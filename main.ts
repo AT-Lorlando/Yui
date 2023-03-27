@@ -1,32 +1,39 @@
 import { logger } from './logger';
+import { Entity, Light, TV, Speakers } from './Entity';
 
 // Importez vos modules ici
 // import CommandRecognition from './CommandRecognition';
 // import ManualCommand from './ManualCommand';
-// import CommandExecutor from './CommandExecutor';
+import CommandExecutor from './CommandExecutor';
 // import GPT3Request from './GPT3Request';
 
 async function main() {
-    logger.info('Démarrage de l\'application "Yui"');
-    logger.info('Message d\'information');
-    logger.success('Message de succès');
-    logger.warn('Message d\'avertissement');
-    logger.error('Message d\'erreur');
-    logger.debug('Message de débogage');
+    logger.info('Starting the "Yui" application');
+    logger.info('Information message');
+    logger.success('Success message');
+    logger.warn('Warning message');
+    logger.error('Error message');
+    logger.debug('Debug message');
 
     // Initialisez vos modules ici
     // const commandRecognition = new CommandRecognition();
     // const manualCommand = new ManualCommand();
-    // const commandExecutor = new CommandExecutor();
+    const commandExecutor = new CommandExecutor();
     // const gpt3Request = new GPT3Request();
 
-    logger.info('Initialisation des modules terminée');
+    logger.info('Initialisation of the "Yui" application completed')
+
+    const light = new Light('Lumière', 'Salon');
+    const speakers = new Speakers('Haut-parleurs', 'Salon');
+
+    commandExecutor.startup(light);
+    commandExecutor.startup(speakers);
 }
 
 main()
     .then(() => {
-        logger.info('L\'application "Yui" est en cours d\'exécution');
+        logger.info('Yui is ready to use');
     })
     .catch((error) => {
-        logger.error(`Erreur lors de l'exécution de l'application : ${error.message}`);
+        logger.error(`Error during the initialisation of Yui: ${error.message}`);
 });
