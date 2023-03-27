@@ -1,4 +1,11 @@
 {
+  "name": "yui",
+  "version": "0.1.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "npx ts-node main.ts"
+  },
   "dependencies": {
     "node-hue-api": "^5.0.0-beta.15",
     "ts-node": "^10.9.1",
@@ -8,4 +15,5 @@
   "devDependencies": {
     "@types/node": "^18.15.10"
   }
+  
 }
