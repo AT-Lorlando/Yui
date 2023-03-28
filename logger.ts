@@ -1,8 +1,5 @@
 import winston from 'winston';
-import dotenv from 'dotenv';
-import { env } from './env';
-dotenv.config();
-
+import env from './env';
 
 const colorizer = winston.format.colorize();
 const { 

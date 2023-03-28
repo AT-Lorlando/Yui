@@ -1,15 +1,12 @@
 import { logger } from './logger';
 import { Entity, Light, TV, Speakers } from './Entity';
-import dotenv from 'dotenv';
-import { env } from './env';
-dotenv.config();
 
 
 // Importez vos modules ici
 // import CommandRecognition from './CommandRecognition';
 // import ManualCommand from './ManualCommand';
 import CommandExecutor from './CommandExecutor';
-// import GPT3Request from './GPT3Request';
+import GPT3Request from './GPT3Request';
 
 async function main() {
     testLogger();
@@ -20,7 +17,7 @@ async function main() {
     // const commandRecognition = new CommandRecognition();
     // const manualCommand = new ManualCommand();
     const commandExecutor = new CommandExecutor();
-    // const gpt3Request = new GPT3Request();
+    const gpt3Request = new GPT3Request();
     logger.debug('Modules imported');
 
     logger.debug('Modules initialisation');
@@ -43,10 +40,10 @@ async function main() {
         logger.error(`Error during the initialisation of CommandExecutor: ${error}`);
     }
     try {
-        // await gpt3Request.init();
+        await gpt3Request.init();
     }
-    catch (error) {
-        logger.error(`Error during the initialisation of gpt3Request: ${error}`);
+    catch (error: any) {
+        logger.error(`Error during the initialisation of gpt3Request: ${error.message}`);
     }
     logger.debug('Modules initialised');
 
