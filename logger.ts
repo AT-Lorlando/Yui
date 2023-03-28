@@ -22,9 +22,10 @@ const logger = winston.createLogger({
         timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
         printf(
             ({ timestamp, level, message }) => {
-                return `${timestamp} ${get_offset(level)}[${level.toLocaleUpperCase()}] - ${message}`;
+                const formattedMessage = typeof message === "object" ? JSON.stringify(message, null, 2) : message;
+                return `${timestamp} ${get_offset(level)}[${level.toLocaleUpperCase()}] - ${formattedMessage}`;
             }
-        )
+        ),
     ),
     transports: [
         new winston.transports.File({ filename: 'error.log', level: 'error' }),
@@ -39,9 +40,11 @@ if (env.NODE_ENV !== 'production') {
             timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
             printf(
                 ({ timestamp, level, message }) => {
+                    const formattedMessage = typeof message === "object" ? JSON.stringify(message, null, 2) : message;
+
                     return colorizer.colorize(
                     level,
-                    `${timestamp} ${get_offset(level)}[${level.toLocaleUpperCase()}] - ${message}`,
+                    `${timestamp} ${get_offset(level)}[${level.toLocaleUpperCase()}] - ${formattedMessage}`,
                     );
                 },
             ),
