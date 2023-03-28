@@ -1,4 +1,8 @@
 import winston from 'winston';
+import dotenv from 'dotenv';
+import { env } from './env';
+dotenv.config();
+
 
 const colorizer = winston.format.colorize();
 const { 
@@ -28,7 +32,7 @@ const logger = winston.createLogger({
     ],
 });
 
-if (process.env.NODE_ENV !== 'production') {
+if (env.NODE_ENV !== 'production') {
     logger.add(new winston.transports.Console({
         format: combine(
             simple(),
