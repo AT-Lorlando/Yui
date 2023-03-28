@@ -10,7 +10,7 @@ import CommandExecutor from './CommandExecutor';
 async function main() {
     logger.info('Starting the "Yui" application');
     logger.info('Information message');
-    logger.success('Success message');
+    logger.verbose('Success message');
     logger.warn('Warning message');
     logger.error('Error message');
     logger.debug('Debug message');
