@@ -5,9 +5,14 @@ export abstract class Entity {
 
     abstract shutdown(): void;
     abstract startup(): void;
+
+    test() {
+        console.log(`Test of ${this.name}`);
+    }
 }
   
 export class Light extends Entity {
+
     constructor(name: string, public room: string) {
         super(name);
         
@@ -25,6 +30,10 @@ export class Light extends Entity {
 }
 
 export class TV extends Entity {
+    constructor(name: string, public room: string) {
+        super(name);   
+    }
+
     shutdown(): void {
         console.log(`The TV is off.`);
         // Ajoutez ici le code pour éteindre la télévision
