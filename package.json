@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "npx ts-node main.ts"
+    "dev": "npx ts-node main.ts",
+    "debug": "LOG_LEVEL=debug npx ts-node main.ts"
   },
   "dependencies": {
     "dotenv": "^16.0.3",
