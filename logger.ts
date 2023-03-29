@@ -13,7 +13,7 @@ function get_offset(c : string) : string {
 }
 
 const logger = winston.createLogger({
-    level: 'silly',
+    level: env.LOG_LEVEL || 'info',
     format: combine(
         simple(),
         timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
