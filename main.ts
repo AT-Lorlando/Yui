@@ -1,6 +1,5 @@
-import { logger } from './logger';
-import { Entity, Light, TV, Speakers } from './Entity';
-
+import { logger, testLogger } from './logger';
+import { initEntities, testEntities, Entity } from './Entity';
 
 // Importez vos modules ici
 // import CommandRecognition from './CommandRecognition';
@@ -12,7 +11,6 @@ async function main() {
     testLogger();
     logger.info('Starting the "Yui" application');
 
-
     logger.debug('Importing modules');
     // const commandRecognition = new CommandRecognition();
     // const manualCommand = new ManualCommand();
@@ -21,53 +19,36 @@ async function main() {
     logger.debug('Modules imported');
 
     logger.debug('Modules initialisation');
-    try {
-        // await commandRecognition.init();
-    }
-    catch (error) {
-        logger.error(`Error during the initialisation of commandRecognition: ${error}`);
-    }
-    try {
-        // await manualCommand.init();
-    }
-    catch (error) {
-        logger.error(`Error during the initialisation of manualCommand: ${error}`);
-    }
-    try {
-        await commandExecutor.init();
-    }
-    catch (error) {
-        logger.error(`Error during the initialisation of CommandExecutor: ${error}`);
-    }
-    try {
-        await gpt3Request.init();
-    }
-    catch (error: any) {
-        logger.error(`Error during the initialisation of gpt3Request: ${error.message}`);
-    }
+
+    // await commandRecognition.init().catch((error) => {
+    //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
+    // });
+
+    // await manualCommand.init().catch((error) => {
+    //     logger.error(`Error during the initialisation of manualCommand: ${error}`);
+    // });
+
+    // await commandExecutor.init().catch((error) => {
+    //     logger.error(`Error during the initialisation of CommandExecutor: ${error}`);
+    // });
+
+    // await gpt3Request.init().catch((error) => {
+    //     logger.error(`Error during the initialisation of gpt3Request: ${error}`);
+    // });
     logger.debug('Modules initialised');
 
-    logger.info('Initialisation of the "Yui" application completed')
+    const entities = await initEntities().catch((error) => {
+        logger.error(`Error during the initialisation of entities: ${error}`);
+    });
 
-    await testEntities()
-}
+    if (entities === undefined) {
+        logger.error('Entities are undefined');
+        return;
+    }
 
-function testLogger() {
-    logger.info('Information message');
-    logger.verbose('Success message');
-    logger.warn('Warning message');
-    logger.error('Error message');
-    logger.debug('Debug message');
-}
+    await testEntities(entities);
 
-async function testEntities() {
-    const light = new Light('Lumière', 'Salon');
-    const tv = new TV('TV', 'Salon');
-    const speakers = new Speakers('Haut-parleurs', 'Salon');
-
-    light.test();
-    tv.test();
-    speakers.test();
+    logger.info('Initialisation of the "Yui" application completed');
 }
 
 main()
@@ -75,5 +56,7 @@ main()
         logger.info('Yui is ready to use');
     })
     .catch((error) => {
-        logger.error(`Error during the initialisation of Yui: ${error.message}`);
-});
+        logger.error(
+            `Error during the initialisation of Yui: ${error.message}`,
+        );
+    });
