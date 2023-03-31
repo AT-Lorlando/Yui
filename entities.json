@@ -1,0 +1,34 @@
+{
+    "lights": [
+        {
+            "name": "Light 1",
+            "room": "chamber"
+        },
+        {
+            "name": "Light 2",
+            "room": "living room"
+        }
+    ],
+    "speakers": [
+        {
+            "name": "Speaker 1",
+            "room": "living room"
+        },
+        {
+            "name": "Speaker 2",
+            "room": "kitchen"
+        }
+    ],
+    "devices" : [
+        {
+            "name": "TV",
+            "room": "living room",
+            "type": "TV"
+        },
+        {
+            "name": "Door",
+            "room": "entrance",
+            "type": "door"
+        }
+    ]
+}
