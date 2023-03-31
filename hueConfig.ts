@@ -6,20 +6,22 @@ const appName = 'Yui';
 const deviceName = 'Sukoshi';
 
 async function discoverBridge() {
-  try {
-    const searchResults = await v3.discovery.nupnpSearch();
+    try {
+        const searchResults = await v3.discovery.nupnpSearch();
 
-    if (searchResults.length === 0) {
-      throw new Error('No bridges found. Make sure your bridge is powered on and connected to the network.');
+        if (searchResults.length === 0) {
+            throw new Error(
+                'No bridges found. Make sure your bridge is powered on and connected to the network.',
+            );
+        }
+
+        const bridge = searchResults[0];
+        logger.info(`Bridge found at IP address: ${bridge.ipaddress}`);
+
+        return bridge;
+    } catch (error) {
+        logger.error('Error during the discovery of the bridge:', error);
     }
-
-    const bridge = searchResults[0];
-    logger.info(`Bridge found at IP address: ${bridge.ipaddress}`);
-
-    return bridge;
-  } catch (error) {
-    logger.error('Error during the discovery of the bridge:', error);
-  }
 }
 
 async function createUser(bridge: BridgeDiscoveryResponse) {
@@ -46,10 +48,9 @@ async function main() {
         throw new Error('Error during the creation of the user');
     }
     const { api, user } = result;
-      logger.info(`User created - Username: ${user.username}`);
-      logger.info(`Press link button on the bridge to create a user (if needed)`);
+    logger.info(`User created - Username: ${user.username}`);
+    logger.info(`Press link button on the bridge to create a user (if needed)`);
     // Utilisez l'API ici pour contrôler vos lumières
-    
 }
 
 main();
