@@ -15,7 +15,7 @@ export const logger = winston.createLogger({
         simple(),
         timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
         printf(({ timestamp, level, message }) => {
-            const formattedMessage =
+            const formattedMessage: string =
                 typeof message === 'object'
                     ? JSON.stringify(message, null, 2)
                     : message;
@@ -25,13 +25,6 @@ export const logger = winston.createLogger({
         }),
     ),
     transports: [
-        new winston.transports.File({ filename: 'error.log', level: 'error' }),
-        new winston.transports.File({ filename: 'combined.log' }),
-    ],
-});
-
-if (env.NODE_ENV !== 'production') {
-    logger.add(
         new winston.transports.Console({
             format: combine(
                 simple(),
@@ -42,14 +35,42 @@ if (env.NODE_ENV !== 'production') {
                             ? JSON.stringify(message, null, 2)
                             : message;
 
-                    return colorizer.colorize(
-                        level,
-                        `${timestamp} ${get_offset(
-                            level,
-                        )}[${level.toLocaleUpperCase()}] - ${formattedMessage}`,
-                    );
+                    if (level === 'error') {
+                        return (
+                            `${colorizer.colorize(
+                                level,
+                                timestamp,
+                            )} ${get_offset(level)}` +
+                            colorizer.colorize(
+                                level,
+                                `[${level.toLocaleUpperCase()}] - ${formattedMessage}`,
+                            )
+                        );
+                    } else {
+                        return (
+                            `${timestamp} ${get_offset(level)}` +
+                            colorizer.colorize(
+                                level,
+                                `[${level.toLocaleUpperCase()}] - ${formattedMessage}`,
+                            )
+                        );
+                    }
                 }),
             ),
+        }),
+    ],
+});
+
+if (env.NODE_ENV === 'production') {
+    logger.add(
+        new winston.transports.File({
+            filename: 'error.log',
+            level: 'error',
+        }),
+    );
+    logger.add(
+        new winston.transports.File({
+            filename: 'combined.log',
         }),
     );
 }

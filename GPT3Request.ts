@@ -1,6 +1,10 @@
 import { Configuration, OpenAIApi } from 'openai';
+import { Entity } from './Entity';
 import { logger } from './logger';
 import env from './env';
+import CommandExecutor from './CommandExecutor';
+
+const DO_NOT_FETCH = true;
 
 class gpt3Request {
     configuration: any;
@@ -10,6 +14,7 @@ class gpt3Request {
     testOrder: any;
     entities: any;
     commands: any;
+    commandExecutor: any;
 
     constructor() {
         this.exempleOrders = [
@@ -34,7 +39,7 @@ class gpt3Request {
         this.exempleReturns = [
             {
                 requestID: '12',
-                commands: ['shutdown(4)', 'startup(6)'],
+                commands: ['shutdown(4)', 'turnon(6)'],
                 confidence: 0.9,
             },
             {
@@ -44,7 +49,7 @@ class gpt3Request {
             },
             {
                 requestID: '14',
-                commands: ['startup(4)', 'startup(5)'],
+                commands: ['turnon(4)', 'turnon(5)'],
                 confidence: 0.85,
             },
             {
@@ -54,42 +59,49 @@ class gpt3Request {
             },
         ];
 
-        this.entities = [
-            {
-                id: 4,
-                name: 'Light 1',
-                room: 'chamber',
-            },
-            {
-                id: 5,
-                name: 'Light 2',
-                room: 'living room',
-            },
-            {
-                id: 6,
-                name: 'TV',
-                room: 'living room',
-            },
-        ];
+        // this.entities = [
+        //     {
+        //         id: 4,
+        //         name: 'Light 1',
+        //         room: 'chamber',
+        //     },
+        //     {
+        //         id: 5,
+        //         name: 'Light 2',
+        //         room: 'living room',
+        //     },
+        //     {
+        //         id: 6,
+        //         name: 'TV',
+        //         room: 'living room',
+        //     },
+        // ];
 
         this.commands = [
-            'startup(entityID: number)',
+            'turnon(entityID: number)',
             'shutdown(entityID: number)',
             'lock(entityID: number)',
         ];
+
+        
     }
 
-    async init() {
+    async init(commandExecutor: CommandExecutor, entities: Entity[]): Promise<void> {
         this.configuration = new Configuration({
             apiKey: env.OPENAI_API_KEY,
         });
         this.openai = new OpenAIApi(this.configuration);
+        this.commandExecutor = commandExecutor;
+        this.entities = entities;
 
         await this.testRequest();
         await this.testCommandRequest();
     }
 
     private async fetch(text: string): Promise<string> {
+        if (DO_NOT_FETCH) {
+            return "{ \"commands\": [\"shutdown(4)\", \"turnon(6)\"], \"confidence\": 0.9 }";
+        }
         const config35 = {
             model: 'gpt-3.5-turbo',
             messages: [{ role: 'user', content: text }],
@@ -121,6 +133,7 @@ class gpt3Request {
     }
 
     private async fetchCommand(text: string): Promise<string> {
+
         // const config35 = {
         //     model: "gpt-3.5-turbo",
         //     messages: [
@@ -160,7 +173,11 @@ class gpt3Request {
             max_tokens: 500,
             temperature: 0.8,
         };
-
+        
+        logger.debug(content);
+        if (DO_NOT_FETCH) {
+            return "{ \"commands\": [\"shutdown(4)\", \"turnon(6)\"], \"confidence\": 0.9 }";
+        }
         const response = await this.openai
             .createCompletion(configDavinci)
             .catch((err: any) => {
@@ -213,7 +230,7 @@ class gpt3Request {
                 commands: ['shutdown(4)', 'shutdown(5)'],
             },
             {
-                commands: ['shutdown(4)', 'shutdown(5)', 'startup(6)'],
+                commands: ['shutdown(4)', 'shutdown(5)', 'turnon(6)'],
             },
         ];
         for (let i = 0; i < testOrders.length; i++) {
@@ -237,6 +254,16 @@ class gpt3Request {
                 });
             }
         }
+    }
+
+    async command(text: string) {
+        const reponse = await this.fetchCommand(text)
+        const json = JSON.parse(reponse);
+            json.commands.forEach((command: string) => {
+                logger.debug("Test command execution from GPT3Request : " + command);
+                // eval(`this.commandExecutor.test(0)`)
+                eval(`this.commandExecutor.${command}`)
+            });
     }
 }
 

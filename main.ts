@@ -20,6 +20,14 @@ async function main() {
 
     logger.debug('Modules initialisation');
 
+    const entities = await initEntities().catch((error) => {
+        logger.error(`Error during the initialisation of entities: ${error}`);
+    })
+    if (entities === undefined) {
+        logger.error('Entities are undefined');
+        return;
+    }
+    await testEntities(entities);
     // await commandRecognition.init().catch((error) => {
     //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
     // });
@@ -28,25 +36,19 @@ async function main() {
     //     logger.error(`Error during the initialisation of manualCommand: ${error}`);
     // });
 
-    // await commandExecutor.init().catch((error) => {
-    //     logger.error(`Error during the initialisation of CommandExecutor: ${error}`);
-    // });
-
-    // await gpt3Request.init().catch((error) => {
-    //     logger.error(`Error during the initialisation of gpt3Request: ${error}`);
-    // });
-    logger.debug('Modules initialised');
-
-    const entities = await initEntities().catch((error) => {
-        logger.error(`Error during the initialisation of entities: ${error}`);
+    await commandExecutor.init(entities).catch((error) => {
+        logger.error(`Error during the initialisation of CommandExecutor: ${error}`);
     });
 
-    if (entities === undefined) {
-        logger.error('Entities are undefined');
-        return;
-    }
+    await gpt3Request.init(commandExecutor, entities).catch((error) => {
+        logger.error(`Error during the initialisation of gpt3Request: ${error}`);
+    });
+    logger.debug('Modules initialised');
 
-    await testEntities(entities);
+
+
+
+    gpt3Request.command("Turn on the light in the chamber");
 
     logger.info('Initialisation of the "Yui" application completed');
 }

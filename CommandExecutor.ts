@@ -1,17 +1,51 @@
 // Importez les classes d'entités
 import { Entity, Light, TV, Speakers } from './Entity';
+import { logger } from './logger';
 
 class CommandExecutor {
-    async init() {
-        throw new Error('Method not implemented.');
+    entities: Entity[];
+    constructor() {
+        this.entities = [];
     }
 
-    shutdown(entity: Entity): void {
-        entity.shutdown();
+    async init(entities: Entity[]): Promise<void> {
+        this.entities = entities;
+    }
+        
+    private getEntity(entityID: number): Entity {
+        const entity = this.entities.find((entity) => entity.id === entityID);
+        if (entity === undefined) {
+            throw new Error(`Entity with id ${entityID} not found`);
+        }
+        return entity;
     }
 
-    startup(entity: Entity): void {
-        entity.startup();
+
+    shutdown(entityID: number): void {
+        try {
+            const entity = this.getEntity(entityID);
+            entity.shutdown();
+        } catch (error: any) {
+            logger.error(error.message);
+        }
+    }
+
+    turnon(entityID: number): void {
+        try {
+            const entity = this.getEntity(entityID);
+            entity.turnon();
+        } catch (error: any) {
+            logger.error(error.message);
+        }
+    }
+
+    test(entityID: number): void {
+        try {
+            const entity = this.getEntity(entityID);
+            entity.test();
+        } catch (error: any) {
+            logger.error(error.message);
+        }
     }
 }
 
