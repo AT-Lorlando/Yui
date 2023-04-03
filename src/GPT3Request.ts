@@ -82,11 +82,12 @@ class gpt3Request {
             'shutdown(entityID: number)',
             'lock(entityID: number)',
         ];
-
-        
     }
 
-    async init(commandExecutor: CommandExecutor, entities: Entity[]): Promise<void> {
+    async init(
+        commandExecutor: CommandExecutor,
+        entities: Entity[],
+    ): Promise<void> {
         this.configuration = new Configuration({
             apiKey: env.OPENAI_API_KEY,
         });
@@ -100,7 +101,7 @@ class gpt3Request {
 
     private async fetch(text: string): Promise<string> {
         if (DO_NOT_FETCH) {
-            return "{ \"commands\": [\"shutdown(4)\", \"turnon(6)\"], \"confidence\": 0.9 }";
+            return '{ "commands": ["shutdown(4)", "turnon(6)"], "confidence": 0.9 }';
         }
         const config35 = {
             model: 'gpt-3.5-turbo',
@@ -133,7 +134,6 @@ class gpt3Request {
     }
 
     private async fetchCommand(text: string): Promise<string> {
-
         // const config35 = {
         //     model: "gpt-3.5-turbo",
         //     messages: [
@@ -173,10 +173,10 @@ class gpt3Request {
             max_tokens: 500,
             temperature: 0.8,
         };
-        
+
         logger.debug(content);
         if (DO_NOT_FETCH) {
-            return "{ \"commands\": [\"shutdown(4)\", \"turnon(6)\"], \"confidence\": 0.9 }";
+            return '{ "commands": ["shutdown(4)", "turnon(6)"], "confidence": 0.9 }';
         }
         const response = await this.openai
             .createCompletion(configDavinci)
@@ -257,13 +257,15 @@ class gpt3Request {
     }
 
     async command(text: string) {
-        const reponse = await this.fetchCommand(text)
+        const reponse = await this.fetchCommand(text);
         const json = JSON.parse(reponse);
-            json.commands.forEach((command: string) => {
-                logger.debug("Test command execution from GPT3Request : " + command);
-                // eval(`this.commandExecutor.test(0)`)
-                eval(`this.commandExecutor.${command}`)
-            });
+        json.commands.forEach((command: string) => {
+            logger.debug(
+                'Test command execution from GPT3Request : ' + command,
+            );
+            // eval(`this.commandExecutor.test(0)`)
+            eval(`this.commandExecutor.${command}`);
+        });
     }
 }
 
