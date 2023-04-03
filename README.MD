@@ -32,3 +32,8 @@ async function getApi() {
 getApi().then((api) => {
   console.log("Connecté au pont Hue");
 });
+
+# TODO
+
+- [] Ajouter des tests
+- [] Logger instance

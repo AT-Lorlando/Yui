@@ -3,6 +3,7 @@ import { Entity } from './Entity';
 import { logger } from './logger';
 import env from './env';
 import CommandExecutor from './CommandExecutor';
+import * as fs from 'fs';
 
 const DO_NOT_FETCH = true;
 
@@ -257,15 +258,35 @@ class gpt3Request {
     }
 
     async command(text: string) {
-        const reponse = await this.fetchCommand(text);
-        const json = JSON.parse(reponse);
-        json.commands.forEach((command: string) => {
-            logger.debug(
-                'Test command execution from GPT3Request : ' + command,
-            );
-            // eval(`this.commandExecutor.test(0)`)
-            eval(`this.commandExecutor.${command}`);
+        logger.info('Command request to GPT3Request : ' + text);
+        const response = await this.fetchCommand(text);
+        const json = JSON.parse(response);
+        await json.commands.forEach(async (command: string) => {
+            logger.info('Command execution from GPT3Request : ' + command);
+            try {
+                eval(`this.commandExecutor.${command}`);
+            } catch (error: any) {
+                logger.error(
+                    `Error the evaluation of ${command} : ${error.message}`,
+                );
+                this.saveCommand(text, command, true);
+                return;
+            } finally {
+                this.saveCommand(text, command);
+            }
         });
+    }
+
+    async saveCommand(order: string, result: string, error = false) {
+        // Append data to a file, creating the file if it does not yet exist.
+        const data = `${order} => ${result}\n`;
+        fs.appendFile(
+            `commands/${error ? 'error' : 'success'}.txt`,
+            data,
+            (err) => {
+                if (err) throw err;
+            },
+        );
     }
 }
 

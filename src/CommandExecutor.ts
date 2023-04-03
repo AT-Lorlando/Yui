@@ -26,6 +26,7 @@ class CommandExecutor {
             entity.shutdown();
         } catch (error: any) {
             logger.error(error.message);
+            throw error;
         }
     }
 
@@ -35,6 +36,7 @@ class CommandExecutor {
             entity.turnon();
         } catch (error: any) {
             logger.error(error.message);
+            throw error;
         }
     }
 
@@ -44,6 +46,7 @@ class CommandExecutor {
             entity.test();
         } catch (error: any) {
             logger.error(error.message);
+            throw error;
         }
     }
 }
