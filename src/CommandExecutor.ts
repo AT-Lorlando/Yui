@@ -11,7 +11,7 @@ class CommandExecutor {
     async init(entities: Entity[]): Promise<void> {
         this.entities = entities;
     }
-        
+
     private getEntity(entityID: number): Entity {
         const entity = this.entities.find((entity) => entity.id === entityID);
         if (entity === undefined) {
@@ -19,7 +19,6 @@ class CommandExecutor {
         }
         return entity;
     }
-
 
     shutdown(entityID: number): void {
         try {
