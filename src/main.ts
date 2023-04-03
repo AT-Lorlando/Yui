@@ -22,7 +22,7 @@ async function main() {
 
     const entities = await initEntities().catch((error) => {
         logger.error(`Error during the initialisation of entities: ${error}`);
-    })
+    });
     if (entities === undefined) {
         logger.error('Entities are undefined');
         return;
@@ -37,18 +37,19 @@ async function main() {
     // });
 
     await commandExecutor.init(entities).catch((error) => {
-        logger.error(`Error during the initialisation of CommandExecutor: ${error}`);
+        logger.error(
+            `Error during the initialisation of CommandExecutor: ${error}`,
+        );
     });
 
     await gpt3Request.init(commandExecutor, entities).catch((error) => {
-        logger.error(`Error during the initialisation of gpt3Request: ${error}`);
+        logger.error(
+            `Error during the initialisation of gpt3Request: ${error}`,
+        );
     });
     logger.debug('Modules initialised');
 
-
-
-
-    gpt3Request.command("Turn on the light in the chamber");
+    gpt3Request.command('Turn on the light in the chamber');
 
     logger.info('Initialisation of the "Yui" application completed');
 }
