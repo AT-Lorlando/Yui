@@ -33,6 +33,8 @@ getApi().then((api) => {
   console.log("Connecté au pont Hue");
 });
 
+curl -X POST localhost:3000/command -f --header "Content-Type: application/json" --data '{"password":"password"}'
+
 # TODO
 
 - [] Ajouter des tests
