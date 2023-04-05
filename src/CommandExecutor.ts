@@ -49,6 +49,20 @@ class CommandExecutor {
             throw error;
         }
     }
+
+    async specialCommand(
+        entityID: number,
+        command: string,
+        args?: [any],
+    ): Promise<void> {
+        try {
+            const entity = this.getEntity(entityID);
+            await entity.specialCommand(command, args);
+        } catch (error: any) {
+            logger.error(error.message);
+            throw error;
+        }
+    }
 }
 
 export default CommandExecutor;
