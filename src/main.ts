@@ -34,11 +34,11 @@ async function main() {
     //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
     // });
 
-    await manualCommand.init().catch((error) => {
-        logger.error(
-            `Error during the initialisation of manualCommand: ${error}`,
-        );
-    });
+    // await manualCommand.init().catch((error) => {
+    //     logger.error(
+    //         `Error during the initialisation of manualCommand: ${error}`,
+    //     );
+    // });
 
     await commandExecutor.init(entities).catch((error) => {
         logger.error(
