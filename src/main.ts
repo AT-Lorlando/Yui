@@ -3,7 +3,7 @@ import { initEntities, testEntities, Entity } from './Entity';
 
 // Importez vos modules ici
 // import CommandRecognition from './CommandRecognition';
-// import ManualCommand from './ManualCommand';
+import ManualCommand from './ManualCommand';
 import CommandExecutor from './CommandExecutor';
 import GPT3Request from './GPT3Request';
 
@@ -13,7 +13,7 @@ async function main() {
     logger.debug('Importing modules');
 
     // const commandRecognition = new CommandRecognition();
-    // const manualCommand = new ManualCommand();
+    const manualCommand = new ManualCommand();
     const commandExecutor = new CommandExecutor();
     const gpt3Request = new GPT3Request();
 
@@ -34,9 +34,11 @@ async function main() {
     //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
     // });
 
-    // await manualCommand.init().catch((error) => {
-    //     logger.error(`Error during the initialisation of manualCommand: ${error}`);
-    // });
+    await manualCommand.init().catch((error) => {
+        logger.error(
+            `Error during the initialisation of manualCommand: ${error}`,
+        );
+    });
 
     await commandExecutor.init(entities).catch((error) => {
         logger.error(
