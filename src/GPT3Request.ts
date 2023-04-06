@@ -87,17 +87,29 @@ class gpt3Request {
 
     async init(
         commandExecutor: CommandExecutor,
-        entities: Entity[],
+        entities: any[],
     ): Promise<void> {
         this.configuration = new Configuration({
             apiKey: env.OPENAI_API_KEY,
         });
         this.openai = new OpenAIApi(this.configuration);
         this.commandExecutor = commandExecutor;
-        this.entities = entities;
+        this.entities = entities.map((entity: Entity) => {
+            return {
+                id: entity.id,
+                name: entity.name,
+                room: entity.room,
+            };
+        });
 
-        await this.testRequest();
-        await this.testCommandRequest();
+        await this.testRequest().catch((err: any) => {
+            logger.error(`GPT3Request init testRequest error.`);
+            throw err;
+        });
+        await this.testCommandRequest().catch((err: any) => {
+            logger.error(`GPT3Request init testCommandRequest error.`);
+            throw err;
+        });
     }
 
     private async fetch(text: string): Promise<string> {
@@ -151,7 +163,6 @@ class gpt3Request {
         // logger.debug("GPT3Request respond");
         // logger.debug(response.data.choices[0].message.content);
         // return response.data.choices[0].message.content;
-
         let content = `You are my assistant, your name is 'Yui'. I'll give you a list of commands and entities, with an order, and you'll have to find the right command(s) and entities that correspond to the order. Be autonomous ! Answer only with JSON format as follow: {\"message\": \"<Your message>\", ...}.
         Here is the list of entities: ${JSON.stringify(this.entities)}
         Here is the list of commands: ${JSON.stringify(this.commands)}
@@ -165,7 +176,6 @@ class gpt3Request {
                 this.exempleReturns[index],
             )}\n`;
         });
-
         content += `Here is the order: ${JSON.stringify(text)}\n`;
 
         const configDavinci = {
@@ -235,8 +245,15 @@ class gpt3Request {
             },
         ];
         for (let i = 0; i < testOrders.length; i++) {
-            const reponse = await this.fetchCommand(testOrders[i]);
-            const json = JSON.parse(reponse);
+            const response = await this.fetchCommand(testOrders[i]).catch(
+                (error) => {
+                    logger.error(
+                        `Fetch command error during testCommandRequest`,
+                    );
+                    throw error;
+                },
+            );
+            const json = JSON.parse(response);
             const testCommands = testReturns[i].commands;
             json.commands.forEach((command: string) => {
                 if (testCommands.includes(command)) {
@@ -278,7 +295,6 @@ class gpt3Request {
     }
 
     async saveCommand(order: string, result: string, error = false) {
-        // Append data to a file, creating the file if it does not yet exist.
         const data = `${order} => ${result}\n`;
         fs.appendFile(
             `commands/${error ? 'error' : 'success'}.txt`,

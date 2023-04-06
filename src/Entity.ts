@@ -1,8 +1,11 @@
 import { logger } from './logger';
 import * as fs from 'fs';
+import HueController from './HueController';
 
 export abstract class Entity {
-    constructor(public name: string, public id: number) {
+    constructor(public name: string, public id: number, public room: string) {
+        this.name = name;
+        this.room = room;
         this.id = id;
     }
 
@@ -16,8 +19,15 @@ export abstract class Entity {
 }
 
 export class Light extends Entity {
-    constructor(name: string, public id: number, public room: string) {
-        super(name, id);
+    hueController: HueController;
+    constructor(
+        name: string,
+        public id: number,
+        public room: string,
+        hueController: HueController,
+    ) {
+        super(name, id, room);
+        this.hueController = hueController;
     }
 
     async specialCommand(command: string, args?: [any]): Promise<void> {
@@ -82,7 +92,7 @@ export class Light extends Entity {
 
 export class TV extends Entity {
     constructor(name: string, public id: number, public room: string) {
-        super(name, id);
+        super(name, id, room);
     }
 
     async specialCommand(command: string, args?: [any]): Promise<void> {
@@ -143,7 +153,7 @@ export class TV extends Entity {
 
 export class Speakers extends Entity {
     constructor(name: string, public id: number, public room: string) {
-        super(name, id);
+        super(name, id, room);
     }
 
     async specialCommand(command: string, args?: [any]): Promise<void> {
@@ -205,7 +215,9 @@ export async function testEntities(entities: Entity[]) {
     });
 }
 
-export async function initEntities() {
+export async function initEntitiesFromJson(
+    hueController: HueController,
+): Promise<Entity[]> {
     // Read from entities.json and create the entities
 
     // Return an array of entities
@@ -216,7 +228,9 @@ export async function initEntities() {
 
     entities.lights.forEach(
         (light: { name: string; id: number; room: string }) => {
-            entitiesArray.push(new Light(light.name, light.id, light.room));
+            entitiesArray.push(
+                new Light(light.name, light.id, light.room, hueController),
+            );
             logger.info(`Light '${light.name}' in ${light.room} added`);
         },
     );
@@ -240,6 +254,28 @@ export async function initEntities() {
             }
         },
     );
+
+    return entitiesArray;
+}
+
+export async function initEntitiesFromAPI(
+    hueController: HueController,
+): Promise<Entity[]> {
+    // Read from entities.json and create the entities
+
+    // Return an array of entities
+
+    const entitiesArray: Entity[] = [];
+    const lightsGroups = await hueController.getGroupsByType('Room');
+    lightsGroups.forEach(async (group) => {
+        group.lights.forEach(async (lightID: number) => {
+            const light = await hueController.getLightById(lightID);
+            entitiesArray.push(
+                new Light(light.name, light.id, group.name, hueController),
+            );
+            logger.info(`Light '${light.name}' in ${group.name} added`);
+        });
+    });
 
     return entitiesArray;
 }

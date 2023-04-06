@@ -1,20 +1,16 @@
 // Importez les classes d'entités
 import { Entity, Light, TV, Speakers } from './Entity';
 import { logger } from './logger';
-import { HueController } from './HueController';
 
 class CommandExecutor {
     entities: Entity[];
-    HueController: HueController;
 
     constructor() {
         this.entities = [];
-        this.HueController = new HueController();
     }
 
     async init(entities: Entity[]): Promise<void> {
         this.entities = entities;
-        await this.HueController.connect();
     }
 
     private getEntity(entityID: number): Entity {
