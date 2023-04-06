@@ -1,0 +1,45 @@
+{
+    "lights": [
+        {
+            "name": "Light test",
+            "room": "test room",
+            "id": 0
+        },
+        {
+            "name": "Light 1",
+            "room": "chamber",
+            "id": 1
+        },
+        {
+            "name": "Light 2",
+            "room": "living room",
+            "id": 2
+        }
+    ],
+    "speakers": [
+        {
+            "name": "Speaker 1",
+            "room": "living room",
+            "id": 10
+        },
+        {
+            "name": "Speaker 2",
+            "room": "kitchen",
+            "id": 11
+        }
+    ],
+    "devices" : [
+        {
+            "name": "TV",
+            "room": "living room",
+            "type": "TV",
+            "id": 20
+        },
+        {
+            "name": "Door",
+            "room": "entrance",
+            "type": "door",
+            "id": 21
+        }
+    ]
+}

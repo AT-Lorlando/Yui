@@ -1,13 +1,13 @@
-changeLightState(state): Change l'état des lumières (états possibles: "on", "off").
-changeShuttersState(state): Change l'état des stores (états possibles: "open", "close").
-changeVolume(target, action): Change le volume de la cible spécifiée (cibles possibles: "speakers", "tv"; actions possibles: "up", "down").
-changeTemperature(action): Change la température du thermostat (actions possibles: "increase", "decrease").
-shutdown(target): Éteint l'appareil spécifié (cibles possibles: "tv", "lights", "speakers").
-turnOn(target): Allume l'appareil spécifié (cibles possibles: "tv", "lights", "speakers").
-changeChannel(channel): Change la chaîne de la télévision (paramètre channel pour spécifier la chaîne souhaitée).
-togglePlayback(action): Met en pause ou reprend la lecture du contenu (actions possibles: "pause", "resume").
-lockDoor(action): Verrouille ou déverrouille la porte (actions possibles: "lock", "unlock").
-toggleAlarm(action): Active ou désactive le système d'alarme (actions possibles: "activate", "deactivate").
+- changeLightState(state): Change l'état des lumières (états possibles: "on", "off").
+- changeShuttersState(state): Change l'état des stores (états possibles: "open", "close").
+- changeVolume(target, action): Change le volume de la cible spécifiée (cibles possibles: "speakers", "tv"; actions possibles: "up", "down").
+- changeTemperature(action): Change la température du thermostat (actions possibles: "increase", "decrease").
+- shutdown(target): Éteint l'appareil spécifié (cibles possibles: "tv", "lights", "speakers").
+- turnOn(target): Allume l'appareil spécifié (cibles possibles: "tv", "lights", "speakers").
+- changeChannel(channel): Change la chaîne de la télévision (paramètre channel pour spécifier la chaîne souhaitée).
+- togglePlayback(action): Met en pause ou reprend la lecture du contenu (actions possibles: "pause", "resume").
+- lockDoor(action): Verrouille ou déverrouille la porte (actions possibles: "lock", "unlock").
+- toggleAlarm(action): Active ou désactive le système d'alarme (actions possibles: "activate", "deactivate").
 
 npm install node-hue-api
 
@@ -32,3 +32,10 @@ async function getApi() {
 getApi().then((api) => {
   console.log("Connecté au pont Hue");
 });
+
+curl -X POST localhost:3000/command -f --header "Content-Type: application/json" --data '{"password":"password"}'
+
+# TODO
+
+- [] Ajouter des tests
+- [] Logger instance
