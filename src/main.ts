@@ -1,13 +1,10 @@
 import { logger, testLogger } from './logger';
 import {
     initEntitiesFromJson,
-    testEntities,
     Entity,
     initEntitiesFromAPI,
+    Light,
 } from './Entity';
-
-// Importez vos modules ici
-// import CommandRecognition from './CommandRecognition';
 import ManualCommand from './ManualCommand';
 import CommandExecutor from './CommandExecutor';
 import GPT3Request from './GPT3Request';
@@ -46,12 +43,15 @@ async function main() {
         },
     );
 
-    if (entities === undefined) {
-        logger.error('Entities are undefined');
-        return;
+    if (entities === undefined || entities.length === 0) {
+        throw new Error('Entities are undefined');
     }
 
-    await testEntities(entities);
+    const light = entities.find((entity) => entity instanceof Light) as Light;
+    hueController.getLightState(light.id).then((state) => {
+        console.log(state);
+    });
+
     // await commandRecognition.init().catch((error) => {
     //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
     // });
