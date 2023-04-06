@@ -2,6 +2,7 @@ import { v3, discovery } from 'node-hue-api';
 import { BridgeDiscoveryResponse } from 'node-hue-api/dist/esm/api/discovery/discoveryTypes';
 import { logger } from './logger';
 import { env } from './env';
+import { Light } from './Entity';
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -141,7 +142,6 @@ export default class HueController {
             if (!this.api) {
                 throw new Error('Hue API not initialized.');
             }
-
             const light = await this.api.lights.getLight(id);
             logger.debug(`Light found: ID=${light.id}, Name=${light.name}`);
             if (!light) {
@@ -188,6 +188,9 @@ export default class HueController {
                     'Hue API not initialized. Call connect() first.',
                 );
             }
+            await this.getLightById(lightId).catch((error: any) => {
+                throw error;
+            });
 
             const lightState = new v3.lightStates.LightState().on(on);
 
@@ -211,6 +214,9 @@ export default class HueController {
                     'Hue API not initialized. Call connect() first.',
                 );
             }
+            await this.getLightById(lightId).catch((error: any) => {
+                throw error;
+            });
 
             const lightState = new v3.lightStates.LightState().brightness(
                 brightness,
@@ -234,6 +240,10 @@ export default class HueController {
                 );
             }
 
+            await this.getLightById(lightId).catch((error: any) => {
+                throw error;
+            });
+
             const hue = parseInt(color, 16);
             const sat = 100;
 
@@ -249,6 +259,23 @@ export default class HueController {
                 `Error setting light color for light ${lightId}:`,
                 error.message,
             );
+        }
+    }
+
+    public async getLightState(lightId: number): Promise<any> {
+        try {
+            if (!this.api) {
+                throw new Error('Hue API not initialized.');
+            }
+            const light = await this.getLightById(lightId).catch(
+                (error: any) => {
+                    throw error;
+                },
+            );
+            return light.state;
+        } catch (error: any) {
+            logger.error('Error getting light state');
+            throw error;
         }
     }
 }
