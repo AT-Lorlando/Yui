@@ -1,9 +1,12 @@
 import { logger } from './logger';
 import * as fs from 'fs';
+import HueController from './HueController';
 
 export abstract class Entity {
-    constructor(public name: string, public id: number) {
+    constructor(public name: string, public id: number, public room: string) {
         this.id = id;
+        this.name = name;
+        this.room = room;
     }
 
     abstract shutdown(): void;
@@ -16,8 +19,15 @@ export abstract class Entity {
 }
 
 export class Light extends Entity {
-    constructor(name: string, public id: number, public room: string) {
-        super(name, id);
+    private hueController: HueController;
+    constructor(
+        name: string,
+        public id: number,
+        public room: string,
+        hueController: HueController,
+    ) {
+        super(name, id, room);
+        this.hueController = hueController;
     }
 
     async specialCommand(command: string, args?: [any]): Promise<void> {
@@ -46,43 +56,71 @@ export class Light extends Entity {
     }
 
     async shutdown(): Promise<void> {
-        console.log(`Light ${this.name} in ${this.room} is off.`);
-        // Ajoutez ici le code pour éteindre les lumières
+        await this.hueController
+            .setLightState(this.id, false)
+            .catch((error) => {
+                throw error;
+            });
     }
 
     async turnon(): Promise<void> {
-        console.log(`Light ${this.name} in ${this.room} is on.`);
-        // Ajoutez ici le code pour allumer les lumières
+        await this.hueController.setLightState(this.id, true).catch((error) => {
+            throw error;
+        });
     }
 
     async set_luminosity(luminosity: number): Promise<void> {
-        console.log(
-            `Light ${this.name} in ${this.room} luminosity is ${luminosity}.`,
-        );
-        // Ajoutez ici le code pour changer la luminosité des lumières
+        const state = await this.hueController.getLightState(this.id);
+        if (state.on === false) {
+            await this.hueController.setLightState(this.id, true);
+        }
+        await this.hueController
+            .setLightBrightness(this.id, luminosity)
+            .catch((error) => {
+                throw error;
+            });
     }
 
     async set_color(color: string): Promise<void> {
-        console.log(`Light ${this.name} in ${this.room} color is ${color}.`);
-        // Ajoutez ici le code pour changer la couleur des lumières
+        await this.hueController
+            .setLightColor(this.id, color)
+            .catch((error) => {
+                throw error;
+            });
     }
 
     async lower_luminosity(): Promise<void> {
-        console.log(
-            `Light ${this.name} in ${this.room} luminosity is lowered.`,
-        );
-        // Ajoutez ici le code pour baisser la luminosité des lumières
+        const state = await this.hueController
+            .getLightState(this.id)
+            .catch((error) => {
+                throw error;
+            });
+        const luminosity = state.bri;
+        await this.hueController
+            .setLightBrightness(this.id, luminosity - 10)
+            .catch((error) => {
+                throw error;
+            });
     }
 
     async raise_luminosity(): Promise<void> {
-        console.log(`Light ${this.name} in ${this.room} luminosity is raised.`);
-        // Ajoutez ici le code pour augmenter la luminosité des lumières
+        const state = await this.hueController
+            .getLightState(this.id)
+            .catch((error) => {
+                throw error;
+            });
+        const luminosity = state.bri;
+        await this.hueController
+            .setLightBrightness(this.id, luminosity + 10)
+            .catch((error) => {
+                throw error;
+            });
     }
 }
 
 export class TV extends Entity {
     constructor(name: string, public id: number, public room: string) {
-        super(name, id);
+        super(name, id, room);
     }
 
     async specialCommand(command: string, args?: [any]): Promise<void> {
@@ -143,7 +181,7 @@ export class TV extends Entity {
 
 export class Speakers extends Entity {
     constructor(name: string, public id: number, public room: string) {
-        super(name, id);
+        super(name, id, room);
     }
 
     async specialCommand(command: string, args?: [any]): Promise<void> {
@@ -205,7 +243,9 @@ export async function testEntities(entities: Entity[]) {
     });
 }
 
-export async function initEntities() {
+export async function initEntitiesFromJson(
+    hueController: HueController,
+): Promise<Entity[]> {
     // Read from entities.json and create the entities
 
     // Return an array of entities
@@ -216,7 +256,9 @@ export async function initEntities() {
 
     entities.lights.forEach(
         (light: { name: string; id: number; room: string }) => {
-            entitiesArray.push(new Light(light.name, light.id, light.room));
+            entitiesArray.push(
+                new Light(light.name, light.id, light.room, hueController),
+            );
             logger.info(`Light '${light.name}' in ${light.room} added`);
         },
     );
@@ -240,6 +282,38 @@ export async function initEntities() {
             }
         },
     );
+
+    return entitiesArray;
+}
+
+export async function initEntitiesFromAPI(
+    hueController: HueController,
+): Promise<Entity[]> {
+    const lightsGroups = await hueController.getGroupsByType('Room');
+
+    // Créez un tableau pour stocker toutes les Promesses
+    const lightPromises: Promise<Entity>[] = [];
+
+    lightsGroups.forEach((group) => {
+        group.lights.forEach((lightID: number) => {
+            // Ajoutez chaque Promesse de getLightById au tableau
+            lightPromises.push(
+                hueController.getLightById(lightID).then((light) => {
+                    const newLight = new Light(
+                        light.name,
+                        light.id,
+                        group.name,
+                        hueController,
+                    );
+                    logger.info(`Light '${light.name}' in ${group.name} added`);
+                    return newLight;
+                }),
+            );
+        });
+    });
+
+    // Attendez que toutes les Promesses soient résolues
+    const entitiesArray = await Promise.all(lightPromises);
 
     return entitiesArray;
 }

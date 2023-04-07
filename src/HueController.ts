@@ -2,12 +2,13 @@ import { v3, discovery } from 'node-hue-api';
 import { BridgeDiscoveryResponse } from 'node-hue-api/dist/esm/api/discovery/discoveryTypes';
 import { logger } from './logger';
 import { env } from './env';
+import { Light } from './Entity';
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export class HueController {
+export default class HueController {
     private api: any;
     private appName: string;
     private deviceName: string;
@@ -15,6 +16,10 @@ export class HueController {
     constructor() {
         this.appName = 'Yui';
         this.deviceName = 'Sukoshi';
+    }
+
+    async init() {
+        await this.connect();
     }
 
     async connect() {
@@ -107,18 +112,72 @@ export class HueController {
         }
     }
 
-    public async getAllLights(): Promise<void> {
+    public async getAllLights(): Promise<any[]> {
         try {
             if (!this.api) {
                 throw new Error('Hue API not initialized.');
             }
-
+            const returnLights: any[] = [];
             const lights = await this.api.lights.getAll();
-            lights.forEach((light: any) => {
-                logger.info(`Light found: ID=${light.id}, Name=${light.name}`);
+            lights.map((light: any) => {
+                logger.debug(`Light found: ID=${light.id}, Name=${light.name}`);
+                returnLights.push({
+                    id: light.id,
+                    name: light.name,
+                    state: light.state,
+                });
             });
+            if (returnLights.length === 0) {
+                throw new Error('No lights found.');
+            }
+            return returnLights;
         } catch (error: any) {
-            logger.error('Error getting all lights:', error.message);
+            logger.error('Error getting all lights');
+            throw error;
+        }
+    }
+
+    public async getLightById(id: number): Promise<any> {
+        try {
+            if (!this.api) {
+                throw new Error('Hue API not initialized.');
+            }
+            const light = await this.api.lights.getLight(id);
+            logger.debug(`Light found: ID=${light.id}, Name=${light.name}`);
+            if (!light) {
+                throw new Error('No light found.');
+            }
+            return light;
+        } catch (error: any) {
+            logger.error('Error getting light by ID');
+            throw error;
+        }
+    }
+
+    public async getGroupsByType(type: string): Promise<any[]> {
+        try {
+            if (!this.api) {
+                throw new Error('Hue API not initialized.');
+            }
+            const returnGroup: any[] = [];
+            const groups = await this.api.groups.getAll();
+            groups.map((group: any) => {
+                logger.debug(`Group found: ID=${group.id}, Name=${group.name}`);
+                if (group.type === type) {
+                    returnGroup.push({
+                        id: group.id,
+                        name: group.name,
+                        lights: group.lights,
+                    });
+                }
+            });
+            if (returnGroup.length === 0) {
+                throw new Error('No groups found.');
+            }
+            return returnGroup;
+        } catch (error: any) {
+            logger.error('Error getting groups by type');
+            throw error;
         }
     }
 
@@ -129,6 +188,9 @@ export class HueController {
                     'Hue API not initialized. Call connect() first.',
                 );
             }
+            await this.getLightById(lightId).catch((error: any) => {
+                throw error;
+            });
 
             const lightState = new v3.lightStates.LightState().on(on);
 
@@ -152,6 +214,9 @@ export class HueController {
                     'Hue API not initialized. Call connect() first.',
                 );
             }
+            await this.getLightById(lightId).catch((error: any) => {
+                throw error;
+            });
 
             const lightState = new v3.lightStates.LightState().brightness(
                 brightness,
@@ -175,6 +240,10 @@ export class HueController {
                 );
             }
 
+            await this.getLightById(lightId).catch((error: any) => {
+                throw error;
+            });
+
             const hue = parseInt(color, 16);
             const sat = 100;
 
@@ -190,6 +259,25 @@ export class HueController {
                 `Error setting light color for light ${lightId}:`,
                 error.message,
             );
+        }
+    }
+
+    public async getLightState(lightId: number): Promise<any> {
+        try {
+            if (!this.api) {
+                throw new Error('Hue API not initialized.');
+            }
+            const light = await this.getLightById(lightId).catch(
+                (error: any) => {
+                    throw error;
+                },
+            );
+            const lightState = light.state;
+            lightState.bri = Math.round((lightState.bri / 254) * 100);
+            return lightState;
+        } catch (error: any) {
+            logger.error('Error getting light state');
+            throw error;
         }
     }
 }
