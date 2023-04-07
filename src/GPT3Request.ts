@@ -5,7 +5,7 @@ import env from './env';
 import CommandExecutor from './CommandExecutor';
 import * as fs from 'fs';
 
-const DO_NOT_FETCH = true;
+const DO_NOT_FETCH = false;
 
 class gpt3Request {
     configuration: any;
@@ -21,67 +21,60 @@ class gpt3Request {
         this.exempleOrders = [
             {
                 requestID: 12,
-                order: "turn off the chamber's lights turn on and the tv",
+                order: 'Eteint la lumière',
             },
             {
                 requestID: 13,
-                order: 'Yui, turn off everythings',
+                order: 'Yui, éteint tout',
             },
             {
                 requestID: 14,
-                order: 'Please turn on the lights',
+                order: "Allume la lumière s'il te plait",
             },
             {
                 requestID: 15,
-                order: 'Turn off the chamber',
+                order: 'Baisse la lumière',
+            },
+            {
+                requestID: 16,
+                order: 'Met la lumière de la chambre à 50%',
             },
         ];
 
         this.exempleReturns = [
             {
                 requestID: '12',
-                commands: ['shutdown(4)', 'turnon(6)'],
+                commands: ['turnoff(4)', 'turnoff(12)'],
                 confidence: 0.9,
             },
             {
                 requestID: '13',
-                commands: ['shutdown(4)', 'shutdown(5)', 'shutdown(6)'],
+                commands: ['turnoff(4)', 'turnoff(5)', 'turnoff(12)'],
                 confidence: 0.85,
             },
             {
                 requestID: '14',
-                commands: ['turnon(4)', 'turnon(5)'],
+                commands: ['turnon(4)', 'turnon(12)'],
                 confidence: 0.85,
             },
             {
                 requestID: '15',
-                commands: ['shutdown(4)'],
+                commands: ['lower_luminosity(4)', 'lower_luminosity(12)'],
                 confidence: 0.9,
+            },
+            {
+                requestID: '16',
+                commands: ['set_luminosity(4, 50)', 'set_luminosity(12, 50)'],
             },
         ];
 
-        // this.entities = [
-        //     {
-        //         id: 4,
-        //         name: 'Light 1',
-        //         room: 'chamber',
-        //     },
-        //     {
-        //         id: 5,
-        //         name: 'Light 2',
-        //         room: 'living room',
-        //     },
-        //     {
-        //         id: 6,
-        //         name: 'TV',
-        //         room: 'living room',
-        //     },
-        // ];
-
         this.commands = [
-            'turnon(entityID: number)',
-            'shutdown(entityID: number)',
-            'lock(entityID: number)',
+            'turnoff(entityID: number) // Allume une entité',
+            'turnon(entityID: number) // Eteint une entité',
+            "set_luminosity(entityID: number, luminosity: number) // Change la luminosité d'une entité a une valeur entre 0 et 100",
+            "set_color(entityID: number, color: string) // Change la couleur d'une entité",
+            "lower_luminosity(entityID: number) // Diminue la luminosité d'une entité de 10%",
+            "raise_luminosity(entityID: number) // Augmente la luminosité d'une entité de 10%",
         ];
     }
 
@@ -102,67 +95,13 @@ class gpt3Request {
             };
         });
 
-        await this.testRequest().catch((err: any) => {
-            logger.error(`GPT3Request init testRequest error.`);
-            throw err;
-        });
         await this.testCommandRequest().catch((err: any) => {
             logger.error(`GPT3Request init testCommandRequest error.`);
             throw err;
         });
     }
 
-    private async fetch(text: string): Promise<string> {
-        if (DO_NOT_FETCH) {
-            return '{ "commands": ["shutdown(4)", "turnon(6)"], "confidence": 0.9 }';
-        }
-        const config35 = {
-            model: 'gpt-3.5-turbo',
-            messages: [{ role: 'user', content: text }],
-            temperature: 0.1,
-            max_tokens: 100,
-        };
-
-        const response = await this.openai
-            .createChatCompletion(config35)
-            .catch((err: any) => {
-                logger.error(err);
-            });
-        logger.debug('GPT3Request respond');
-        logger.debug(response.data.choices[0].message.content);
-        return response.data.choices[0].message.content;
-
-        // const configDavinci = {
-        //     model: "text-davinci-003",
-        //     prompt: text,
-        //     max_tokens: 500,
-        //     temperature: 1,
-        // }
-
-        // const response = await this.openai.createCompletion(configDavinci);
-        // logger.debug("GPT3Request respond");
-        // logger.debug(text);
-        // logger.debug(this.getJson(response.data.choices[0].text));
-        // return this.getJson(response.data.choices[0].text);
-    }
-
-    private async fetchCommand(text: string): Promise<string> {
-        // const config35 = {
-        //     model: "gpt-3.5-turbo",
-        //     messages: [
-        //         {role: "system", content: `You are my assistant, your name is 'Yui'. I'll give you an order with a list of commands and entities, and you'll have to find the right command(s) to execute it. Be autonomous ! Answer only with JSON format as follow: {'message': '<Your message>', ...}.\nThe entities are grouped by room or by type, but can be specified if i use the term 'all the lights' or 'everythings', etc. Return your confidence between 0 and 1 each message in the JSON. Only answer with commands that exist in the following command list with entities that exist in the following entity list. If you have to execute multiple commands, return them in a list. Command must be used with none or one entity but NOT more. For exemple, you can not return 'command(all)' because all do not exist. Again, be autonomous. If the user don't specify the name of the entity, guess what entity he's talking about with the informations given.\n`},
-        //         {role: "system", content: `Here is the list of entities: ${JSON.stringify(this.entities)}\nHere is the list of commands: ${JSON.stringify(this.commands)}`},
-        //         {role: "system", content: `Here is an exemple of order: ${JSON.stringify(this.exempleOrder)}\nHere is an exemple of return: ${JSON.stringify(this.exempleReturn)}`},
-        //         {role: "user", content: text}
-        //     ],
-        //     temperature: 0.5,
-        //     max_tokens: 50,
-        // }
-
-        // const response = await this.openai.createChatCompletion(config35);
-        // logger.debug("GPT3Request respond");
-        // logger.debug(response.data.choices[0].message.content);
-        // return response.data.choices[0].message.content;
+    private async fetchCommandDavinci(text: string): Promise<string> {
         let content = `You are my assistant, your name is 'Yui'. I'll give you a list of commands and entities, with an order, and you'll have to find the right command(s) and entities that correspond to the order. Be autonomous ! Answer only with JSON format as follow: {\"message\": \"<Your message>\", ...}.
         Here is the list of entities: ${JSON.stringify(this.entities)}
         Here is the list of commands: ${JSON.stringify(this.commands)}
@@ -187,21 +126,114 @@ class gpt3Request {
 
         logger.debug(content);
         if (DO_NOT_FETCH) {
-            return '{ "commands": ["shutdown(4)", "turnon(6)"], "confidence": 0.9 }';
+            return '{ "commands": ["turnoff(4)", "turnon(6)"], "confidence": 0.9 }';
         }
         const response = await this.openai
             .createCompletion(configDavinci)
             .catch((err: any) => {
-                logger.error(`Error during a request of gpt3Request: ${err}`);
-                logger.error(text);
-                logger.debug(err.response.status);
-                logger.debug(err.response.data);
-                logger.debug(err.message);
+                logger.error(
+                    `Error during a request of gpt3Request: ${err}` +
+                        ` Order : ${text}`,
+                );
+                logger.error(err.response.statusText);
+                throw err;
             });
 
         logger.info('GPT3Request respond : ' + text);
         logger.info(this.getJson(response.data.choices[0].text));
         return this.getJson(response.data.choices[0].text);
+    }
+
+    private async fetchCommandChat(text: string): Promise<string> {
+        const config35 = {
+            model: 'gpt-3.5-turbo',
+            messages: [
+                {
+                    role: 'system',
+                    content: `Tu es CHATGPT, un modele de langage entrainé par OpenAI et répondant aux demandes en JSON. Tu aides un assistant vocal, nommé Yui, à comprendre les différents ordres qui lui sont donnés. Cet assistant est capable de contrôler des appareils électriques, des lumières, des volets, etc.\nIl est capable d'utiliser les commandes suivantes: ${JSON.stringify(
+                        this.commands,
+                    )}.\nCes commandes peuvent être éxécutées sur des entités, qui sont des appareils, des lumières, des volets, etc. Ces entités sont les suivantes: ${JSON.stringify(
+                        this.entities,
+                    )}.\nPour éxécuter ces commandes, Yui reçoit un ordre humain, et tu dois trouver la ou les commandes et entités qui correspondent à cet ordre. Attention, Yui ne comprend pas le langage comme toi, Yui ne sait lire qu'un format JSON. Pour cela, tu dois répondre au format JSON, comme suit: {\"commands\": \"<...>\"} Ne met pas de \" dans ton JSON, sinon Yui aura une erreur. Yui lira ce JSON et éxécutera les commandes que tu lui aura donné. N'explicite pas ta démarche car Yui ne comprendra pas.\nSi la pièce n'est pas spécifié dans l'ordre, essaie de deviner (c'est souvent la chambre).`,
+                },
+                {
+                    role: 'system',
+                    content: `Voici un exemple d'ordre que Yui reçoit: ${JSON.stringify(
+                        this.exempleOrders[0],
+                    )} et tu dois répondre: ${JSON.stringify(
+                        this.exempleReturns[0],
+                    )}`,
+                },
+                {
+                    role: 'system',
+                    content: `Voici un autre exemple d'ordre que Yui reçoit: ${JSON.stringify(
+                        this.exempleOrders[1],
+                    )} et tu dois répondre: ${JSON.stringify(
+                        this.exempleReturns[1],
+                    )}`,
+                },
+                {
+                    role: 'system',
+                    content: `Voici un autre exemple d'ordre que Yui reçoit: ${JSON.stringify(
+                        this.exempleOrders[2],
+                    )} et tu dois répondre: ${JSON.stringify(
+                        this.exempleReturns[2],
+                    )}`,
+                },
+                {
+                    role: 'system',
+                    content: `Voici un autre exemple d'ordre que Yui reçoit: ${JSON.stringify(
+                        this.exempleOrders[3],
+                    )} et tu dois répondre: ${JSON.stringify(
+                        this.exempleReturns[2],
+                    )}`,
+                },
+                {
+                    role: 'system',
+                    content: `Voici un autre exemple d'ordre que Yui reçoit: ${JSON.stringify(
+                        this.exempleOrders[4],
+                    )} et tu dois répondre: ${JSON.stringify(
+                        this.exempleReturns[2],
+                    )}`,
+                },
+                {
+                    role: 'system',
+                    content: `Les autres messages d'utilisateurs seront les ordres que reçoit Yui, retourne les commandes et entités qui correspondent à ces ordres. A partir de maintenant, répond UNIQUEMENT en JSON, et attention à ne pas écrire de <\"> dans ton JSON.`,
+                },
+                {
+                    role: 'user',
+                    content:
+                        "Voici l'ordre reçu :" +
+                        text +
+                        `\n Que doit faire Yui ?`,
+                },
+            ],
+            temperature: 0.2,
+            max_tokens: 100,
+        };
+
+        if (DO_NOT_FETCH) {
+            return '{ "commands": ["turnoff(4)", "turnon(6)"], "confidence": 0.9 }';
+        }
+
+        const response = await this.openai
+            .createChatCompletion(config35)
+            .catch((err: any) => {
+                logger.error(
+                    `Error during a request of gpt3Request: ${err}` +
+                        ` Order : ${text}`,
+                );
+                logger.error(err.response.statusText);
+                throw err;
+            });
+        logger.info('GPT3Request respond to ' + text);
+        logger.info(response.data.choices[0].message.content);
+
+        const jsonInResponse = this.getJson(
+            response.data.choices[0].message.content,
+        );
+
+        return jsonInResponse;
     }
 
     private getJson(text: string): string {
@@ -212,40 +244,25 @@ class gpt3Request {
         }
     }
 
-    async request(text: string) {
-        const reponse = await this.fetch(text).catch((error) => {
-            logger.error(`Error during a request of gpt3Request: ${error}`);
-            logger.debug(error.response.status);
-            logger.debug(error.response.data);
-            logger.debug(error.message);
-        });
-    }
-
-    async testRequest() {
-        await this.request(
-            'This is a test, answer an json object like {"message": "ok"} if you can read this.',
-        );
-    }
-
     async testCommandRequest() {
         const testOrders = [
-            'Hey, please turn off the living room',
-            'Yui, turn off the lights',
-            'Hey, please turn off the lights and start the tv',
+            "Hey, s'il te plait, éteins les lumières",
+            'Yui, éteins la chambre et le rez de chaussée',
+            'Met la luminosité à 10%',
         ];
         const testReturns = [
             {
-                commands: ['shutdown(5)', 'shutdown(6)'],
+                commands: ['turnoff(4)', 'turnoff(12)'],
             },
             {
-                commands: ['shutdown(4)', 'shutdown(5)'],
+                commands: ['turnoff(4)', 'turnoff(12)', 'turnoff(5)'],
             },
             {
-                commands: ['shutdown(4)', 'shutdown(5)', 'turnon(6)'],
+                commands: ['set_luminosity(4,10)', 'set_luminosity(12,10)'],
             },
         ];
         for (let i = 0; i < testOrders.length; i++) {
-            const response = await this.fetchCommand(testOrders[i]).catch(
+            const response = await this.fetchCommandChat(testOrders[i]).catch(
                 (error) => {
                     logger.error(
                         `Fetch command error during testCommandRequest`,
@@ -253,6 +270,7 @@ class gpt3Request {
                     throw error;
                 },
             );
+
             const json = JSON.parse(response);
             const testCommands = testReturns[i].commands;
             json.commands.forEach((command: string) => {
@@ -276,7 +294,7 @@ class gpt3Request {
 
     async command(text: string) {
         logger.info('Command request to GPT3Request : ' + text);
-        const response = await this.fetchCommand(text);
+        const response = await this.fetchCommandChat(text);
         const json = JSON.parse(response);
         await json.commands.forEach(async (command: string) => {
             logger.info('Command execution from GPT3Request : ' + command);
