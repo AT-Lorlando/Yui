@@ -55,12 +55,12 @@ async function main() {
     //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
     // });
 
-    // await manualCommand.init().catch((error) => {
-    //     logger.error(
-    //         `Error during the initialisation of manualCommand: ${error}`,
-    //     );
-    //     throw new Error ('Error during the initialisation of manualCommand');
-    // });
+    await manualCommand.init(gpt3Request).catch((error: any) => {
+        logger.error(
+            `Error during the initialisation of manualCommand: ${error}`,
+        );
+        throw new Error('Error during the initialisation of manualCommand');
+    });
 
     await commandExecutor.init(entities).catch((error) => {
         logger.error(
@@ -78,7 +78,9 @@ async function main() {
     logger.debug('Modules initialised');
 
     // try {
-    //     await gpt3Request.command('Turn on the light in the chamber');
+    //     await gpt3Request.getCommandFromOrder(
+    //         'Allume la lumière de la chambre',
+    //     );
     // } catch (error) {
     //     logger.error(`Error during the execution of the command: ${error}`);
     // }
