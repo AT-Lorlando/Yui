@@ -10,73 +10,67 @@ const DO_NOT_FETCH = false;
 class gpt3Request {
     configuration: any;
     openai: any;
-    exempleOrders: any;
-    exempleReturns: any;
     testOrder: any;
     entities: any;
-    commands: any;
     commandExecutor: any;
 
-    constructor() {
-        this.exempleOrders = [
-            {
-                requestID: 12,
-                order: 'Eteint la lumière',
-            },
-            {
-                requestID: 13,
-                order: 'Yui, éteint tout',
-            },
-            {
-                requestID: 14,
-                order: "Allume la lumière s'il te plait",
-            },
-            {
-                requestID: 15,
-                order: 'Baisse la lumière',
-            },
-            {
-                requestID: 16,
-                order: 'Met la lumière de la chambre à 50%',
-            },
-        ];
-
-        this.exempleReturns = [
-            {
-                requestID: '12',
-                commands: ['turnoff(4)', 'turnoff(12)'],
-                confidence: 0.9,
-            },
-            {
-                requestID: '13',
-                commands: ['turnoff(4)', 'turnoff(5)', 'turnoff(12)'],
-                confidence: 0.85,
-            },
-            {
-                requestID: '14',
-                commands: ['turnon(4)', 'turnon(12)'],
-                confidence: 0.85,
-            },
-            {
-                requestID: '15',
-                commands: ['lower_luminosity(4)', 'lower_luminosity(12)'],
-                confidence: 0.9,
-            },
-            {
-                requestID: '16',
-                commands: ['set_luminosity(4, 50)', 'set_luminosity(12, 50)'],
-            },
-        ];
-
-        this.commands = [
-            'turnoff(entityID: number) // Allume une entité',
-            'turnon(entityID: number) // Eteint une entité',
-            "set_luminosity(entityID: number, luminosity: number) // Change la luminosité d'une entité a une valeur entre 0 et 100",
-            "set_color(entityID: number, color: string) // Change la couleur d'une entité",
-            "lower_luminosity(entityID: number) // Diminue la luminosité d'une entité de 10%",
-            "raise_luminosity(entityID: number) // Augmente la luminosité d'une entité de 10%",
-        ];
-    }
+    exempleOrders = [
+        {
+            requestID: 12,
+            order: 'Eteint la lumière',
+        },
+        {
+            requestID: 13,
+            order: 'Yui, éteint tout',
+        },
+        {
+            requestID: 14,
+            order: "Allume la lumière s'il te plait",
+        },
+        {
+            requestID: 15,
+            order: 'Baisse la lumière',
+        },
+        {
+            requestID: 16,
+            order: 'Met la lumière de la chambre à 50%',
+        },
+    ];
+    exempleReturns = [
+        {
+            requestID: '12',
+            commands: ['turnoff(4)', 'turnoff(12)'],
+            confidence: 0.9,
+        },
+        {
+            requestID: '13',
+            commands: ['turnoff(4)', 'turnoff(5)', 'turnoff(12)'],
+            confidence: 0.85,
+        },
+        {
+            requestID: '14',
+            commands: ['turnon(4)', 'turnon(12)'],
+            confidence: 0.85,
+        },
+        {
+            requestID: '15',
+            commands: ['lower_luminosity(4)', 'lower_luminosity(12)'],
+            confidence: 0.9,
+        },
+        {
+            requestID: '16',
+            commands: ['set_luminosity(4, 50)', 'set_luminosity(12, 50)'],
+        },
+    ];
+    commands = [
+        'turnoff(entityID: number) // Allume une entité',
+        'turnon(entityID: number) // Eteint une entité',
+        "set_luminosity(entityID: number, luminosity: number) // Change la luminosité d'une entité a une valeur entre 0 et 100",
+        "set_color(entityID: number, color: string) // Change la couleur d'une entité",
+        "lower_luminosity(entityID: number) // Diminue la luminosité d'une entité de 10%",
+        "raise_luminosity(entityID: number) // Augmente la luminosité d'une entité de 10%",
+    ];
+    globalCommands = ['turnoff', 'turnon', 'test'];
 
     async init(
         commandExecutor: CommandExecutor,
@@ -140,11 +134,11 @@ class gpt3Request {
             });
 
         logger.info('GPT3Request respond : ' + text);
-        logger.info(this.getJson(response.data.choices[0].text));
-        return this.getJson(response.data.choices[0].text);
+        logger.info(this.getJsonFromResponse(response.data.choices[0].text));
+        return this.getJsonFromResponse(response.data.choices[0].text);
     }
 
-    private async fetchCommandChat(text: string): Promise<string> {
+    private async fetchCommandChat(text: string): Promise<any> {
         const config35 = {
             model: 'gpt-3.5-turbo',
             messages: [
@@ -229,14 +223,14 @@ class gpt3Request {
         logger.info('GPT3Request respond to ' + text);
         logger.info(response.data.choices[0].message.content);
 
-        const jsonInResponse = this.getJson(
+        const jsonInResponse = this.getJsonFromResponse(
             response.data.choices[0].message.content,
         );
 
-        return jsonInResponse;
+        return JSON.parse(jsonInResponse);
     }
 
-    private getJson(text: string): string {
+    private getJsonFromResponse(text: string): string {
         if (text.match(/{([^}]+)}/) === null) {
             return `{\"message\": \"${text}\"}`;
         } else {
@@ -271,9 +265,8 @@ class gpt3Request {
                 },
             );
 
-            const json = JSON.parse(response);
             const testCommands = testReturns[i].commands;
-            json.commands.forEach((command: string) => {
+            response.commands.forEach((command: string) => {
                 if (testCommands.includes(command)) {
                     logger.debug(command + ' ✅');
                     testCommands.splice(testCommands.indexOf(command), 1);
@@ -292,12 +285,13 @@ class gpt3Request {
         }
     }
 
-    async command(text: string) {
-        logger.info('Command request to GPT3Request : ' + text);
+    async getCommandFromOrder(text: string) {
+        logger.info('Get command with request to GPT3Request : ' + text);
         const response = await this.fetchCommandChat(text);
-        const json = JSON.parse(response);
-        await json.commands.forEach(async (command: string) => {
+        await response.commands.forEach(async (command: string) => {
             logger.info('Command execution from GPT3Request : ' + command);
+            if (command) {
+            }
             try {
                 eval(`this.commandExecutor.${command}`);
             } catch (error: any) {
