@@ -1,10 +1,5 @@
 import { logger, testLogger } from './logger';
-import {
-    initEntitiesFromJson,
-    Entity,
-    initEntitiesFromAPI,
-    Light,
-} from './Entity';
+import { initEntitiesFromAPI } from './Entity';
 import ManualCommand from './ManualCommand';
 import CommandExecutor from './CommandExecutor';
 import GPT3Request from './GPT3Request';
@@ -32,20 +27,12 @@ async function main() {
         throw new Error('Error during the initialisation of HueController');
     });
 
-    // const entities = await initEntitiesFromJson(hueController).catch((error: Error) => {
-    //     logger.error(`Error during the initialisation of entities from JSON: ${error}`);
-    // });
-
-    const entities = await initEntitiesFromAPI(hueController).catch(
-        (error: Error) => {
-            logger.error(
-                `Error during the initialisation of entities from API: ${error}`,
-            );
-            throw new Error(
-                'Error during the initialisation of entities from API',
-            );
-        },
-    );
+    const entities = await initEntitiesFromAPI(hueController).catch((error) => {
+        logger.error(
+            `Error during the initialisation of entities from API: ${error}`,
+        );
+        throw new Error('Error during the initialisation of entities from API');
+    });
 
     if (entities === undefined || entities.length === 0) {
         throw new Error('Entities are undefined');
@@ -55,7 +42,7 @@ async function main() {
     //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
     // });
 
-    await manualCommand.init(gpt3Request).catch((error: any) => {
+    await manualCommand.init(gpt3Request).catch((error) => {
         logger.error(
             `Error during the initialisation of manualCommand: ${error}`,
         );

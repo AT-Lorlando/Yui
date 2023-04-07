@@ -65,7 +65,7 @@ class ManualCommand {
                         this.leaveHome();
                         break;
                     default:
-                        // Gpt 3 handle this
+                        gpt3Request.evalCommandFromOrder(command);
                         res.status(200).send('Command received');
                         return;
                 }
@@ -87,7 +87,7 @@ class ManualCommand {
         process.stdin.on('data', (text: string) => {
             logger.info(`Received command ${text}`);
             try {
-                gpt3Request.getCommandFromOrder(text);
+                gpt3Request.evalCommandFromOrder(text);
             } catch (error) {
                 logger.error(
                     `Error during the execution of the command: ${error}`,
