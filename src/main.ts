@@ -29,6 +29,7 @@ async function main() {
         logger.error(
             `Error during the initialisation of HueController: ${error}`,
         );
+        throw new Error('Error during the initialisation of HueController');
     });
 
     // const entities = await initEntitiesFromJson(hueController).catch((error: Error) => {
@@ -40,17 +41,15 @@ async function main() {
             logger.error(
                 `Error during the initialisation of entities from API: ${error}`,
             );
+            throw new Error(
+                'Error during the initialisation of entities from API',
+            );
         },
     );
 
     if (entities === undefined || entities.length === 0) {
         throw new Error('Entities are undefined');
     }
-
-    const light = entities.find((entity) => entity instanceof Light) as Light;
-    hueController.getLightState(light.id).then((state) => {
-        console.log(state);
-    });
 
     // await commandRecognition.init().catch((error) => {
     //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
@@ -60,19 +59,22 @@ async function main() {
     //     logger.error(
     //         `Error during the initialisation of manualCommand: ${error}`,
     //     );
+    //     throw new Error ('Error during the initialisation of manualCommand');
     // });
 
     await commandExecutor.init(entities).catch((error) => {
         logger.error(
             `Error during the initialisation of CommandExecutor: ${error}`,
         );
+        throw new Error('Error during the initialisation of CommandExecutor');
     });
 
-    // await gpt3Request.init(commandExecutor, entities).catch((error) => {
-    //     logger.error(
-    //         `Error during the initialisation of gpt3Request: ${error}`,
-    //     );
-    // });
+    await gpt3Request.init(commandExecutor, entities).catch((error) => {
+        logger.error(
+            `Error during the initialisation of gpt3Request: ${error}`,
+        );
+        throw new Error('Error during the initialisation of gpt3Request');
+    });
     logger.debug('Modules initialised');
 
     // try {
