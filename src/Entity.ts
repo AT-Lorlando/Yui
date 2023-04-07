@@ -9,7 +9,7 @@ export abstract class Entity {
         this.room = room;
     }
 
-    abstract shutdown(): void;
+    abstract turnoff(): void;
     abstract turnon(): void;
     abstract specialCommand(command: string, args?: [any]): Promise<void>;
 
@@ -55,7 +55,7 @@ export class Light extends Entity {
         }
     }
 
-    async shutdown(): Promise<void> {
+    async turnoff(): Promise<void> {
         await this.hueController
             .setLightState(this.id, false)
             .catch((error) => {
@@ -148,7 +148,7 @@ export class TV extends Entity {
         }
     }
 
-    async shutdown(): Promise<void> {
+    async turnoff(): Promise<void> {
         console.log(`The TV is off.`);
         // Ajoutez ici le code pour éteindre la télévision
     }
@@ -203,7 +203,7 @@ export class Speakers extends Entity {
         }
     }
 
-    async shutdown(): Promise<void> {
+    async turnoff(): Promise<void> {
         console.log(`The speakers ${this.name} in ${this.room} are off.`);
         // Ajoutez ici le code pour éteindre les haut-parleurs
     }

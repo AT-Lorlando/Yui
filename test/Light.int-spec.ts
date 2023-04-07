@@ -49,8 +49,8 @@ describe('Light controller', () => {
         expect(hueController.setLightColor).toHaveBeenCalledWith(1, 'red');
     });
 
-    test('shutdown() should turn off the light', async () => {
-        await light.shutdown();
+    test('turnoff() should turn off the light', async () => {
+        await light.turnoff();
         expect(hueController.setLightState).toHaveBeenCalledWith(1, false);
     });
 

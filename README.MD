@@ -2,7 +2,7 @@
 - changeShuttersState(state): Change l'état des stores (états possibles: "open", "close").
 - changeVolume(target, action): Change le volume de la cible spécifiée (cibles possibles: "speakers", "tv"; actions possibles: "up", "down").
 - changeTemperature(action): Change la température du thermostat (actions possibles: "increase", "decrease").
-- shutdown(target): Éteint l'appareil spécifié (cibles possibles: "tv", "lights", "speakers").
+- turnoff(target): Éteint l'appareil spécifié (cibles possibles: "tv", "lights", "speakers").
 - turnOn(target): Allume l'appareil spécifié (cibles possibles: "tv", "lights", "speakers").
 - changeChannel(channel): Change la chaîne de la télévision (paramètre channel pour spécifier la chaîne souhaitée).
 - togglePlayback(action): Met en pause ou reprend la lecture du contenu (actions possibles: "pause", "resume").
