@@ -11,6 +11,8 @@
     "lint:check": "eslint \"**/*.ts\"",
     "lint": "eslint \"**/*.ts\" --fix",
     "test": "jest",
+    "test:e2e": "jest --selectProjects e2e",
+    "test:unit-int": "jest --selectProjects unit-integration",
     "prepare": "husky install",
     "pre-commit": "lint-staged",
     "pre-push": "lint-staged"
