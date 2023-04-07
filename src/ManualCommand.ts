@@ -36,10 +36,10 @@ class ManualCommand {
             logger.info(`Received command ${command}`);
             try {
                 switch (command) {
-                    case 'shutdown':
+                    case 'turnoff':
                         logger.info('Shutting down');
                         res.status(200).send('Shutting down');
-                        this.shutdown();
+                        this.turnoff();
                         break;
                     case 'backhome':
                         logger.info('Going back home');
@@ -78,7 +78,7 @@ class ManualCommand {
         // Code when i'm leaving home
     }
 
-    async shutdown(): Promise<void> {
+    async turnoff(): Promise<void> {
         logger.info('Shutting down');
         // Code when Yui is shutting down
     }

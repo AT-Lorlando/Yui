@@ -21,10 +21,10 @@ class CommandExecutor {
         return entity;
     }
 
-    shutdown(entityID: number): void {
+    turnoff(entityID: number): void {
         try {
             const entity = this.getEntity(entityID);
-            entity.shutdown();
+            entity.turnoff();
         } catch (error: any) {
             logger.error(error.message);
             throw error;
