@@ -28,7 +28,7 @@ describe('E2E Test', () => {
 
     test('turnoff should turn off the light', async () => {
         // Turn off the light
-        await light.shutdown();
+        await light.turnoff();
 
         // Get the updated light state
         const updatedLightState = await hueController.getLightState(light.id);
