@@ -5,7 +5,7 @@ import env from './env';
 import CommandExecutor from './CommandExecutor';
 import * as fs from 'fs';
 
-const DO_NOT_FETCH = false;
+const DO_NOT_FETCH = true;
 
 class gpt3Request {
     configuration: any;
@@ -207,7 +207,7 @@ class gpt3Request {
         };
 
         if (DO_NOT_FETCH) {
-            return '{ "commands": ["turnoff(4)", "turnon(6)"], "confidence": 0.9 }';
+            return { commands: ['turnoff(4)', 'turnon(5)'], confidence: 0.9 };
         }
 
         const response = await this.openai
@@ -290,10 +290,31 @@ class gpt3Request {
         const response = await this.fetchCommandChat(text);
         await response.commands.forEach(async (command: string) => {
             logger.info('Command execution from GPT3Request : ' + command);
-            if (command) {
-            }
             try {
-                eval(`this.commandExecutor.${command}`);
+                const commandName = command.split('(')[0];
+                if (this.globalCommands.includes(commandName)) {
+                    eval(`this.commandExecutor.${command}`);
+                    logger.info(
+                        `Command execution from GPT3Request : commandExecutor.${command}`,
+                    );
+                } else {
+                    const commandArgs = command
+                        .split('(')[1]
+                        .split(')')[0]
+                        .split(',');
+                    const entityID = commandArgs[0];
+                    const entityValue = commandArgs[1];
+                    eval(
+                        `this.commandExecutor.specialCommand(${entityID},'${commandName}'${
+                            entityValue ? ',' + entityValue : ''
+                        })}`,
+                    );
+                    logger.info(
+                        `Command execution from GPT3Request : commandExecutor.specialCommand(${entityID},'${commandName}'${
+                            entityValue ? ',' + entityValue : ''
+                        })}`,
+                    );
+                }
             } catch (error: any) {
                 logger.error(
                     `Error the evaluation of ${command} : ${error.message}`,
