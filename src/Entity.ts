@@ -70,6 +70,10 @@ export class Light extends Entity {
     }
 
     async set_luminosity(luminosity: number): Promise<void> {
+        const state = await this.hueController.getLightState(this.id);
+        if (state.on === false) {
+            await this.hueController.setLightState(this.id, true);
+        }
         await this.hueController
             .setLightBrightness(this.id, luminosity)
             .catch((error) => {

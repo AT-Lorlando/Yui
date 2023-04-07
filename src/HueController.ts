@@ -272,7 +272,9 @@ export default class HueController {
                     throw error;
                 },
             );
-            return light.state;
+            const lightState = light.state;
+            lightState.bri = Math.round((lightState.bri / 254) * 100);
+            return lightState;
         } catch (error: any) {
             logger.error('Error getting light state');
             throw error;
