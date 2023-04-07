@@ -5,7 +5,8 @@ import env from './env';
 import CommandExecutor from './CommandExecutor';
 import * as fs from 'fs';
 
-const DO_NOT_FETCH = true;
+// const DO_NOT_FETCH = true;
+const DO_NOT_FETCH = false;
 
 class gpt3Request {
     configuration: any;
@@ -285,7 +286,7 @@ class gpt3Request {
         }
     }
 
-    async getCommandFromOrder(text: string) {
+    async evalCommandFromOrder(text: string) {
         logger.info('Get command with request to GPT3Request : ' + text);
         const response = await this.fetchCommandChat(text);
         await response.commands.forEach(async (command: string) => {
