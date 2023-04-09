@@ -42,18 +42,18 @@ async function main() {
     //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
     // });
 
-    await manualCommand.init(gpt3Request).catch((error) => {
-        logger.error(
-            `Error during the initialisation of manualCommand: ${error}`,
-        );
-        throw new Error('Error during the initialisation of manualCommand');
-    });
-
     await commandExecutor.init(entities).catch((error) => {
         logger.error(
             `Error during the initialisation of CommandExecutor: ${error}`,
         );
         throw new Error('Error during the initialisation of CommandExecutor');
+    });
+
+    await manualCommand.init(gpt3Request, commandExecutor).catch((error) => {
+        logger.error(
+            `Error during the initialisation of manualCommand: ${error}`,
+        );
+        throw new Error('Error during the initialisation of manualCommand');
     });
 
     await gpt3Request.init(commandExecutor, entities).catch((error) => {
