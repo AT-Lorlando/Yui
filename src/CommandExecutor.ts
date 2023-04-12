@@ -1,5 +1,5 @@
 // Importez les classes d'entités
-import { Entity, Light, TV, Speakers } from './Entity';
+import { Entity } from './Entity';
 import { logger } from './logger';
 
 class CommandExecutor {
