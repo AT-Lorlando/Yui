@@ -53,7 +53,7 @@ class ManualCommand {
                 return;
             }
             const command = req.body.command;
-            logger.info(`Received command ${command}`);
+            logger.info(`Received command ${command.replace('\n', '')}`);
             try {
                 switch (command) {
                     case 'turnoff':
@@ -133,15 +133,11 @@ class ManualCommand {
     }
 
     private PushNotification(pushTitle: string, pushMessage: string): void {
-        let apiKey = env.NOTIFYMYDEVICE_API_KEY;
+        const apiKey = env.NOTIFYMYDEVICE_API_KEY;
         if (apiKey !== undefined) {
             http.get(
                 `http://www.notifymydevice.com/push?ApiKey=${apiKey}&PushTitle=${pushTitle}&PushText=${pushMessage}`,
                 (resp) => {
-                    let data = '';
-                    resp.on('data', (chunk) => {
-                        data += chunk;
-                    });
                     resp.on('end', () => {
                         logger.info('Push notification sent');
                     });
