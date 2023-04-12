@@ -3,7 +3,11 @@
       "target": "es2022",
       "module": "commonjs",
       "strict": true,
-      "esModuleInterop": true
+      "esModuleInterop": true,
+      "typeRoots": ["./types", "./node_modules/@types"],
+      "paths": {
+        "castv2-client": ["./types/castv2-client.d.ts"]
+      }
     },
 }
   
