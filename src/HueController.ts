@@ -2,7 +2,6 @@ import { v3, discovery } from 'node-hue-api';
 import { BridgeDiscoveryResponse } from 'node-hue-api/dist/esm/api/discovery/discoveryTypes';
 import { logger } from './logger';
 import { env } from './env';
-import { Light } from './Entity';
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -214,21 +213,22 @@ export default class HueController {
                     'Hue API not initialized. Call connect() first.',
                 );
             }
-            await this.getLightById(lightId).catch((error: any) => {
+            await this.getLightById(lightId).catch((error) => {
                 throw error;
             });
 
-            const lightState = new v3.lightStates.LightState().brightness(
-                brightness,
-            );
+            const lightState = new v3.lightStates.LightState()
+                .on()
+                .brightness(brightness);
 
             await this.api.lights.setLightState(lightId, lightState);
             logger.info(`Light ${lightId} brightness set to ${brightness}`);
-        } catch (error: any) {
+        } catch (error) {
             logger.error(
                 `Error setting light brightness for light ${lightId}:`,
-                error.message,
+                error,
             );
+            throw error;
         }
     }
 
