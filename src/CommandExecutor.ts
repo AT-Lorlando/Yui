@@ -1,16 +1,20 @@
 // Importez les classes d'entités
 import { Entity } from './Entity';
 import { logger } from './logger';
-
+import http from 'http';
+import env from './env';
+import gpt3Request from './GPT3Request';
 class CommandExecutor {
     entities: Entity[];
+    gpt3Request: gpt3Request | undefined;
 
     constructor() {
         this.entities = [];
     }
 
-    async init(entities: Entity[]): Promise<void> {
+    async init(entities: Entity[], gpt3Request: gpt3Request): Promise<void> {
         this.entities = entities;
+        this.gpt3Request = gpt3Request;
     }
 
     private getEntity(entityID: number): Entity {
@@ -63,6 +67,51 @@ class CommandExecutor {
             logger.error(error.message);
             throw error;
         }
+    }
+
+    async backHome(): Promise<void> {
+        logger.info('Going back home');
+        this.PushNotification('Yui', 'Welcome back home !');
+        try {
+            this.turnon(4);
+            this.turnon(5);
+            this.turnon(12);
+        } catch (error) {
+            logger.error(`Error when back home: ${error}`);
+        }
+    }
+
+    async leaveHome(): Promise<void> {
+        logger.info('Leaving home');
+        this.PushNotification('Yui', 'See you soon !');
+        try {
+            this.turnoff(4);
+            this.turnoff(5);
+            this.turnoff(12);
+        } catch (error) {
+            logger.error(`Error when leaving home: ${error}`);
+        }
+    }
+
+    public PushNotification(pushTitle: string, pushMessage: string): void {
+        const apiKey = env.NOTIFYMYDEVICE_API_KEY;
+        if (apiKey !== undefined) {
+            http.get(
+                `http://www.notifymydevice.com/push?ApiKey=${apiKey}&PushTitle=${pushTitle}&PushText=${pushMessage}`,
+                (resp) => {
+                    resp.on('end', () => {
+                        logger.info('Push notification sent');
+                    });
+                },
+            );
+        }
+    }
+
+    public evalCommandFromOrder(command: string): void {
+        if (this.gpt3Request == undefined) {
+            throw new Error('GPT3Request is not initialized');
+        }
+        this.gpt3Request.evalCommandFromOrder(command);
     }
 }
 
