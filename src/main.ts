@@ -1,9 +1,10 @@
 import { logger, testLogger } from './logger';
 import { initEntitiesFromAPI } from './Entity';
-import ManualCommand from './ManualCommand';
 import CommandExecutor from './CommandExecutor';
 import GPT3Request from './GPT3Request';
 import HueController from './HueController';
+import SpotifyController from './SpotifyController';
+import Listener from './Listener';
 
 async function main() {
     testLogger();
@@ -11,14 +12,22 @@ async function main() {
     logger.debug('Importing modules');
 
     // const commandRecognition = new CommandRecognition();
-    const manualCommand = new ManualCommand();
     const commandExecutor = new CommandExecutor();
     const gpt3Request = new GPT3Request();
     const hueController = new HueController();
+    const spotifyController = new SpotifyController();
+    const listener = new Listener();
 
     logger.debug('Modules imported');
 
     logger.debug('Modules initialisation');
+
+    await spotifyController.init().catch((error) => {
+        logger.error(
+            `Error during the initialisation of SpotifyController: ${error}`,
+        );
+        throw new Error('Error during the initialisation of SpotifyController');
+    });
 
     await hueController.init().catch((error) => {
         logger.error(
@@ -27,7 +36,10 @@ async function main() {
         throw new Error('Error during the initialisation of HueController');
     });
 
-    const entities = await initEntitiesFromAPI(hueController).catch((error) => {
+    const entities = await initEntitiesFromAPI(
+        hueController,
+        spotifyController,
+    ).catch((error) => {
         logger.error(
             `Error during the initialisation of entities from API: ${error}`,
         );
@@ -42,18 +54,16 @@ async function main() {
     //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
     // });
 
-    await commandExecutor.init(entities).catch((error) => {
+    await commandExecutor.init(entities, gpt3Request).catch((error) => {
         logger.error(
             `Error during the initialisation of CommandExecutor: ${error}`,
         );
         throw new Error('Error during the initialisation of CommandExecutor');
     });
 
-    await manualCommand.init(gpt3Request, commandExecutor).catch((error) => {
-        logger.error(
-            `Error during the initialisation of manualCommand: ${error}`,
-        );
-        throw new Error('Error during the initialisation of manualCommand');
+    await listener.init(commandExecutor, spotifyController).catch((error) => {
+        logger.error(`Error during the initialisation of Listener: ${error}`);
+        throw new Error('Error during the initialisation of Listener');
     });
 
     await gpt3Request.init(commandExecutor, entities).catch((error) => {
@@ -62,15 +72,6 @@ async function main() {
         );
         throw new Error('Error during the initialisation of gpt3Request');
     });
-    logger.debug('Modules initialised');
-
-    // try {
-    //     await gpt3Request.getCommandFromOrder(
-    //         'Allume la lumière de la chambre',
-    //     );
-    // } catch (error) {
-    //     logger.error(`Error during the execution of the command: ${error}`);
-    // }
 
     logger.info('Initialisation of the "Yui" application completed');
 }
