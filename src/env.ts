@@ -8,10 +8,10 @@ export interface Env {
     HUE_BRIDGE_IP: string | undefined;
     HUE_USERNAME: string | undefined;
     BEARER_TOKEN: string;
-    NOTIFYMYDEVICE_API_KEY: string | undefined;
-    SPOTIFY_CLIENT_ID: string | undefined;
-    SPOTIFY_CLIENT_SECRET: string | undefined;
-    SPOTIFY_REDIRECT_URI: string | undefined;
+    NOTIFYMYDEVICE_API_KEY: string;
+    SPOTIFY_CLIENT_ID: string;
+    SPOTIFY_CLIENT_SECRET: string;
+    SPOTIFY_REDIRECT_URI: string;
 }
 
 export const env: Env = {
