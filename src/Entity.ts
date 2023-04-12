@@ -1,6 +1,7 @@
 import { logger } from './logger';
 import * as fs from 'fs';
 import HueController from './HueController';
+import SpotifyController from './SpotifyController';
 
 export abstract class Entity {
     constructor(public name: string, public id: number, public room: string) {
@@ -288,15 +289,14 @@ export async function initEntitiesFromJson(
 
 export async function initEntitiesFromAPI(
     hueController: HueController,
+    spotifyController: SpotifyController,
 ): Promise<Entity[]> {
     const lightsGroups = await hueController.getGroupsByType('Room');
 
-    // Créez un tableau pour stocker toutes les Promesses
     const lightPromises: Promise<Entity>[] = [];
 
     lightsGroups.forEach((group) => {
         group.lights.forEach((lightID: number) => {
-            // Ajoutez chaque Promesse de getLightById au tableau
             lightPromises.push(
                 hueController.getLightById(lightID).then((light) => {
                     const newLight = new Light(
@@ -312,8 +312,21 @@ export async function initEntitiesFromAPI(
         });
     });
 
+    const speakers = await spotifyController.getDevices();
+    const speakersArray = [] as Entity[];
+    speakers.forEach((speaker: any) => {
+        speakersArray.push(
+            new Speakers(speaker.name, speaker.host, 'Living room'),
+        );
+        logger.info(`Speakers '${speaker.name}' in Living room added`);
+    });
+
     // Attendez que toutes les Promesses soient résolues
-    const entitiesArray = await Promise.all(lightPromises);
+    const lightsArray = await Promise.all(lightPromises);
+
+    const entitiesArray: Entity[] = [];
+
+    entitiesArray.push(...lightsArray, ...speakersArray);
 
     return entitiesArray;
 }
