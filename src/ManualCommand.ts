@@ -3,13 +3,20 @@ import express from 'express';
 import * as bodyParser from 'body-parser';
 import * as fs from 'fs';
 import gpt3Request from './GPT3Request';
+import CommandExecutor from './CommandExecutor';
 import env from './env';
 import http from 'http';
 
 class ManualCommand {
-    async init(gpt3Request: gpt3Request): Promise<void> {
+    private commandExecutor: CommandExecutor | undefined;
+
+    async init(
+        gpt3Request: gpt3Request,
+        commandExecutor: CommandExecutor,
+    ): Promise<void> {
         this.listenOnWeb(gpt3Request);
         this.listenOnStdin(gpt3Request);
+        this.commandExecutor = commandExecutor;
     }
 
     private async listenOnWeb(gpt3Request: gpt3Request): Promise<void> {
@@ -46,7 +53,7 @@ class ManualCommand {
                 return;
             }
             const command = req.body.command;
-            logger.info(`Received command ${command}`);
+            logger.info(`Received command ${command.replace('\n', '')}`);
             try {
                 switch (command) {
                     case 'turnoff':
@@ -98,12 +105,26 @@ class ManualCommand {
 
     async backHome(): Promise<void> {
         logger.info('Going back home');
-        // Code when i'm back home
+        this.PushNotification('Yui', 'Welcome back home !');
+        try {
+            this.commandExecutor?.turnon(4);
+            this.commandExecutor?.turnon(5);
+            this.commandExecutor?.turnon(12);
+        } catch (error) {
+            logger.error(`Error when back home: ${error}`);
+        }
     }
 
     async leaveHome(): Promise<void> {
         logger.info('Leaving home');
-        // Code when i'm leaving home
+        this.PushNotification('Yui', 'See you soon !');
+        try {
+            this.commandExecutor?.turnoff(4);
+            this.commandExecutor?.turnoff(5);
+            this.commandExecutor?.turnoff(12);
+        } catch (error) {
+            logger.error(`Error when leaving home: ${error}`);
+        }
     }
 
     async turnoff(): Promise<void> {
@@ -112,15 +133,11 @@ class ManualCommand {
     }
 
     private PushNotification(pushTitle: string, pushMessage: string): void {
-        let apiKey = env.NOTIFYMYDEVICE_API_KEY;
+        const apiKey = env.NOTIFYMYDEVICE_API_KEY;
         if (apiKey !== undefined) {
             http.get(
                 `http://www.notifymydevice.com/push?ApiKey=${apiKey}&PushTitle=${pushTitle}&PushText=${pushMessage}`,
                 (resp) => {
-                    let data = '';
-                    resp.on('data', (chunk) => {
-                        data += chunk;
-                    });
                     resp.on('end', () => {
                         logger.info('Push notification sent');
                     });
