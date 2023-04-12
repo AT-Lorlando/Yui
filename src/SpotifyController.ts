@@ -1,6 +1,7 @@
 import SpotifyWebApi from 'spotify-web-api-node';
 import env from './env';
 import { Client, DefaultMediaReceiver } from 'castv2-client';
+import { logger } from './logger';
 import Bonjour from 'bonjour';
 
 export default class SpotifyController {
@@ -14,13 +15,10 @@ export default class SpotifyController {
         });
     }
 
-    public async init(): Promise<void> {
-        try {
-            const data = await this.spotifyApi.clientCredentialsGrant();
-            this.spotifyApi.setAccessToken(data.body['access_token']);
-        } catch (error) {
-            console.error('Error initializing SpotifyController:', error);
-        }
+    public async init(): Promise<void> {}
+
+    async setAccessToken(accessToken: string): Promise<void> {
+        this.spotifyApi.setAccessToken(accessToken);
     }
 
     async play(): Promise<void> {
@@ -47,25 +45,27 @@ export default class SpotifyController {
         }
     }
 
-    async getDevices(): Promise<any> {
-        // Créez une instance Bonjour
-        const bonjour = Bonjour();
-        const devices: Bonjour.RemoteService[] = [];
+    async getDevices(): Promise<{}[]> {
+        return new Promise<{}[]>((resolve) => {
+            const bonjour = Bonjour();
+            const devices: {}[] = [];
 
-        // Recherchez les appareils Google Home sur le réseau
-        bonjour.find({ type: 'googlecast' }, (device) => {
-            if (device.type === 'googlecast') {
-                devices.push(device);
-            }
+            bonjour.find({ type: 'googlecast' }, (device) => {
+                if (device.type === 'googlecast') {
+                    logger.info(`Found Google Home device: ${device.name}`);
+                    devices.push({
+                        name: device.txt.fn,
+                        type: device.txt.md,
+                        host: device.host,
+                        port: device.port,
+                    });
+                }
+            });
+
+            setTimeout(() => {
+                resolve(devices);
+            }, 2000);
         });
-
-        return devices;
-        // Vous pouvez également utiliser un événement pour écouter les nouveaux appareils
-        // bonjour.find().on('up', (device) => {
-        //   if (device.type === 'googlecast') {
-        //     console.log('Google Home Device Found:', device);
-        //   }
-        // });
     }
 
     async playOnGoogleHome(
@@ -112,5 +112,21 @@ export default class SpotifyController {
                 reject(error);
             });
         });
+    }
+
+    generateAuthorizeUrl(
+        clientId: string,
+        redirectUri: string,
+        scopes: string[],
+    ): string {
+        const baseUrl = 'https://accounts.spotify.com/authorize';
+        const scopeParam = scopes.join(' ');
+        const queryParams = new URLSearchParams({
+            client_id: clientId,
+            response_type: 'code',
+            redirect_uri: redirectUri,
+            scope: scopeParam,
+        });
+        return `${baseUrl}?${queryParams.toString()}`;
     }
 }
