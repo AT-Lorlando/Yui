@@ -90,10 +90,12 @@ class gpt3Request {
             };
         });
 
-        await this.testCommandRequest().catch((err: any) => {
-            logger.error(`GPT3Request init testCommandRequest error.`);
-            throw err;
-        });
+        if (env.NODE_ENV === 'production') {
+            await this.testCommandRequest().catch((err: any) => {
+                logger.error(`GPT3Request init testCommandRequest error.`);
+                throw err;
+            });
+        }
     }
 
     private async fetchCommandDavinci(text: string): Promise<string> {
@@ -221,7 +223,7 @@ class gpt3Request {
                 logger.error(err.response.statusText);
                 throw err;
             });
-        logger.info('GPT3Request respond to ' + text);
+        logger.info('GPT3Request respond to ' + text.replace('\n', ''));
         logger.info(response.data.choices[0].message.content);
 
         const jsonInResponse = this.getJsonFromResponse(
@@ -232,10 +234,11 @@ class gpt3Request {
     }
 
     private getJsonFromResponse(text: string): string {
-        if (text.match(/{([^}]+)}/) === null) {
+        const match = text.match(/{([^}]+)}/);
+        if (!match) {
             return `{\"message\": \"${text}\"}`;
         } else {
-            return text.match(/{([^}]+)}/)![0];
+            return match[0];
         }
     }
 
@@ -287,17 +290,20 @@ class gpt3Request {
     }
 
     async evalCommandFromOrder(text: string) {
-        logger.info('Get command with request to GPT3Request : ' + text);
+        logger.info(
+            'Get command with request to GPT3Request : ' +
+                text.replace('\n', ''),
+        );
         const response = await this.fetchCommandChat(text);
         await response.commands.forEach(async (command: string) => {
             logger.info('Command execution from GPT3Request : ' + command);
             try {
                 const commandName = command.split('(')[0];
                 if (this.globalCommands.includes(commandName)) {
-                    eval(`this.commandExecutor.${command}`);
                     logger.info(
                         `Command execution from GPT3Request : commandExecutor.${command}`,
                     );
+                    eval(`this.commandExecutor.${command}`);
                 } else {
                     const commandArgs = command
                         .split('(')[1]
@@ -305,15 +311,15 @@ class gpt3Request {
                         .split(',');
                     const entityID = commandArgs[0];
                     const entityValue = commandArgs[1];
-                    eval(
-                        `this.commandExecutor.specialCommand(${entityID},'${commandName}'${
-                            entityValue ? ',' + entityValue : ''
-                        })}`,
-                    );
                     logger.info(
                         `Command execution from GPT3Request : commandExecutor.specialCommand(${entityID},'${commandName}'${
-                            entityValue ? ',' + entityValue : ''
-                        })}`,
+                            entityValue ? ',[' + entityValue + ']' : ''
+                        })`,
+                    );
+                    eval(
+                        `this.commandExecutor.specialCommand(${entityID},'${commandName}'${
+                            entityValue ? ',[' + entityValue + ']' : ''
+                        })`,
                     );
                 }
             } catch (error: any) {
