@@ -1,10 +1,6 @@
 import HueController from '../src/HueController';
 import { Light } from '../src/Entity';
 
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 describe('E2E Test', () => {
     let hueController: HueController;
     let light: Light;
