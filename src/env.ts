@@ -9,6 +9,9 @@ export interface Env {
     HUE_USERNAME: string | undefined;
     BEARER_TOKEN: string;
     NOTIFYMYDEVICE_API_KEY: string | undefined;
+    SPOTIFY_CLIENT_ID: string | undefined;
+    SPOTIFY_CLIENT_SECRET: string | undefined;
+    SPOTIFY_REDIRECT_URI: string | undefined;
 }
 
 export const env: Env = {
@@ -20,6 +23,12 @@ export const env: Env = {
     BEARER_TOKEN: process.env.BEARER_TOKEN as Env['BEARER_TOKEN'],
     NOTIFYMYDEVICE_API_KEY: process.env
         .NOTIFYMYDEVICE_API_KEY as Env['NOTIFYMYDEVICE_API_KEY'],
+    SPOTIFY_CLIENT_ID: process.env
+        .SPOTIFY_CLIENT_ID as Env['SPOTIFY_CLIENT_ID'],
+    SPOTIFY_CLIENT_SECRET: process.env
+        .SPOTIFY_CLIENT_SECRET as Env['SPOTIFY_CLIENT_SECRET'],
+    SPOTIFY_REDIRECT_URI: process.env
+        .SPOTIFY_REDIRECT_URI as Env['SPOTIFY_REDIRECT_URI'],
 };
 
 export default env;
