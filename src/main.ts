@@ -22,6 +22,11 @@ async function main() {
 
     logger.debug('Modules initialisation');
 
+    await listener.init(commandExecutor, spotifyController).catch((error) => {
+        logger.error(`Error during the initialisation of Listener: ${error}`);
+        throw new Error('Error during the initialisation of Listener');
+    });
+
     await spotifyController.init().catch((error) => {
         logger.error(
             `Error during the initialisation of SpotifyController: ${error}`,
@@ -59,11 +64,6 @@ async function main() {
             `Error during the initialisation of CommandExecutor: ${error}`,
         );
         throw new Error('Error during the initialisation of CommandExecutor');
-    });
-
-    await listener.init(commandExecutor, spotifyController).catch((error) => {
-        logger.error(`Error during the initialisation of Listener: ${error}`);
-        throw new Error('Error during the initialisation of Listener');
     });
 
     await gpt3Request.init(commandExecutor, entities).catch((error) => {
