@@ -4,3 +4,4 @@ node_modules/*
 .env
 commands/*.txt
 banned_ips.txt
+refresh-token.json
