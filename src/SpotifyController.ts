@@ -49,6 +49,22 @@ export default class SpotifyController {
         }
     }
 
+    private generateAuthorizeUrl(
+        clientId: string,
+        redirectUri: string,
+        scopes: string[],
+    ): string {
+        const baseUrl = 'https://accounts.spotify.com/authorize';
+        const scopeParam = scopes.join(' ');
+        const queryParams = new URLSearchParams({
+            client_id: clientId,
+            response_type: 'code',
+            redirect_uri: redirectUri,
+            scope: scopeParam,
+        });
+        return `${baseUrl}?${queryParams.toString()}`;
+    }
+
     private async isAuthorized(): Promise<void> {
         return new Promise((resolve, reject) => {
             let intervalId: NodeJS.Timeout;
@@ -73,17 +89,17 @@ export default class SpotifyController {
         });
     }
 
-    async setAccessToken(accessToken: string): Promise<void> {
+    public async setAccessToken(accessToken: string): Promise<void> {
         this.spotifyApi.setAccessToken(accessToken);
         this.flag = true;
     }
 
-    async saveRefreshToken(refreshToken: string): Promise<void> {
+    public async saveRefreshToken(refreshToken: string): Promise<void> {
         const data = { refreshToken };
         await fs.promises.writeFile('refresh-token.json', JSON.stringify(data));
     }
 
-    async loadRefreshToken(): Promise<string | null> {
+    public async loadRefreshToken(): Promise<string | null> {
         try {
             const data = await fs.promises.readFile(
                 'refresh-token.json',
@@ -247,21 +263,5 @@ export default class SpotifyController {
                 reject(error);
             });
         });
-    }
-
-    generateAuthorizeUrl(
-        clientId: string,
-        redirectUri: string,
-        scopes: string[],
-    ): string {
-        const baseUrl = 'https://accounts.spotify.com/authorize';
-        const scopeParam = scopes.join(' ');
-        const queryParams = new URLSearchParams({
-            client_id: clientId,
-            response_type: 'code',
-            redirect_uri: redirectUri,
-            scope: scopeParam,
-        });
-        return `${baseUrl}?${queryParams.toString()}`;
     }
 }
