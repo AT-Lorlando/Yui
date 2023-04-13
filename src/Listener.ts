@@ -90,12 +90,22 @@ export default class Listener {
             });
 
             app.get('/', (req: any, res: any) => {
-                if (this.spotifyController === undefined) {
-                    throw new Error('SpotifyController is undefined');
-                }
                 res.status(200).send('Yui is up and running');
                 console.log(req.query.code);
-                this.spotifyController.setAccessToken(req.query.code);
+
+                if (req.query.code) {
+                    if (this.spotifyController === undefined) {
+                        throw new Error('SpotifyController is undefined');
+                    }
+                    this.spotifyController
+                        .exchangeAuthorizationCode(req.query.code)
+                        .then(({ accessToken, refreshToken }) => {
+                            this.spotifyController!.saveRefreshToken(
+                                refreshToken,
+                            );
+                            this.spotifyController!.setAccessToken(accessToken);
+                        });
+                }
             });
 
             app.listen(port, () => {
