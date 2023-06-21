@@ -1,6 +1,5 @@
 import SpotifyWebApi from 'spotify-web-api-node';
 import env from './env';
-import { Client, DefaultMediaReceiver } from 'castv2-client';
 import { logger } from './logger';
 import Bonjour from 'bonjour';
 import * as fs from 'fs';
@@ -67,16 +66,13 @@ export default class SpotifyController {
 
     private async isAuthorized(): Promise<void> {
         return new Promise((resolve, reject) => {
-            let intervalId: NodeJS.Timeout;
-
             const checkFlag = () => {
                 if (this.flag) {
                     clearInterval(intervalId);
                     resolve();
                 }
             };
-
-            intervalId = setInterval(checkFlag, 5000);
+            const intervalId = setInterval(checkFlag, 5000);
 
             setTimeout(() => {
                 clearInterval(intervalId);
@@ -196,10 +192,10 @@ export default class SpotifyController {
         }
     }
 
-    async getDevices(): Promise<{}[]> {
-        return new Promise<{}[]>((resolve) => {
+    async getDevices(): Promise<object[]> {
+        return new Promise<object[]>((resolve) => {
             const bonjour = Bonjour();
-            const devices: {}[] = [];
+            const devices: object[] = [];
 
             bonjour.find({ type: 'googlecast' }, (device) => {
                 if (device.type === 'googlecast') {
@@ -219,49 +215,40 @@ export default class SpotifyController {
         });
     }
 
-    async playOnGoogleHome(
-        deviceIp: string,
-        spotifyUrl: string,
-    ): Promise<void> {
-        return new Promise(async (resolve, reject) => {
-            const client = new Client();
-            client.connect(deviceIp, () => {
-                client.launch(
-                    DefaultMediaReceiver,
-                    (error: any, player: any) => {
-                        if (error) {
-                            reject(error);
-                        }
+    async isPlaying(): Promise<boolean> {
+        try {
+            const response = await this.spotifyApi.getMyCurrentPlaybackState();
+            return response.body.is_playing;
+        } catch (error) {
+            console.error('Error getting current playback state:', error);
+            return false;
+        }
+    }
 
-                        const metadata = {
-                            type: 'audio/mpeg',
-                            metadataType: 0,
-                            title: 'Spotify',
-                        };
+    async getActiveDevice(): Promise<object | undefined> {
+        try {
+            const response = await this.spotifyApi.getMyDevices();
+            const devices = response.body.devices;
+            const activeDevice = devices.find((device) => device.is_active);
+            return activeDevice;
+        } catch (error) {
+            console.error('Error getting active device:', error);
+            return undefined;
+        }
+    }
 
-                        player.load(
-                            {
-                                contentId: spotifyUrl,
-                                contentType: 'audio/mpeg',
-                                streamType: 'BUFFERED',
-                                metadata,
-                            },
-                            { autoplay: true },
-                            (error: Error) => {
-                                if (error) {
-                                    reject(error);
-                                } else {
-                                    resolve();
-                                }
-                            },
-                        );
-                    },
-                );
-            });
+    async transferPlayback(deviceId: string): Promise<void> {
+        logger.info(`Transferring playback to device: ${deviceId}`);
+        try {
+            await this.spotifyApi.transferMyPlayback([deviceId]);
+        } catch (error) {
+            console.error('Error transferring playback:', error);
+        }
+    }
 
-            client.on('error', (error: Error) => {
-                reject(error);
-            });
-        });
+    async getSpeakerByName(name: string): Promise<object | undefined> {
+        const devices = await this.getDevices();
+        console.log(devices);
+        return devices.find((device: any) => device.name === name);
     }
 }

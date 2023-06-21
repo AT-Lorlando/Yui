@@ -1,6 +1,7 @@
 import express from 'express';
 import * as bodyParser from 'body-parser';
 import * as fs from 'fs';
+import * as wifi from 'node-wifi';
 import CommandExecutor from './CommandExecutor';
 import SpotifyController from './SpotifyController';
 import { logger } from './logger';
@@ -71,6 +72,7 @@ export default class Listener {
                             logger.info('Going back home');
                             res.status(200).send('Going back home');
                             this.commandExecutor.backHome();
+                            this.waitForPhone();
                             break;
                         case 'leavehome':
                             logger.info('Leaving home');
@@ -100,10 +102,15 @@ export default class Listener {
                     this.spotifyController
                         .exchangeAuthorizationCode(req.query.code)
                         .then(({ accessToken, refreshToken }) => {
-                            this.spotifyController!.saveRefreshToken(
+                            if (this.spotifyController === undefined) {
+                                throw new Error(
+                                    'SpotifyController is undefined',
+                                );
+                            }
+                            this.spotifyController.saveRefreshToken(
                                 refreshToken,
                             );
-                            this.spotifyController!.setAccessToken(accessToken);
+                            this.spotifyController.setAccessToken(accessToken);
                         });
                 }
             });
@@ -133,5 +140,73 @@ export default class Listener {
                 );
             }
         });
+    }
+
+    async detectPhone(phoneMacAddress: string, timeout = 30): Promise<void> {
+        return new Promise(async (resolve, reject) => {
+            wifi.init({
+                iface: null, // iface à utiliser si vous avez plusieurs interfaces réseau
+            });
+
+            const checkPhoneConnected = async (): Promise<boolean> => {
+                const devices = await wifi.getCurrentConnections();
+                console.log(devices);
+                return devices.some((device) => device.mac === phoneMacAddress);
+            };
+
+            const detectWithTimeout = async (): Promise<void> => {
+                const isPhoneConnected = await checkPhoneConnected();
+
+                if (isPhoneConnected) {
+                    resolve();
+                } else {
+                    const timer = setTimeout(async () => {
+                        if (!isPhoneConnected) {
+                            reject(
+                                new Error(
+                                    'Phone not detected within the timeout',
+                                ),
+                            );
+                        }
+                    }, timeout * 1000);
+
+                    while (!isPhoneConnected && timer.refresh) {
+                        await new Promise((r) => setTimeout(r, 1000)); // Attendez 1 seconde
+                    }
+
+                    clearTimeout(timer);
+                }
+            };
+
+            detectWithTimeout();
+        });
+    }
+
+    private async waitForPhone() {
+        this.detectPhone(env.PHONE_MAC_ADDRESS)
+            .then(async () => {
+                logger.info('Phone back to home');
+                if (this.spotifyController === undefined) {
+                    throw new Error('SpotifyController is undefined');
+                }
+                if (this.commandExecutor === undefined) {
+                    throw new Error('CommandExecutor is undefined');
+                }
+                if (await this.spotifyController.isPlaying()) {
+                    logger.info('Spotify is playing');
+                    // transfer playback to speaker
+                    const speaker =
+                        (await this.spotifyController.getSpeakerByName(
+                            'Les enceintes',
+                        )) as any;
+                    if (speaker === undefined) {
+                        throw new Error('Speaker not found');
+                    }
+                    await this.spotifyController.transferPlayback(speaker.id);
+                }
+            })
+            .catch(() => {
+                // Phone not detected
+            });
     }
 }
