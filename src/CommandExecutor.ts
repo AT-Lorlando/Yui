@@ -1,5 +1,5 @@
 // Importez les classes d'entités
-import { Entity } from './Entity';
+import { Entity, Light } from './Entity';
 import { logger } from './logger';
 import http from 'http';
 import env from './env';
@@ -73,9 +73,12 @@ class CommandExecutor {
         logger.info('Going back home');
         this.PushNotification('Yui', 'Welcome back home !');
         try {
-            this.turnon(4);
-            this.turnon(5);
-            this.turnon(12);
+            const lights = [4, 5, 12];
+            for (const lightID of lights) {
+                const light = this.getEntity(lightID) as Light;
+                await light.turnon();
+                await light.set_luminosity(100);
+            }
         } catch (error) {
             logger.error(`Error when back home: ${error}`);
         }
