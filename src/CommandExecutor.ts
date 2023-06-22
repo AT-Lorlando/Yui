@@ -1,5 +1,5 @@
 // Importez les classes d'entités
-import { Entity, Light } from './Entity';
+import { Entity, Light, Speaker, Door } from './Entity';
 import { logger } from './logger';
 import http from 'http';
 import env from './env';
@@ -25,44 +25,18 @@ class CommandExecutor {
         return entity;
     }
 
-    turnoff(entityID: number): void {
-        try {
-            const entity = this.getEntity(entityID);
-            entity.turnoff();
-        } catch (error: any) {
-            logger.error(error.message);
-            throw error;
-        }
-    }
-
-    turnon(entityID: number): void {
-        try {
-            const entity = this.getEntity(entityID);
-            entity.turnon();
-        } catch (error: any) {
-            logger.error(error.message);
-            throw error;
-        }
+    getEntities(): { name: string; id: number; room: string; type: string }[] {
+        return this.entities.map((entity) => {
+            const { name, id, room } = entity;
+            const type = entity.constructor.name;
+            return { name, id, room, type };
+        });
     }
 
     test(entityID: number): void {
         try {
             const entity = this.getEntity(entityID);
             entity.test();
-        } catch (error: any) {
-            logger.error(error.message);
-            throw error;
-        }
-    }
-
-    async specialCommand(
-        entityID: number,
-        command: string,
-        args?: [any],
-    ): Promise<void> {
-        try {
-            const entity = this.getEntity(entityID);
-            await entity.specialCommand(command, args);
         } catch (error: any) {
             logger.error(error.message);
             throw error;
@@ -88,9 +62,7 @@ class CommandExecutor {
         logger.info('Leaving home');
         this.PushNotification('Yui', 'See you soon !');
         try {
-            this.turnoff(4);
-            this.turnoff(5);
-            this.turnoff(12);
+            this.lightsTurnOff([4, 5, 12]);
         } catch (error) {
             logger.error(`Error when leaving home: ${error}`);
         }
@@ -115,6 +87,169 @@ class CommandExecutor {
             throw new Error('GPT3Request is not initialized');
         }
         this.gpt3Request.evalCommandFromOrder(command);
+    }
+
+    lightsTurnOn(entitiesID: number[]): void {
+        for (const entityID of entitiesID) {
+            try {
+                const entity = this.getEntity(entityID);
+                if (entity instanceof Light) {
+                    entity.turnon();
+                } else {
+                    throw new Error(
+                        `Entity with id ${entityID} is not a light`,
+                    );
+                }
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+        }
+    }
+
+    lightsTurnOff(entitiesID: number[]): void {
+        for (const entityID of entitiesID) {
+            try {
+                const entity = this.getEntity(entityID);
+                if (entity instanceof Light) {
+                    entity.turnoff();
+                } else {
+                    throw new Error(
+                        `Entity with id ${entityID} is not a light`,
+                    );
+                }
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+        }
+    }
+
+    lightsSetLuminosity(entitiesID: number[], luminosity: number): void {
+        for (const entityID of entitiesID) {
+            try {
+                const entity = this.getEntity(entityID);
+                if (entity instanceof Light) {
+                    entity.set_luminosity(luminosity);
+                } else {
+                    throw new Error(
+                        `Entity with id ${entityID} is not a light`,
+                    );
+                }
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+        }
+    }
+
+    lightsSetColor(entitiesID: number[], color: string): void {
+        for (const entityID of entitiesID) {
+            try {
+                const entity = this.getEntity(entityID);
+                if (entity instanceof Light) {
+                    entity.set_color(color);
+                } else {
+                    throw new Error(
+                        `Entity with id ${entityID} is not a light`,
+                    );
+                }
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+        }
+    }
+
+    speakersPlay(speakersID: number[], url: string): void {
+        for (const speakerID of speakersID) {
+            try {
+                const entity = this.getEntity(speakerID);
+                if (entity instanceof Speaker) {
+                    entity.play(url);
+                } else {
+                    throw new Error(
+                        `Entity with id ${speakerID} is not a speaker`,
+                    );
+                }
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+        }
+    }
+
+    speakersStop(): void {
+        for (const entity of this.entities) {
+            try {
+                if (entity instanceof Speaker) {
+                    entity.stop();
+                } else {
+                    throw new Error(
+                        `Entity with id ${entity.id} is not a speaker`,
+                    );
+                }
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+        }
+    }
+
+    speakersRaiseVolume(): void {
+        for (const entity of this.entities) {
+            try {
+                if (entity instanceof Speaker) {
+                    entity.raise_volume();
+                } else {
+                    throw new Error(
+                        `Entity with id ${entity.id} is not a speaker`,
+                    );
+                }
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+        }
+    }
+
+    speakersLowerVolume(): void {
+        for (const entity of this.entities) {
+            try {
+                if (entity instanceof Speaker) {
+                    entity.lower_volume();
+                } else {
+                    throw new Error(
+                        `Entity with id ${entity.id} is not a speaker`,
+                    );
+                }
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+        }
+    }
+
+    doorsUnlock(doorsID: number[]): void {
+        for (const entityID of doorsID) {
+            try {
+                const entity = this.getEntity(entityID);
+                if (entity instanceof Door) {
+                    entity.unlock();
+                } else {
+                    throw new Error(`Entity with id ${entityID} is not a door`);
+                }
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+        }
+    }
+
+    doorsLock(doorsID: number[]): void {
+        for (const entityID of doorsID) {
+            try {
+                const entity = this.getEntity(entityID);
+                if (entity instanceof Door) {
+                    entity.lock();
+                } else {
+                    throw new Error(`Entity with id ${entityID} is not a door`);
+                }
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+        }
     }
 }
 
