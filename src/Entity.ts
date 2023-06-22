@@ -10,10 +10,6 @@ export abstract class Entity {
         this.room = room;
     }
 
-    abstract turnoff(): void;
-    abstract turnon(): void;
-    abstract specialCommand(command: string, args?: [any]): Promise<void>;
-
     test() {
         logger.verbose(`Test of ${this.name}`);
     }
@@ -29,31 +25,6 @@ export class Light extends Entity {
     ) {
         super(name, id, room);
         this.hueController = hueController;
-    }
-
-    async specialCommand(command: string, args?: [any]): Promise<void> {
-        switch (command) {
-            case 'lower_luminosity':
-                await this.lower_luminosity();
-                break;
-            case 'set_luminosity':
-                if (args === undefined) {
-                    throw new Error(`Missing argument for command ${command}`);
-                }
-                await this.set_luminosity(args[0]);
-                break;
-            case 'set_color':
-                if (args === undefined) {
-                    throw new Error(`Missing argument for command ${command}`);
-                }
-                await this.set_color(args[0]);
-                break;
-            case 'raise_luminosity':
-                await this.raise_luminosity();
-                break;
-            default:
-                throw new Error(`Command ${command} not supported`);
-        }
     }
 
     async turnoff(): Promise<void> {
@@ -180,59 +151,56 @@ export class TV extends Entity {
     }
 }
 
-export class Speakers extends Entity {
+export class Speaker extends Entity {
     constructor(name: string, public id: number, public room: string) {
         super(name, id, room);
     }
 
-    async specialCommand(command: string, args?: [any]): Promise<void> {
-        switch (command) {
-            case 'set_volume':
-                if (args === undefined) {
-                    throw new Error(`Missing argument for command ${command}`);
-                }
-                await this.set_volume(args[0]);
-                break;
-            case 'lower_volume':
-                await this.lower_volume();
-                break;
-            case 'raise_volume':
-                await this.raise_volume();
-                break;
-            default:
-                throw new Error(`Command ${command} not supported`);
-        }
-    }
-
-    async turnoff(): Promise<void> {
-        console.log(`The speakers ${this.name} in ${this.room} are off.`);
+    async stop(): Promise<void> {
+        console.log(`The speaker ${this.name} in ${this.room} are off.`);
         // Ajoutez ici le code pour éteindre les haut-parleurs
     }
 
-    async turnon(): Promise<void> {
-        console.log(`The speakers ${this.name} in ${this.room} are on.`);
+    async play(url: string): Promise<void> {
+        console.log(`The speaker ${this.name} in ${this.room} play ${url}.`);
         // Ajoutez ici le code pour allumer les haut-parleurs
     }
 
     async set_volume(volume: number): Promise<void> {
         console.log(
-            `The speakers ${this.name} in ${this.room} volume is set to ${volume}.`,
+            `The speaker ${this.name} in ${this.room} volume is set to ${volume}.`,
         );
         // Ajoutez ici le code pour changer le volume
     }
 
     async lower_volume(): Promise<void> {
         console.log(
-            `The speakers ${this.name} in ${this.room} volume is lowered.`,
+            `The speaker ${this.name} in ${this.room} volume is lowered.`,
         );
         // Ajoutez ici le code pour baisser le volume
     }
 
     async raise_volume(): Promise<void> {
         console.log(
-            `The speakers ${this.name} in ${this.room} volume is raised.`,
+            `The speaker ${this.name} in ${this.room} volume is raised.`,
         );
         // Ajoutez ici le code pour augmenter le volume
+    }
+}
+
+export class Door extends Entity {
+    constructor(name: string, public id: number, public room: string) {
+        super(name, id, room);
+    }
+
+    async lock(): Promise<void> {
+        console.log(`The door is open.`);
+        // Ajoutez ici le code pour ouvrir la porte
+    }
+
+    async unlock(): Promise<void> {
+        console.log(`The door is closed.`);
+        // Ajoutez ici le code pour fermer la porte
     }
 }
 
@@ -263,14 +231,12 @@ export async function initEntitiesFromJson(
             logger.info(`Light '${light.name}' in ${light.room} added`);
         },
     );
-    entities.speakers.forEach(
-        (speakers: { name: string; id: number; room: string }) => {
+    entities.speaker.forEach(
+        (speaker: { name: string; id: number; room: string }) => {
             entitiesArray.push(
-                new Speakers(speakers.name, speakers.id, speakers.room),
+                new Speaker(speaker.name, speaker.id, speaker.room),
             );
-            logger.info(
-                `Speakers '${speakers.name}' in ${speakers.room} added`,
-            );
+            logger.info(`Speaker '${speaker.name}' in ${speaker.room} added`);
         },
     );
     entities.devices.forEach(
@@ -316,9 +282,9 @@ export async function initEntitiesFromAPI(
     const speakersArray = [] as Entity[];
     speakers.forEach((speaker: any) => {
         speakersArray.push(
-            new Speakers(speaker.name, speaker.host, 'Living room'),
+            new Speaker(speaker.name, speaker.host, 'Living room'),
         );
-        logger.info(`Speakers '${speaker.name}' in Living room added`);
+        logger.info(`Speaker '${speaker.name}' in Living room added`);
     });
 
     // Attendez que toutes les Promesses soient résolues
