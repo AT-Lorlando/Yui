@@ -1,4 +1,8 @@
-import { Configuration, OpenAIApi } from 'openai';
+import {
+    ChatCompletionResponseMessage,
+    Configuration,
+    OpenAIApi,
+} from 'openai';
 import { logger } from './logger';
 import env from './env';
 import CommandExecutor from './CommandExecutor';
@@ -11,11 +15,10 @@ interface FunctionType {
     arguments: string[];
 }
 
-class gpt3Request {
-    configuration: any;
-    openai: any;
-    testOrder: any;
-    commandExecutor: any;
+class GPTQueryLauncher {
+    configuration!: Configuration;
+    openai!: OpenAIApi;
+    commandExecutor!: CommandExecutor;
 
     async init(commandExecutor: CommandExecutor): Promise<void> {
         this.configuration = new Configuration({
@@ -29,19 +32,8 @@ class gpt3Request {
         logger.debug('GPT3Request fetchGPT');
         const response = await this.openai.createChatCompletion(config);
         console.log(response.data.choices);
-        return response.data.choices[0].message as {
-            index: number;
-            user: string;
-            message: {
-                role: string;
-                content: string | null;
-                function_call: {
-                    name: string;
-                    args: any;
-                } | null;
-            };
-            finish_reason: string;
-        };
+        return response.data.choices[0]
+            .message as ChatCompletionResponseMessage;
     }
 
     private async fetchCommandFunctions(text: string): Promise<any> {
@@ -248,7 +240,7 @@ class gpt3Request {
 
         const message = await this.fetchGPT(config35).catch((err: any) => {
             logger.error(
-                `Error during a request of gpt3Request: ${err}` +
+                `Error during a request of GPTQueryLauncher: ${err}` +
                     ` Order : ${text}`,
             );
             logger.error(err.response.data);
@@ -266,7 +258,7 @@ class gpt3Request {
                 logger.info(message.content);
             }
         } catch (err) {
-            logger.error('Error during a request of gpt3Request');
+            logger.error('Error during a request of GPTQueryLauncher');
             console.log(err);
         }
     }
@@ -355,7 +347,9 @@ class gpt3Request {
 
         const responseMessage = await await this.fetchGPT(config).catch(
             (err: any) => {
-                logger.error(`Error during a request of gpt3Request: ${err}`);
+                logger.error(
+                    `Error during a request of GPTQueryLauncher: ${err}`,
+                );
                 logger.error(err.response.data);
             },
         );
@@ -386,4 +380,4 @@ class gpt3Request {
     }
 }
 
-export default gpt3Request;
+export default GPTQueryLauncher;

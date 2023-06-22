@@ -1,20 +1,22 @@
-// Importez les classes d'entités
 import { Entity, Light, Speaker, Door } from './Entity';
 import { logger } from './logger';
 import http from 'http';
 import env from './env';
-import gpt3Request from './GPT3Request';
+import GPTQueryLauncher from './GPTQueryLauncher';
 class CommandExecutor {
     entities: Entity[];
-    gpt3Request: gpt3Request | undefined;
+    GPTQueryLauncher!: GPTQueryLauncher;
 
     constructor() {
         this.entities = [];
     }
 
-    async init(entities: Entity[], gpt3Request: gpt3Request): Promise<void> {
+    async init(
+        entities: Entity[],
+        GPTQueryLauncher: GPTQueryLauncher,
+    ): Promise<void> {
         this.entities = entities;
-        this.gpt3Request = gpt3Request;
+        this.GPTQueryLauncher = GPTQueryLauncher;
     }
 
     private getEntity(entityID: number): Entity {
@@ -83,10 +85,10 @@ class CommandExecutor {
     }
 
     public evalCommandFromOrder(command: string): void {
-        if (this.gpt3Request == undefined) {
+        if (this.GPTQueryLauncher == undefined) {
             throw new Error('GPT3Request is not initialized');
         }
-        this.gpt3Request.evalCommandFromOrder(command);
+        this.GPTQueryLauncher.evalCommandFromOrder(command);
     }
 
     lightsTurnOn(entitiesID: number[]): void {

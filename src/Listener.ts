@@ -8,8 +8,8 @@ import { logger } from './logger';
 import env from './env';
 
 export default class Listener {
-    private commandExecutor: CommandExecutor | undefined;
-    private spotifyController: SpotifyController | undefined;
+    private commandExecutor!: CommandExecutor;
+    private spotifyController!: SpotifyController;
 
     async init(
         commandExecutor: CommandExecutor,
