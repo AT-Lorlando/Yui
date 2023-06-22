@@ -1,7 +1,7 @@
 import { logger, testLogger } from './logger';
 import { initEntitiesFromAPI } from './Entity';
 import CommandExecutor from './CommandExecutor';
-import GPT3Request from './GPT3Request';
+import GPTQueryLauncher from './GPTQueryLauncher';
 import HueController from './HueController';
 import SpotifyController from './SpotifyController';
 import Listener from './Listener';
@@ -13,7 +13,7 @@ async function main() {
 
     // const commandRecognition = new CommandRecognition();
     const commandExecutor = new CommandExecutor();
-    const gpt3Request = new GPT3Request();
+    const GPTQL = new GPTQueryLauncher();
     const hueController = new HueController();
     const spotifyController = new SpotifyController();
     const listener = new Listener();
@@ -59,18 +59,16 @@ async function main() {
     //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
     // });
 
-    await commandExecutor.init(entities, gpt3Request).catch((error) => {
+    await commandExecutor.init(entities, GPTQL).catch((error) => {
         logger.error(
             `Error during the initialisation of CommandExecutor: ${error}`,
         );
         throw new Error('Error during the initialisation of CommandExecutor');
     });
 
-    await gpt3Request.init(commandExecutor, entities).catch((error) => {
-        logger.error(
-            `Error during the initialisation of gpt3Request: ${error}`,
-        );
-        throw new Error('Error during the initialisation of gpt3Request');
+    await GPTQL.init(commandExecutor).catch((error) => {
+        logger.error(`Error during the initialisation of GPTQL: ${error}`);
+        throw new Error('Error during the initialisation of GPTQL');
     });
 
     logger.info('Initialisation of the "Yui" application completed');
