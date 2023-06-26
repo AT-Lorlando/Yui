@@ -76,9 +76,9 @@ if (env.NODE_ENV === 'production') {
 }
 
 export function testLogger() {
-    logger.info('Information message');
-    logger.verbose('Success message');
-    logger.warn('Warning message');
-    logger.error('Error message');
-    logger.debug('Debug message');
+    logger.info('[TEST] Information message');
+    logger.verbose('[TEST] Success message');
+    logger.warn('[TEST] Warning message');
+    logger.error('[TEST] Error message');
+    logger.debug('[TEST] Debug message');
 }
