@@ -5,6 +5,7 @@ import CommandExecutor from './CommandExecutor';
 import { logger } from './logger';
 import env from './env';
 import axios from 'axios';
+import https from 'https';
 
 const BBOX_PASSWORD = env.BBOX_PASSWORD;
 const PHONE_MAC_ADDRESS = env.PHONE_MAC_ADDRESS;
@@ -131,10 +132,19 @@ export default class Listener {
     }
 
     async isPhoneConnected() {
-        const loginResponse = await axios.post(
-            'https://mabbox.bytel.fr/api/v1/login',
-            `password=${BBOX_PASSWORD}`,
-        );
+        const agent = new https.Agent({
+            rejectUnauthorized: false,
+        });
+        const loginResponse = await axios
+            .post(
+                'https://mabbox.bytel.fr/api/v1/login',
+                `password=${BBOX_PASSWORD}`,
+                { httpsAgent: agent },
+            )
+            .catch((error) => {
+                logger.error(`Failed to login to Bbox API: ${error}`);
+                return error.response;
+            });
 
         if (loginResponse.status !== 200) {
             throw new Error('Failed to login to Bbox API');
