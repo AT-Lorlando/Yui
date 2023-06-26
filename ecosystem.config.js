@@ -2,12 +2,11 @@ module.exports = {
     apps: [
       {
         name: 'Yui',
-        script: 'npm run start',
+        script: 'npx ts-node src/main.ts',
         env: {
           NODE_ENV: 'production',
+          LOG_LEVEL: 'info',
         },
-        autorestart: true,
-        watch: true,
       },
     ],
   };
