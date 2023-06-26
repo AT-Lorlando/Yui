@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "npx ts-node src/main.ts",
     "debug": "LOG_LEVEL=debug npx ts-node src/main.ts",
-    "start": "LOG_LEVEL=silly npx ts-node src/main.ts",
+    "start": "LOG_LEVEL=info npx ts-node src/main.ts",
     "format": "prettier --write \"**/*.ts\"",
     "format:check": "prettier --check \"**/*.ts\"",
     "lint:check": "eslint \"**/*.ts\"",
