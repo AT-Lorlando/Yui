@@ -13,6 +13,7 @@ export interface Env {
     SPOTIFY_CLIENT_SECRET: string;
     SPOTIFY_REDIRECT_URI: string;
     PHONE_MAC_ADDRESS: string;
+    BBOX_PASSWORD: string;
 }
 
 export const env: Env = {
@@ -32,6 +33,7 @@ export const env: Env = {
         .SPOTIFY_REDIRECT_URI as Env['SPOTIFY_REDIRECT_URI'],
     PHONE_MAC_ADDRESS: process.env
         .PHONE_MAC_ADDRESS as Env['PHONE_MAC_ADDRESS'],
+    BBOX_PASSWORD: process.env.BBOX_PASSWORD as Env['BBOX_PASSWORD'],
 };
 
 export default env;

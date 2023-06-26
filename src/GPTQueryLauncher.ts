@@ -21,11 +21,16 @@ class GPTQueryLauncher {
     commandExecutor!: CommandExecutor;
 
     async init(commandExecutor: CommandExecutor): Promise<void> {
-        this.configuration = new Configuration({
-            apiKey: env.OPENAI_API_KEY,
-        });
-        this.openai = new OpenAIApi(this.configuration);
-        this.commandExecutor = commandExecutor;
+        try {
+            this.configuration = new Configuration({
+                apiKey: env.OPENAI_API_KEY,
+            });
+            this.openai = new OpenAIApi(this.configuration);
+            this.commandExecutor = commandExecutor;
+        } catch (error) {
+            logger.error(`Error during the initialisation of GPTQL: ${error}`);
+            throw new Error('Error during the initialisation of GPTQL');
+        }
     }
 
     private async fetchGPT(config: any): Promise<any> {
