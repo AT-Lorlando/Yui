@@ -26,7 +26,7 @@ export default class SpotifyController {
                         refreshToken,
                     );
                     this.spotifyApi.setAccessToken(access_token);
-                    logger.info('Yui is now authorized');
+                    logger.info('Yui is now authorized from refresh token');
                 } catch (error) {
                     logger.error('Error refreshing access token:', error);
                 }
@@ -53,6 +53,7 @@ export default class SpotifyController {
                 'Error during the initialisation of SpotifyController',
             );
         }
+        this.getActiveDevice();
     }
 
     private generateAuthorizeUrl(
@@ -236,6 +237,7 @@ export default class SpotifyController {
         try {
             const response = await this.spotifyApi.getMyDevices();
             const devices = response.body.devices;
+            console.log(devices);
             const activeDevice = devices.find((device) => device.is_active);
             return activeDevice;
         } catch (error) {
