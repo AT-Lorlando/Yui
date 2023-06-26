@@ -1,25 +1,30 @@
 import express from 'express';
 import * as bodyParser from 'body-parser';
 import * as fs from 'fs';
-import * as wifi from 'node-wifi';
 import CommandExecutor from './CommandExecutor';
-import SpotifyController from './SpotifyController';
 import { logger } from './logger';
 import env from './env';
+import axios from 'axios';
+
+const BBOX_PASSWORD = env.BBOX_PASSWORD;
+const PHONE_MAC_ADDRESS = env.PHONE_MAC_ADDRESS;
+const PHONE_CHECK_INTERVAL = 10;
 
 export default class Listener {
     private commandExecutor!: CommandExecutor;
-    private spotifyController!: SpotifyController;
 
-    async init(
-        commandExecutor: CommandExecutor,
-        spotifyController: SpotifyController,
-    ): Promise<void> {
-        this.commandExecutor = commandExecutor;
-        this.spotifyController = spotifyController;
-
-        await this.listenOnWeb();
-        await this.listenOnStdin();
+    async init(commandExecutor: CommandExecutor): Promise<void> {
+        try {
+            this.commandExecutor = commandExecutor;
+            await this.listenOnWeb();
+            await this.listenOnStdin();
+            await this.monitorUserPresence();
+        } catch (error) {
+            logger.error(
+                `Error during the initialisation of Listener: ${error}`,
+            );
+            throw new Error('Error during the initialisation of Listener');
+        }
     }
 
     private async listenOnWeb(): Promise<void> {
@@ -72,7 +77,6 @@ export default class Listener {
                             logger.info('Going back home');
                             res.status(200).send('Going back home');
                             this.commandExecutor.backHome();
-                            this.waitForPhone();
                             break;
                         case 'leavehome':
                             logger.info('Leaving home');
@@ -94,24 +98,8 @@ export default class Listener {
             app.get('/', (req: any, res: any) => {
                 res.status(200).send('Yui is up and running');
                 console.log(req.query.code);
-
                 if (req.query.code) {
-                    if (this.spotifyController === undefined) {
-                        throw new Error('SpotifyController is undefined');
-                    }
-                    this.spotifyController
-                        .exchangeAuthorizationCode(req.query.code)
-                        .then(({ accessToken, refreshToken }) => {
-                            if (this.spotifyController === undefined) {
-                                throw new Error(
-                                    'SpotifyController is undefined',
-                                );
-                            }
-                            this.spotifyController.saveRefreshToken(
-                                refreshToken,
-                            );
-                            this.spotifyController.setAccessToken(accessToken);
-                        });
+                    this.commandExecutor.spotifyAuth(req.query.code);
                 }
             });
 
@@ -142,71 +130,77 @@ export default class Listener {
         });
     }
 
-    async detectPhone(phoneMacAddress: string, timeout = 30): Promise<void> {
-        return new Promise(async (resolve, reject) => {
-            wifi.init({
-                iface: null, // iface à utiliser si vous avez plusieurs interfaces réseau
-            });
+    async isPhoneConnected() {
+        const loginResponse = await axios.post(
+            'https://mabbox.bytel.fr/api/v1/login',
+            `password=${BBOX_PASSWORD}`,
+        );
 
-            const checkPhoneConnected = async (): Promise<boolean> => {
-                const devices = await wifi.getCurrentConnections();
-                console.log(devices);
-                return devices.some((device) => device.mac === phoneMacAddress);
+        if (loginResponse.status !== 200) {
+            throw new Error('Failed to login to Bbox API');
+        }
+
+        const devicesResponse = await axios.get(
+            'https://mabbox.bytel.fr/api/v1/hosts',
+            {
+                headers: {
+                    Cookie: loginResponse.headers['set-cookie'],
+                },
+            },
+        );
+
+        if (devicesResponse.status !== 200) {
+            throw new Error('Failed to fetch connected devices from Bbox API');
+        }
+
+        // Check if the phone is connected
+        // console.log(devicesResponse.data[0].hosts.list)
+        const phone = devicesResponse.data[0].hosts.list.find(
+            (device: any) => device.macaddress === PHONE_MAC_ADDRESS,
+        );
+        if (phone) {
+            // we use the "active" field to determine if the phone is connected
+            const isConnected = phone.active === 1;
+            logger.silly(
+                `Phone is ${isConnected ? 'connected' : 'disconnected'}`,
+            );
+            const now = Math.floor(new Date().getTime() / 1000); // current time in seconds since the epoch
+            const lastSeenSeconds = parseInt(phone.lastseen, 10); // second since the epoch
+            const lastSeen = new Date((now - lastSeenSeconds) * 1000); // convert to milliseconds
+            logger.silly(`Last seen: ${lastSeen.toLocaleString()}`);
+            return {
+                isConnected: isConnected,
+                lastSeen: lastSeen,
             };
-
-            const detectWithTimeout = async (): Promise<void> => {
-                const isPhoneConnected = await checkPhoneConnected();
-
-                if (isPhoneConnected) {
-                    resolve();
-                } else {
-                    const timer = setTimeout(async () => {
-                        if (!isPhoneConnected) {
-                            reject(
-                                new Error(
-                                    'Phone not detected within the timeout',
-                                ),
-                            );
-                        }
-                    }, timeout * 1000);
-
-                    while (!isPhoneConnected && timer.refresh) {
-                        await new Promise((r) => setTimeout(r, 1000)); // Attendez 1 seconde
-                    }
-
-                    clearTimeout(timer);
-                }
-            };
-
-            detectWithTimeout();
-        });
+        } else {
+            throw new Error(
+                `Phone with MAC address ${PHONE_MAC_ADDRESS} not found in device list`,
+            );
+        }
     }
 
-    private async waitForPhone() {
-        this.detectPhone(env.PHONE_MAC_ADDRESS)
-            .then(async () => {
-                logger.info('Phone back to home');
-                if (this.spotifyController === undefined) {
-                    throw new Error('SpotifyController is undefined');
-                }
-                if (this.commandExecutor === undefined) {
-                    throw new Error('CommandExecutor is undefined');
-                }
-                if (await this.spotifyController.isPlaying()) {
-                    logger.info('Spotify is playing');
-                    // transfer playback to speaker
-                    const speaker =
-                        (await this.spotifyController.getSpeakerByName(
-                            'Les enceintes',
-                        )) as any;
-                    if (speaker === undefined) {
-                        throw new Error('Speaker not found');
+    async monitorUserPresence() {
+        let { isConnected: wasConnected } = await this.isPhoneConnected();
+        setInterval(async () => {
+            try {
+                const { isConnected, lastSeen } = await this.isPhoneConnected();
+                if (isConnected !== wasConnected) {
+                    if (isConnected) {
+                        logger.info(
+                            `User returned at ${lastSeen.toLocaleString()}`,
+                        );
+                        this.commandExecutor.backHome();
+                    } else {
+                        logger.info(
+                            `User left at ${lastSeen.toLocaleString()}`,
+                        );
+                        this.commandExecutor.leaveHome();
                     }
-                    await this.spotifyController.transferPlayback(speaker.id);
+                    wasConnected = isConnected;
                 }
-            })
-            .catch(() => {
-                // Phone not detected
-            });
+            } catch (error) {
+                logger.error(`Failed to check phone connection: ${error}`);
+            }
+        }, PHONE_CHECK_INTERVAL * 1000);
     }
 }
