@@ -2,12 +2,12 @@ module.exports = {
     apps: [
       {
         name: 'Yui',
-        script: 'main.ts',
-        interpreter: 'node',
-        interpreter_args: '-r ts-node/register/transpile-only',
+        script: 'npm run start',
         env: {
           NODE_ENV: 'production',
         },
+        autorestart: true,
+        watch: true,
       },
     ],
   };
