@@ -1,5 +1,5 @@
 import { logger, testLogger } from './logger';
-import { initEntitiesFromAPI } from './Entity';
+import { initEntities } from './Entity';
 import CommandExecutor from './CommandExecutor';
 import GPTQueryLauncher from './GPTQueryLauncher';
 import HueController from './HueController';
@@ -19,57 +19,16 @@ async function main() {
     const listener = new Listener();
 
     logger.debug('Modules imported');
-
     logger.debug('Modules initialisation');
 
-    await listener.init(commandExecutor, spotifyController).catch((error) => {
-        logger.error(`Error during the initialisation of Listener: ${error}`);
-        throw new Error('Error during the initialisation of Listener');
-    });
+    await spotifyController.init();
+    await hueController.init();
+    const entities = await initEntities(hueController, spotifyController);
+    // await commandRecognition.init()
 
-    await spotifyController.init().catch((error) => {
-        logger.error(
-            `Error during the initialisation of SpotifyController: ${error}`,
-        );
-        throw new Error('Error during the initialisation of SpotifyController');
-    });
-
-    await hueController.init().catch((error) => {
-        logger.error(
-            `Error during the initialisation of HueController: ${error}`,
-        );
-        throw new Error('Error during the initialisation of HueController');
-    });
-
-    const entities = await initEntitiesFromAPI(
-        hueController,
-        spotifyController,
-    ).catch((error) => {
-        logger.error(
-            `Error during the initialisation of entities from API: ${error}`,
-        );
-        throw new Error('Error during the initialisation of entities from API');
-    });
-
-    if (entities === undefined || entities.length === 0) {
-        throw new Error('Entities are undefined');
-    }
-
-    // await commandRecognition.init().catch((error) => {
-    //     logger.error(`Error during the initialisation of commandRecognition: ${error}`);
-    // });
-
-    await commandExecutor.init(entities, GPTQL).catch((error) => {
-        logger.error(
-            `Error during the initialisation of CommandExecutor: ${error}`,
-        );
-        throw new Error('Error during the initialisation of CommandExecutor');
-    });
-
-    await GPTQL.init(commandExecutor).catch((error) => {
-        logger.error(`Error during the initialisation of GPTQL: ${error}`);
-        throw new Error('Error during the initialisation of GPTQL');
-    });
+    await commandExecutor.init(entities, spotifyController, GPTQL);
+    await GPTQL.init(commandExecutor);
+    await listener.init(commandExecutor);
 
     logger.info('Initialisation of the "Yui" application completed');
 }

@@ -18,33 +18,40 @@ export default class SpotifyController {
     }
 
     public async init(): Promise<void> {
-        const refreshToken = await this.loadRefreshToken();
-        if (refreshToken !== null) {
-            try {
-                const access_token = await this.refreshAccessToken(
-                    refreshToken,
+        try {
+            const refreshToken = await this.loadRefreshToken();
+            if (refreshToken !== null) {
+                try {
+                    const access_token = await this.refreshAccessToken(
+                        refreshToken,
+                    );
+                    this.spotifyApi.setAccessToken(access_token);
+                    logger.info('Yui is now authorized');
+                } catch (error) {
+                    logger.error('Error refreshing access token:', error);
+                }
+            } else {
+                const clientId = env.SPOTIFY_CLIENT_ID;
+                const redirectUri = env.SPOTIFY_REDIRECT_URI;
+                const scopes = [
+                    'app-remote-control',
+                    'user-modify-playback-state',
+                    'user-read-playback-state',
+                ];
+                const authorizeUrl = this.generateAuthorizeUrl(
+                    clientId,
+                    redirectUri,
+                    scopes,
                 );
-                this.spotifyApi.setAccessToken(access_token);
+                logger.info(`Please go to ${authorizeUrl} and authorize Yui`);
+                await this.isAuthorized();
                 logger.info('Yui is now authorized');
-            } catch (error) {
-                logger.error('Error refreshing access token:', error);
             }
-        } else {
-            const clientId = env.SPOTIFY_CLIENT_ID;
-            const redirectUri = env.SPOTIFY_REDIRECT_URI;
-            const scopes = [
-                'app-remote-control',
-                'user-modify-playback-state',
-                'user-read-playback-state',
-            ];
-            const authorizeUrl = this.generateAuthorizeUrl(
-                clientId,
-                redirectUri,
-                scopes,
+        } catch (error) {
+            logger.error('Error initializing SpotifyController:', error);
+            throw new Error(
+                'Error during the initialisation of SpotifyController',
             );
-            logger.info(`Please go to ${authorizeUrl} and authorize Yui`);
-            await this.isAuthorized();
-            logger.info('Yui is now authorized');
         }
     }
 
