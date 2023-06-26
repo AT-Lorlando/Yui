@@ -18,7 +18,14 @@ export default class HueController {
     }
 
     async init() {
-        await this.connect();
+        try {
+            await this.connect();
+        } catch (error) {
+            logger.error(
+                `Error during the initialisation of HueController: ${error}`,
+            );
+            throw new Error('Error during the initialisation of HueController');
+        }
     }
 
     async connect() {

@@ -212,7 +212,7 @@ export async function testEntities(entities: Entity[]) {
     });
 }
 
-export async function initEntitiesFromJson(
+async function initEntitiesFromJson(
     hueController: HueController,
 ): Promise<Entity[]> {
     // Read from entities.json and create the entities
@@ -249,11 +249,13 @@ export async function initEntitiesFromJson(
             }
         },
     );
-
+    if (entitiesArray === undefined || entitiesArray.length === 0) {
+        throw new Error('Entities are undefined');
+    }
     return entitiesArray;
 }
 
-export async function initEntitiesFromAPI(
+async function initEntitiesFromAPI(
     hueController: HueController,
     spotifyController: SpotifyController,
 ): Promise<Entity[]> {
@@ -293,6 +295,27 @@ export async function initEntitiesFromAPI(
     const entitiesArray: Entity[] = [];
 
     entitiesArray.push(...lightsArray, ...speakersArray);
-
+    if (entitiesArray === undefined || entitiesArray.length === 0) {
+        throw new Error('Entities are undefined');
+    }
     return entitiesArray;
+}
+
+export async function initEntities(
+    hueController: HueController,
+    spotifyController: SpotifyController,
+    fromAPI = true,
+) {
+    try {
+        if (fromAPI) {
+            return await initEntitiesFromAPI(hueController, spotifyController);
+        } else {
+            return await initEntitiesFromJson(hueController);
+        }
+    } catch (error) {
+        logger.error(
+            `Error during the initialisation of entities from API: ${error}`,
+        );
+        throw new Error('Error during the initialisation of entities from API');
+    }
 }
