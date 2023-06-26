@@ -3,9 +3,12 @@ import { logger } from './logger';
 import http from 'http';
 import env from './env';
 import GPTQueryLauncher from './GPTQueryLauncher';
+import SpotifyController from './SpotifyController';
+
 class CommandExecutor {
     entities: Entity[];
     GPTQueryLauncher!: GPTQueryLauncher;
+    private spotifyController!: SpotifyController;
 
     constructor() {
         this.entities = [];
@@ -13,10 +16,21 @@ class CommandExecutor {
 
     async init(
         entities: Entity[],
+        spotifyController: SpotifyController,
         GPTQueryLauncher: GPTQueryLauncher,
     ): Promise<void> {
-        this.entities = entities;
-        this.GPTQueryLauncher = GPTQueryLauncher;
+        try {
+            this.entities = entities;
+            this.GPTQueryLauncher = GPTQueryLauncher;
+            this.spotifyController = spotifyController;
+        } catch (error) {
+            logger.error(
+                `Error during the initialisation of CommandExecutor: ${error}`,
+            );
+            throw new Error(
+                'Error during the initialisation of CommandExecutor',
+            );
+        }
     }
 
     private getEntity(entityID: number): Entity {
@@ -25,6 +39,21 @@ class CommandExecutor {
             throw new Error(`Entity with id ${entityID} not found`);
         }
         return entity;
+    }
+
+    async spotifyAuth(code: string): Promise<void> {
+        if (this.spotifyController === undefined) {
+            throw new Error('SpotifyController is undefined');
+        }
+        this.spotifyController
+            .exchangeAuthorizationCode(code)
+            .then(({ accessToken, refreshToken }) => {
+                if (this.spotifyController === undefined) {
+                    throw new Error('SpotifyController is undefined');
+                }
+                this.spotifyController.saveRefreshToken(refreshToken);
+                this.spotifyController.setAccessToken(accessToken);
+            });
     }
 
     getEntities(): { name: string; id: number; room: string; type: string }[] {
@@ -54,6 +83,19 @@ class CommandExecutor {
                 const light = this.getEntity(lightID) as Light;
                 await light.turnon();
                 await light.set_luminosity(100);
+            }
+            if (this.spotifyController === undefined) {
+                throw new Error('SpotifyController is undefined');
+            }
+            if (await this.spotifyController.isPlaying()) {
+                logger.info('Spotify is playing');
+                const speaker = (await this.spotifyController.getSpeakerByName(
+                    'Les enceintes',
+                )) as any;
+                if (speaker === undefined) {
+                    throw new Error('Speaker not found');
+                }
+                await this.spotifyController.transferPlayback(speaker.id);
             }
         } catch (error) {
             logger.error(`Error when back home: ${error}`);
