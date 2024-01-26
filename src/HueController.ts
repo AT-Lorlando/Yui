@@ -251,20 +251,78 @@ export default class HueController {
                 throw error;
             });
 
-            const hue = parseInt(color, 16);
-            const sat = 100;
+            function hexToRgb(hex: string) {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(
+                    hex,
+                );
+                if (result === null) {
+                    throw new Error('Error converting hex to RGB');
+                }
+                return {
+                    r: parseInt(result[1], 16),
+                    g: parseInt(result[2], 16),
+                    b: parseInt(result[3], 16),
+                };
+            }
 
+            function rgbToHueSat(rgb: { r: number; g: number; b: number }) {
+                const r = rgb.r / 255;
+                const g = rgb.g / 255;
+                const b = rgb.b / 255;
+
+                const max = Math.max(r, g, b),
+                    min = Math.min(r, g, b);
+                let h,
+                    s = (max + min) / 2;
+                const l = s;
+                if (max === min) {
+                    h = s = 0; // achromatic
+                } else {
+                    const d = max - min;
+                    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                    switch (max) {
+                        case r:
+                            h = (g - b) / d + (g < b ? 6 : 0);
+                            break;
+                        case g:
+                            h = (b - r) / d + 2;
+                            break;
+                        case b:
+                            h = (r - g) / d + 4;
+                            break;
+                    }
+                    if (h === undefined) {
+                        throw new Error('Error converting RGB to HSL');
+                    }
+                    h /= 6;
+                }
+
+                return {
+                    hue: Math.round(h * 65535),
+                    sat: Math.round(s * 254),
+                };
+            }
+            const newColor = rgbToHueSat(hexToRgb(color));
+            const hue = newColor.hue;
+            const sat = newColor.sat;
+            logger.debug(`Hue: ${hue}, Sat: ${sat}`);
             const lightState = new v3.lightStates.LightState()
                 .on()
                 .hue(hue)
                 .sat(sat);
-
-            await this.api.lights.setLightState(lightId, lightState);
+            logger.info(
+                `Call api with lightId: ${lightId}, lightState: ${lightState}`,
+            );
+            await this.api.lights
+                .setLightState(lightId, lightState)
+                .catch((error: any) => {
+                    throw error;
+                });
             logger.info(`Light ${lightId} color set to ${color}`);
         } catch (error: any) {
             logger.error(
                 `Error setting light color for light ${lightId}:`,
-                error.message,
+                error,
             );
         }
     }

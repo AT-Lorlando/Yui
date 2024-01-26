@@ -36,7 +36,8 @@ class GPTQueryLauncher {
     private async fetchGPT(config: any): Promise<any> {
         logger.debug('GPT3Request fetchGPT');
         const response = await this.openai.createChatCompletion(config);
-        console.log(response.data.choices);
+        logger.info('GPTQL: GPT3Request respond');
+        logger.info(response.data.choices);
         return response.data.choices[0]
             .message as ChatCompletionResponseMessage;
     }
@@ -245,7 +246,7 @@ class GPTQueryLauncher {
 
         const message = await this.fetchGPT(config35).catch((err: any) => {
             logger.error(
-                `Error during a request of GPTQueryLauncher: ${err}` +
+                `GPTQL: Error during a request of GPTQueryLauncher: ${err}` +
                     ` Order : ${text}`,
             );
             logger.error(err.response.data);
@@ -256,15 +257,19 @@ class GPTQueryLauncher {
         try {
             if (message.function_call) {
                 const analyse = await this.analyseFunction(config35, message);
-                logger.info('GPT3Request respond to ' + text.replace('\n', ''));
+                logger.info(
+                    'GPTQL: GPT3Request respond to ' + text.replace('\n', ''),
+                );
                 logger.info(analyse.content);
             } else {
-                logger.info('GPT3Request respond to ' + text.replace('\n', ''));
+                logger.info(
+                    'GPTQL: GPT3Request respond to ' + text.replace('\n', ''),
+                );
                 logger.info(message.content);
             }
         } catch (err) {
-            logger.error('Error during a request of GPTQueryLauncher');
-            console.log(err);
+            logger.error('GPTQL: Error during a request of GPTQueryLauncher');
+            logger.error(err);
         }
     }
 
@@ -340,6 +345,11 @@ class GPTQueryLauncher {
                     ? JSON.stringify(functionReturn)
                     : 'null',
             };
+            logger.debug(
+                `GPT need function ${functionName} and returned ${JSON.stringify(
+                    functionReturn,
+                )}`,
+            );
             config.messages.push(message);
             config.messages.push(return_message);
         } catch (err) {
@@ -350,7 +360,7 @@ class GPTQueryLauncher {
             return;
         }
 
-        const responseMessage = await await this.fetchGPT(config).catch(
+        const responseMessage = await this.fetchGPT(config).catch(
             (err: any) => {
                 logger.error(
                     `Error during a request of GPTQueryLauncher: ${err}`,
@@ -367,8 +377,7 @@ class GPTQueryLauncher {
 
     async evalCommandFromOrder(text: string) {
         logger.info(
-            'Get command with request to GPT3Request : ' +
-                text.replace('\n', ''),
+            'GPTQL: Fetching a command from order : ' + text.replace('\n', ''),
         );
         await this.fetchCommandFunctions(text);
     }
