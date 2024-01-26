@@ -227,9 +227,8 @@ export default class SpotifyController {
         try {
             const response = await this.spotifyApi.getMyCurrentPlaybackState();
             return response.body.is_playing;
-        } catch (error) {
-            console.error('Error getting current playback state:', error);
-            return false;
+        } catch (error: any) {
+            throw new Error('Error getting playback state', error);
         }
     }
 
@@ -240,9 +239,8 @@ export default class SpotifyController {
             console.log(devices);
             const activeDevice = devices.find((device) => device.is_active);
             return activeDevice;
-        } catch (error) {
-            console.error('Error getting active device:', error);
-            return undefined;
+        } catch (error: any) {
+            throw new Error('Error getting active device', error);
         }
     }
 
@@ -250,8 +248,8 @@ export default class SpotifyController {
         logger.info(`Transferring playback to device: ${deviceId}`);
         try {
             await this.spotifyApi.transferMyPlayback([deviceId]);
-        } catch (error) {
-            console.error('Error transferring playback:', error);
+        } catch (error: any) {
+            throw new Error('Error transferring playback', error);
         }
     }
 

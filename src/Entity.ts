@@ -228,7 +228,9 @@ async function initEntitiesFromJson(
             entitiesArray.push(
                 new Light(light.name, light.id, light.room, hueController),
             );
-            logger.info(`Light '${light.name}' in ${light.room} added`);
+            logger.info(
+                `Entities Initialisation: Light '${light.name}' in ${light.room} added`,
+            );
         },
     );
     entities.speaker.forEach(
@@ -236,14 +238,18 @@ async function initEntitiesFromJson(
             entitiesArray.push(
                 new Speaker(speaker.name, speaker.id, speaker.room),
             );
-            logger.info(`Speaker '${speaker.name}' in ${speaker.room} added`);
+            logger.info(
+                `Entities Initialisation: Speaker '${speaker.name}' in ${speaker.room} added`,
+            );
         },
     );
     entities.devices.forEach(
         (device: { name: string; id: number; room: string; type: string }) => {
             if (device.type === 'TV') {
                 entitiesArray.push(new TV(device.name, device.id, device.room));
-                logger.info(`TV '${device.name}' in ${device.room} added`);
+                logger.info(
+                    `Entities Initialisation: TV '${device.name}' in ${device.room} added`,
+                );
             } else {
                 logger.error(`Unknown device type: ${device.name}`);
             }
@@ -273,7 +279,9 @@ async function initEntitiesFromAPI(
                         group.name,
                         hueController,
                     );
-                    logger.info(`Light '${light.name}' in ${group.name} added`);
+                    logger.info(
+                        `Entities Initialisation: Light '${light.name}' in ${group.name} added`,
+                    );
                     return newLight;
                 }),
             );
@@ -286,7 +294,9 @@ async function initEntitiesFromAPI(
         speakersArray.push(
             new Speaker(speaker.name, speaker.host, 'Living room'),
         );
-        logger.info(`Speaker '${speaker.name}' in Living room added`);
+        logger.info(
+            `Entities Initialisation: Speaker '${speaker.name}' in Living room added`,
+        );
     });
 
     // Attendez que toutes les Promesses soient résolues

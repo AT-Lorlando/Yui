@@ -71,7 +71,9 @@ export default class Listener {
                     return;
                 }
                 const command = req.body.command;
-                logger.info(`Received command ${command.replace('\n', '')}`);
+                logger.info(
+                    `WEB Listener: Received order ${command.replace('\n', '')}`,
+                );
                 try {
                     switch (command) {
                         case 'backhome':
@@ -86,7 +88,7 @@ export default class Listener {
                             break;
                         default:
                             this.commandExecutor.evalCommandFromOrder(command);
-                            res.status(200).send('Command received');
+                            res.status(200).send('Order received');
                             return;
                     }
                 } catch (error: any) {
@@ -97,7 +99,10 @@ export default class Listener {
             });
 
             app.get('/', (req: any, res: any) => {
-                res.status(200).send('Yui is up and running');
+                // send assets/index.html
+                res.status(200).sendFile('assets/index.html', {
+                    root: __dirname,
+                });
                 console.log(req.query.code);
                 if (req.query.code) {
                     this.commandExecutor.spotifyAuth(req.query.code);
@@ -118,14 +123,16 @@ export default class Listener {
         process.stdin.setEncoding('utf8');
         process.stdin.on('data', (text: string) => {
             if (this.commandExecutor === undefined) {
-                throw new Error('CommandExecutor is undefined');
+                throw new Error('STDIN Listener: CommandExecutor is undefined');
             }
-            logger.info(`Received command ${text.replace('\n', '')}`);
+            logger.info(
+                `STDIN Listener: Received order ${text.replace('\n', '')}`,
+            );
             try {
                 this.commandExecutor.evalCommandFromOrder(text);
             } catch (error) {
                 logger.error(
-                    `Error during the execution of the command: ${error}`,
+                    `STDIN Listener: Error during the execution of the command: ${error}`,
                 );
             }
         });
