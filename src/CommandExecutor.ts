@@ -9,6 +9,7 @@ class CommandExecutor {
     entities: Entity[];
     GPTQueryLauncher!: GPTQueryLauncher;
     private spotifyController!: SpotifyController;
+    private timedEvents: { time: number; callback: () => void }[] = [];
 
     constructor() {
         this.entities = [];
@@ -31,6 +32,8 @@ class CommandExecutor {
                 'Error during the initialisation of CommandExecutor',
             );
         }
+
+        setInterval(() => this.timedCycle(), 1000);
     }
 
     private getEntity(entityID: number): Entity {
@@ -133,7 +136,45 @@ class CommandExecutor {
         this.GPTQueryLauncher.evalCommandFromOrder(command);
     }
 
+    private timedCycle(): void {
+        const now = Date.now();
+        logger.silly(`Timed cycle at ${now}`);
+        logger.silly(`Timed events: ${this.timedEvents.length}`);
+        for (const event of this.timedEvents) {
+            logger.silly(`Event at ${event.time}`);
+            if (now >= event.time) {
+                logger.silly('Event triggered');
+                try {
+                    event.callback();
+                    this.timedEvents.splice(this.timedEvents.indexOf(event), 1);
+                } catch (error: any) {
+                    logger.error(error.message);
+                }
+            }
+        }
+    }
+
+    addTimedEvent(
+        time: number,
+        callback: (...args: any[]) => void,
+        ...args: any[]
+    ): void {
+        const now = Date.now();
+        console.log(now);
+        console.log(time);
+        logger.silly(`Adding timed event at ${now + time}`);
+        this.timedEvents.push({
+            time: now + time,
+            callback: () => callback(...args),
+        });
+    }
+
+    getTimestamp(): number {
+        return Date.now();
+    }
+
     lightsTurnOn(entitiesID: number[]): void {
+        logger.info(`Turning on lights ${entitiesID}`);
         for (const entityID of entitiesID) {
             try {
                 const entity = this.getEntity(entityID);
@@ -151,6 +192,7 @@ class CommandExecutor {
     }
 
     lightsTurnOff(entitiesID: number[]): void {
+        logger.info(`Turning off lights ${entitiesID}`);
         for (const entityID of entitiesID) {
             try {
                 const entity = this.getEntity(entityID);

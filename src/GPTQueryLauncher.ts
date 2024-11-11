@@ -44,13 +44,15 @@ class GPTQueryLauncher {
 
     private async fetchCommandFunctions(text: string): Promise<any> {
         const config35 = {
-            model: 'gpt-3.5-turbo-0613',
+            model: 'gpt-4',
             messages: [
                 {
                     role: 'system',
                     content: `Tu es Yui, un assistant vocal destiné à comprendre les différents ordres qui lui sont donnés. Tu es capable de contrôler des appareils électriques, des lumières, des volets, etc.
                     Pour ça, tu reçois un ordre humain, et tu dois trouver la ou les commandes et entités qui correspondent à cet ordre.\nSi la pièce n'est pas spécifié dans l'ordre, essaie de deviner (c'est souvent la chambre).\n
-                    Outre les ordres, tu peux également répondre comme un humain aux questions qui te sont posées.`,
+                    
+                    Si tu obtiens un ordre à prévoir dans le temps, utilise la fonction addTimedEvent(timestamp, function, function_parameters) pour le prévoir, mais n'oublies pas de récupérer les arguments avant ! Par exemple, pour eteindre toutes les lumieres, d'abord récupère les ID avec getEntities, recupere la datepuis: addTimedEvent(10000, {function: lightsTurnOff, parameters: [<result>]}).\n
+                    Outre les ordres, tu peux également répondre comme un humain aux questions qui te sont posées.\nS`,
                 },
                 {
                     role: 'user',
@@ -66,6 +68,43 @@ class GPTQueryLauncher {
                         type: 'object',
                         properties: {},
                         required: [],
+                    },
+                },
+
+                {
+                    name: 'addTimedEvent',
+                    description: 'Add a timed event',
+                    parameters: {
+                        type: 'object',
+                        properties: {
+                            timestamp: {
+                                type: 'number',
+                                description:
+                                    'A timestamp in milliseconds that will be added to the current timestamp to set the time of the event',
+                            },
+                            function_call: {
+                                type: 'object',
+                                description:
+                                    'An object containing the name of the function to call and its parameters',
+                                properties: {
+                                    function: {
+                                        type: 'string',
+                                        description:
+                                            'The name of the function to call',
+                                    },
+                                    parameters: {
+                                        type: 'object',
+                                        description:
+                                            'An object containing the parameters of the function',
+                                    },
+                                },
+                            },
+                        },
+                        required: [
+                            'timestamp',
+                            'function',
+                            'function_parameters',
+                        ],
                     },
                 },
                 {
@@ -249,7 +288,7 @@ class GPTQueryLauncher {
                 `GPTQL: Error during a request of GPTQueryLauncher: ${err}` +
                     ` Order : ${text}`,
             );
-            logger.error(err.response.data);
+            console.log(err.response);
             return;
             // throw err;
         });
@@ -267,17 +306,26 @@ class GPTQueryLauncher {
                 );
                 logger.info(message.content);
             }
-        } catch (err) {
-            logger.error('GPTQL: Error during a request of GPTQueryLauncher');
-            logger.error(err);
+        } catch (err: any) {
+            logger.error('GPTQL: Error during an analyse of GPTQueryLauncher');
+            console.log(err);
         }
     }
 
     async analyseFunction(config: any, message: any): Promise<any> {
+        logger.debug('GPTQL: analyseFunction');
         const availableFunctions = {
             getEntities: {
                 function: this.commandExecutor.getEntities,
                 arguments: [],
+            },
+            getTimestamp: {
+                function: this.commandExecutor.getTimestamp,
+                arguments: [],
+            },
+            addTimedEvent: {
+                function: this.commandExecutor.addTimedEvent,
+                arguments: ['timestamp', 'function', 'parameters'],
             },
             lightsTurnOn: {
                 function: this.commandExecutor.lightsTurnOn,
@@ -325,6 +373,9 @@ class GPTQueryLauncher {
         const functionName = message.function_call.name as string;
         const responseArguments = JSON.parse(message.function_call.arguments);
         const argNames = availableFunctions[functionName].arguments;
+        logger.debug(
+            `GPTQL: analyseFunction: functionName : ${functionName} | responseArguments : ${responseArguments} | argNames : ${argNames}`,
+        );
         const functionCall = availableFunctions[functionName].function;
         const functionArguments = argNames.map(
             (argName) => responseArguments[argName],
@@ -334,6 +385,14 @@ class GPTQueryLauncher {
             logger.debug(
                 `Calling function ${functionName} with arguments ${functionArguments}`,
             );
+            // If it's a timed event, we need to put a pointer to the function
+            if (functionName === 'addTimedEvent') {
+                const callbackName = functionArguments[1].function;
+                const callbackArguments = functionArguments[1].arguments;
+                functionArguments[1] =
+                    availableFunctions[callbackName].function;
+                functionArguments.push(callbackArguments);
+            }
             const functionReturn = await functionCall.apply(
                 this.commandExecutor,
                 functionArguments,
