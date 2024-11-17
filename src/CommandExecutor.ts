@@ -1,4 +1,7 @@
-import { Entity, Light, Speaker, Door } from './Entity';
+import Entity from './Entity/Entity';
+import { Light } from './Entity/Light';
+import { Speaker } from './Entity/Speaker';
+import { Door } from './Entity/Door';
 import { logger } from './logger';
 import http from 'http';
 import env from './env';
