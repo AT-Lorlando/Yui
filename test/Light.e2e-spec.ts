@@ -1,5 +1,5 @@
 import HueController from '../src/HueController';
-import { Light } from '../src/Entity';
+import { Light } from '../src/Entity/Light';
 
 describe('E2E Test', () => {
     let hueController: HueController;
