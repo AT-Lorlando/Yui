@@ -14,6 +14,8 @@ export interface Env {
     SPOTIFY_REDIRECT_URI: string;
     PHONE_MAC_ADDRESS: string;
     BBOX_PASSWORD: string;
+    HOME_LATITUDE: string;
+    HOME_LONGITUDE: string;
 }
 
 export const env: Env = {
@@ -34,6 +36,8 @@ export const env: Env = {
     PHONE_MAC_ADDRESS: process.env
         .PHONE_MAC_ADDRESS as Env['PHONE_MAC_ADDRESS'],
     BBOX_PASSWORD: process.env.BBOX_PASSWORD as Env['BBOX_PASSWORD'],
+    HOME_LATITUDE: process.env.HOME_LATITUDE as Env['HOME_LATITUDE'],
+    HOME_LONGITUDE: process.env.HOME_LONGITUDE as Env['HOME_LONGITUDE'],
 };
 
 export default env;
