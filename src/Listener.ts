@@ -2,7 +2,7 @@ import express from 'express';
 import * as bodyParser from 'body-parser';
 import * as fs from 'fs';
 import CommandExecutor from './CommandExecutor';
-import { logger } from './logger';
+import Logger from './Logger';
 import env from './env';
 import cors from 'cors';
 
@@ -23,7 +23,7 @@ export default class Listener {
             await this.listenOnWeb();
             await this.listenOnStdin();
         } catch (error) {
-            logger.error(
+            Logger.error(
                 `Error during the initialisation of Listener: ${error}`,
             );
             throw new Error('Error during the initialisation of Listener');
@@ -42,8 +42,8 @@ export default class Listener {
     private checkPassword(bearer: string | undefined, ip: string): boolean {
         // Todo: Add a rate limiter
         if (bearer === undefined || bearer !== env.BEARER_TOKEN) {
-            logger.error('Wrong password');
-            logger.error(`Banned IP: ${ip}`);
+            Logger.error('Wrong password');
+            Logger.error(`Banned IP: ${ip}`);
             fs.appendFileSync('banned_ips.txt', `${ip}\n`);
             return false;
         }
@@ -79,17 +79,17 @@ export default class Listener {
                     req.connection.remoteAddress;
                 const bearer = req.headers.authorization;
                 const command = req.body.command;
-                logger.info(
+                Logger.info(
                     `WEB Listener: Received order ${command.replace('\n', '')}`,
                 );
 
                 // if (this.isBannedIP(ip)) {
-                //     logger.error(`Banned IP: ${ip}`);
+                //     Logger.error(`Banned IP: ${ip}`);
                 //     res.status(401).send('Unauthorized');
                 //     return;
                 // }
                 if (!this.checkPassword(bearer, ip)) {
-                    logger.error(`Wrong password from IP: ${ip}`);
+                    Logger.error(`Wrong password from IP: ${ip}`);
                     res.status(401).send('Unauthorized');
                     return;
                 }
@@ -97,12 +97,12 @@ export default class Listener {
                 try {
                     switch (command) {
                         case 'backhome':
-                            logger.info('Going back home');
+                            Logger.info('Going back home');
                             res.status(200).send('Going back home');
                             this.commandExecutor.backHome();
                             break;
                         case 'leavehome':
-                            logger.info('Leaving home');
+                            Logger.info('Leaving home');
                             res.status(200).send('Leaving home');
                             this.commandExecutor.leaveHome();
                             break;
@@ -112,7 +112,7 @@ export default class Listener {
                             return;
                     }
                 } catch (error: any) {
-                    logger.error(error.message);
+                    Logger.error(error.message);
                     res.status(500).send(error.message);
                     return;
                 }
@@ -140,17 +140,17 @@ export default class Listener {
                 //     req.connection.remoteAddress;
                 // const bearer = req.headers.authorization;
                 const payload = req.body;
-                logger.info(
+                Logger.info(
                     `WEB Listener: Received payload ${JSON.stringify(payload)}`,
                 );
 
                 // if (this.isBannedIP(ip)) {
-                //     logger.error(`Banned IP: ${ip}`);
+                //     Logger.error(`Banned IP: ${ip}`);
                 //     res.status(401).send('Unauthorized');
                 //     return;
                 // }
                 // if (!this.checkPassword(bearer, ip)) {
-                //     logger.error(`Wrong password from IP: ${ip}`);
+                //     Logger.error(`Wrong password from IP: ${ip}`);
                 //     res.status(401).send('Unauthorized');
                 //     return;
                 // }
@@ -166,18 +166,18 @@ export default class Listener {
                     //     },
                     //     "status": "status"
                     // }
-                    logger.info(`Payload received: ${JSON.stringify(payload)}`);
+                    Logger.info(`Payload received: ${JSON.stringify(payload)}`);
                     res.status(200).send('Payload received');
                     return;
                 } catch (error: any) {
-                    logger.error(error.message);
+                    Logger.error(error.message);
                     res.status(500).send(error.message);
                     return;
                 }
             });
 
             app.listen(port, () => {
-                logger.info(`Listening on port ${port}`);
+                Logger.info(`Listening on port ${port}`);
                 resolve();
             }).on('error', (error) => {
                 reject(error);
@@ -192,13 +192,13 @@ export default class Listener {
             if (this.commandExecutor === undefined) {
                 throw new Error('STDIN Listener: CommandExecutor is undefined');
             }
-            logger.info(
+            Logger.info(
                 `STDIN Listener: Received order ${text.replace('\n', '')}`,
             );
             try {
                 this.commandExecutor.evalCommandFromOrder(text);
             } catch (error) {
-                logger.error(
+                Logger.error(
                     `STDIN Listener: Error during the execution of the command: ${error}`,
                 );
             }
