@@ -1,5 +1,6 @@
 import HueController from '../HueController';
-import { Entity } from '../Entity';
+import Entity from './Entity';
+import { logger } from '../logger';
 
 export class Light extends Entity {
     private hueController: HueController;
@@ -74,4 +75,30 @@ export class Light extends Entity {
                 throw error;
             });
     }
+}
+
+export async function initLights(
+    hueController: HueController,
+): Promise<Entity[]> {
+    const lightsGroups = await hueController.getGroupsByType('Room');
+    const lightPromises: Promise<Entity>[] = [];
+    lightsGroups.forEach((group) => {
+        group.lights.forEach((lightID: number) => {
+            lightPromises.push(
+                hueController.getLightById(lightID).then((light) => {
+                    const newLight = new Light(
+                        light.name,
+                        light.id,
+                        group.name,
+                        hueController,
+                    );
+                    logger.info(
+                        `Entities Initialisation: ${light.id}: Light '${light.name}' in ${group.name} added`,
+                    );
+                    return newLight;
+                }),
+            );
+        });
+    });
+    return await Promise.all(lightPromises);
 }

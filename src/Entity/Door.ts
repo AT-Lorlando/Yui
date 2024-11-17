@@ -1,4 +1,4 @@
-import { Entity } from '../Entity';
+import Entity from './Entity';
 
 export class Door extends Entity {
     constructor(name: string, public id: number, public room: string) {

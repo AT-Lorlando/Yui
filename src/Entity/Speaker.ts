@@ -1,4 +1,6 @@
-import { Entity } from '../Entity';
+import Entity from './Entity';
+import SpotifyController from '../SpotifyController';
+import { logger } from '../logger';
 
 export class Speaker extends Entity {
     constructor(name: string, public id: number, public room: string) {
@@ -35,4 +37,20 @@ export class Speaker extends Entity {
         );
         // Ajoutez ici le code pour augmenter le volume
     }
+}
+
+export async function initSpeakers(
+    spotifyController: SpotifyController,
+): Promise<Entity[]> {
+    const speakers = await spotifyController.getDevices();
+    const speakersArray = [] as Entity[];
+    speakers.forEach((speaker: any) => {
+        speakersArray.push(
+            new Speaker(speaker.name, speaker.host, 'Living room'),
+        );
+        logger.info(
+            `Entities Initialisation: Speaker '${speaker.name}' in Living room added`,
+        );
+    });
+    return speakersArray;
 }
