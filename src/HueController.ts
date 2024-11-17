@@ -1,6 +1,6 @@
 import { v3, discovery } from 'node-hue-api';
 import { BridgeDiscoveryResponse } from 'node-hue-api/dist/esm/api/discovery/discoveryTypes';
-import { logger } from './logger';
+import Logger from './Logger';
 import { env } from './env';
 
 function sleep(ms: number): Promise<void> {
@@ -21,7 +21,7 @@ export default class HueController {
         try {
             await this.connect();
         } catch (error) {
-            logger.error(
+            Logger.error(
                 `Error during the initialisation of HueController: ${error}`,
             );
             throw new Error('Error during the initialisation of HueController');
@@ -32,7 +32,7 @@ export default class HueController {
         let bridge;
         if (env.HUE_BRIDGE_IP) {
             bridge = { ipaddress: env.HUE_BRIDGE_IP };
-            logger.info(`Using existing bridge IP: ${bridge.ipaddress}`);
+            Logger.info(`Using existing bridge IP: ${bridge.ipaddress}`);
         } else {
             bridge = await this.discoverBridge();
             if (!bridge) {
@@ -43,15 +43,15 @@ export default class HueController {
         let user;
         if (env.HUE_USERNAME) {
             user = { username: env.HUE_USERNAME };
-            logger.info(`Using existing username: ${user.username}`);
+            Logger.info(`Using existing username: ${user.username}`);
         } else {
             const result = await this.createUser(bridge);
             if (!result) {
                 throw new Error('Error during the creation of the user');
             }
             user = result.user;
-            logger.info(`User created - Username: ${user.username}`);
-            logger.info(
+            Logger.info(`User created - Username: ${user.username}`);
+            Logger.info(
                 `Press link button on the bridge to create a user (if needed)`,
             );
         }
@@ -72,11 +72,11 @@ export default class HueController {
             }
 
             const bridge = searchResults[0];
-            logger.info(`Bridge found at IP address: ${bridge.ipaddress}`);
+            Logger.info(`Bridge found at IP address: ${bridge.ipaddress}`);
 
             return bridge;
         } catch (error) {
-            logger.error('Error during the discovery of the bridge:', error);
+            Logger.error('Error during the discovery of the bridge:', error);
         }
     }
 
@@ -86,7 +86,7 @@ export default class HueController {
         try {
             const api = await v3.api.createLocal(bridge.ipaddress).connect();
 
-            logger.info(
+            Logger.info(
                 'Press the link button on the bridge within the next 30 seconds.',
             );
 
@@ -110,11 +110,11 @@ export default class HueController {
                 throw new Error('Failed to create user. Please try again.');
             }
 
-            logger.info('User created.' + JSON.stringify(user));
+            Logger.info('User created.' + JSON.stringify(user));
 
             return { api, user };
         } catch (error) {
-            logger.error('Error during the creation of the user:', error);
+            Logger.error('Error during the creation of the user:', error);
         }
     }
 
@@ -126,7 +126,7 @@ export default class HueController {
             const returnLights: any[] = [];
             const lights = await this.api.lights.getAll();
             lights.map((light: any) => {
-                logger.debug(`Light found: ID=${light.id}, Name=${light.name}`);
+                Logger.debug(`Light found: ID=${light.id}, Name=${light.name}`);
                 returnLights.push({
                     id: light.id,
                     name: light.name,
@@ -138,7 +138,7 @@ export default class HueController {
             }
             return returnLights;
         } catch (error: any) {
-            logger.error('Error getting all lights');
+            Logger.error('Error getting all lights');
             throw error;
         }
     }
@@ -149,13 +149,13 @@ export default class HueController {
                 throw new Error('Hue API not initialized.');
             }
             const light = await this.api.lights.getLight(id);
-            logger.debug(`Light found: ID=${light.id}, Name=${light.name}`);
+            Logger.debug(`Light found: ID=${light.id}, Name=${light.name}`);
             if (!light) {
                 throw new Error('No light found.');
             }
             return light;
         } catch (error: any) {
-            logger.error('Error getting light by ID');
+            Logger.error('Error getting light by ID');
             throw error;
         }
     }
@@ -168,7 +168,7 @@ export default class HueController {
             const returnGroup: any[] = [];
             const groups = await this.api.groups.getAll();
             groups.map((group: any) => {
-                logger.debug(`Group found: ID=${group.id}, Name=${group.name}`);
+                Logger.debug(`Group found: ID=${group.id}, Name=${group.name}`);
                 if (group.type === type) {
                     returnGroup.push({
                         id: group.id,
@@ -182,7 +182,7 @@ export default class HueController {
             }
             return returnGroup;
         } catch (error: any) {
-            logger.error('Error getting groups by type');
+            Logger.error('Error getting groups by type');
             throw error;
         }
     }
@@ -201,9 +201,9 @@ export default class HueController {
             const lightState = new v3.lightStates.LightState().on(on);
 
             await this.api.lights.setLightState(lightId, lightState);
-            logger.info(`Light ${lightId} turned ${on ? 'on' : 'off'}`);
+            Logger.info(`Light ${lightId} turned ${on ? 'on' : 'off'}`);
         } catch (error: any) {
-            logger.error(
+            Logger.error(
                 `Error setting light state for light ${lightId}:`,
                 error.message,
             );
@@ -229,9 +229,9 @@ export default class HueController {
                 .brightness(brightness);
 
             await this.api.lights.setLightState(lightId, lightState);
-            logger.info(`Light ${lightId} brightness set to ${brightness}`);
+            Logger.info(`Light ${lightId} brightness set to ${brightness}`);
         } catch (error) {
-            logger.error(
+            Logger.error(
                 `Error setting light brightness for light ${lightId}:`,
                 error,
             );
@@ -305,12 +305,12 @@ export default class HueController {
             const newColor = rgbToHueSat(hexToRgb(color));
             const hue = newColor.hue;
             const sat = newColor.sat;
-            logger.debug(`Hue: ${hue}, Sat: ${sat}`);
+            Logger.debug(`Hue: ${hue}, Sat: ${sat}`);
             const lightState = new v3.lightStates.LightState()
                 .on()
                 .hue(hue)
                 .sat(sat);
-            logger.info(
+            Logger.info(
                 `Call api with lightId: ${lightId}, lightState: ${lightState}`,
             );
             await this.api.lights
@@ -318,9 +318,9 @@ export default class HueController {
                 .catch((error: any) => {
                     throw error;
                 });
-            logger.info(`Light ${lightId} color set to ${color}`);
+            Logger.info(`Light ${lightId} color set to ${color}`);
         } catch (error: any) {
-            logger.error(
+            Logger.error(
                 `Error setting light color for light ${lightId}:`,
                 error,
             );
@@ -341,7 +341,7 @@ export default class HueController {
             lightState.bri = Math.round((lightState.bri / 254) * 100);
             return lightState;
         } catch (error: any) {
-            logger.error('Error getting light state');
+            Logger.error('Error getting light state');
             throw error;
         }
     }

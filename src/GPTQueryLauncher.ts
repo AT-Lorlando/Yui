@@ -3,7 +3,7 @@ import {
     Configuration,
     OpenAIApi,
 } from 'openai';
-import { logger } from './logger';
+import Logger from './Logger';
 import env from './env';
 import CommandExecutor from './CommandExecutor';
 import * as fs from 'fs';
@@ -28,16 +28,16 @@ class GPTQueryLauncher {
             this.openai = new OpenAIApi(this.configuration);
             this.commandExecutor = commandExecutor;
         } catch (error) {
-            logger.error(`Error during the initialisation of GPTQL: ${error}`);
+            Logger.error(`Error during the initialisation of GPTQL: ${error}`);
             throw new Error('Error during the initialisation of GPTQL');
         }
     }
 
     private async fetchGPT(config: any): Promise<any> {
-        logger.debug('GPT3Request fetchGPT');
+        Logger.debug('GPT3Request fetchGPT');
         const response = await this.openai.createChatCompletion(config);
-        logger.info('GPTQL: GPT3Request respond');
-        logger.info(response.data.choices);
+        Logger.info('GPTQL: GPT3Request respond');
+        Logger.info(response.data.choices);
         return response.data.choices[0]
             .message as ChatCompletionResponseMessage;
     }
@@ -284,7 +284,7 @@ class GPTQueryLauncher {
         }
 
         const message = await this.fetchGPT(config35).catch((err: any) => {
-            logger.error(
+            Logger.error(
                 `GPTQL: Error during a request of GPTQueryLauncher: ${err}` +
                     ` Order : ${text}`,
             );
@@ -296,24 +296,24 @@ class GPTQueryLauncher {
         try {
             if (message.function_call) {
                 const analyse = await this.analyseFunction(config35, message);
-                logger.info(
+                Logger.info(
                     'GPTQL: GPT3Request respond to ' + text.replace('\n', ''),
                 );
-                logger.info(analyse.content);
+                Logger.info(analyse.content);
             } else {
-                logger.info(
+                Logger.info(
                     'GPTQL: GPT3Request respond to ' + text.replace('\n', ''),
                 );
-                logger.info(message.content);
+                Logger.info(message.content);
             }
         } catch (err: any) {
-            logger.error('GPTQL: Error during an analyse of GPTQueryLauncher');
+            Logger.error('GPTQL: Error during an analyse of GPTQueryLauncher');
             console.log(err);
         }
     }
 
     async analyseFunction(config: any, message: any): Promise<any> {
-        logger.debug('GPTQL: analyseFunction');
+        Logger.debug('GPTQL: analyseFunction');
         const availableFunctions = {
             getEntities: {
                 function: this.commandExecutor.getEntities,
@@ -373,7 +373,7 @@ class GPTQueryLauncher {
         const functionName = message.function_call.name as string;
         const responseArguments = JSON.parse(message.function_call.arguments);
         const argNames = availableFunctions[functionName].arguments;
-        logger.debug(
+        Logger.debug(
             `GPTQL: analyseFunction: functionName : ${functionName} | responseArguments : ${responseArguments} | argNames : ${argNames}`,
         );
         const functionCall = availableFunctions[functionName].function;
@@ -382,7 +382,7 @@ class GPTQueryLauncher {
         );
 
         try {
-            logger.debug(
+            Logger.debug(
                 `Calling function ${functionName} with arguments ${functionArguments}`,
             );
             // If it's a timed event, we need to put a pointer to the function
@@ -404,7 +404,7 @@ class GPTQueryLauncher {
                     ? JSON.stringify(functionReturn)
                     : 'null',
             };
-            logger.debug(
+            Logger.debug(
                 `GPT need function ${functionName} and returned ${JSON.stringify(
                     functionReturn,
                 )}`,
@@ -412,7 +412,7 @@ class GPTQueryLauncher {
             config.messages.push(message);
             config.messages.push(return_message);
         } catch (err) {
-            logger.error(
+            Logger.error(
                 `Error calling function ${functionName} with arguments ${functionArguments}`,
             );
             console.log(err);
@@ -421,10 +421,10 @@ class GPTQueryLauncher {
 
         const responseMessage = await this.fetchGPT(config).catch(
             (err: any) => {
-                logger.error(
+                Logger.error(
                     `Error during a request of GPTQueryLauncher: ${err}`,
                 );
-                logger.error(err.response.data);
+                Logger.error(err.response.data);
             },
         );
         if (responseMessage.function_call) {
@@ -435,7 +435,7 @@ class GPTQueryLauncher {
     }
 
     async evalCommandFromOrder(text: string) {
-        logger.info(
+        Logger.info(
             'GPTQL: Fetching a command from order : ' + text.replace('\n', ''),
         );
         await this.fetchCommandFunctions(text);

@@ -1,4 +1,4 @@
-import { logger } from '../logger';
+import Logger from '../Logger';
 
 export default abstract class Entity {
     constructor(public name: string, public id: number, public room: string) {
@@ -8,6 +8,6 @@ export default abstract class Entity {
     }
 
     test() {
-        logger.verbose(`Test of ${this.name}`);
+        Logger.verbose(`Test of ${this.name}`);
     }
 }
