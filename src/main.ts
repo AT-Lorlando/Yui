@@ -1,5 +1,6 @@
 import { logger, testLogger } from './logger';
-import { initEntities } from './Entity';
+import { initLights } from './Entity/Light';
+import { initSpeakers } from './Entity/Speaker';
 import CommandExecutor from './CommandExecutor';
 import GPTQueryLauncher from './GPTQueryLauncher';
 import HueController from './HueController';
@@ -23,7 +24,10 @@ async function main() {
 
     await spotifyController.init();
     await hueController.init();
-    const entities = await initEntities(hueController, spotifyController);
+    const entities = await Promise.all([
+        initLights(hueController),
+        initSpeakers(spotifyController),
+    ]).then((entities) => entities.flat());
     // await commandRecognition.init()
 
     await commandExecutor.init(entities, spotifyController, GPTQL);
