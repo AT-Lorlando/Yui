@@ -1,4 +1,5 @@
-import { logger, testLogger } from './logger';
+import Logger from './Logger';
+import { testLogger } from './Logger';
 import { initLights } from './Entity/Light';
 import { initSpeakers } from './Entity/Speaker';
 import CommandExecutor from './CommandExecutor';
@@ -9,8 +10,8 @@ import Listener from './Listener';
 
 async function main() {
     testLogger();
-    logger.info('Starting the "Yui" application');
-    logger.debug('Importing modules');
+    Logger.info('Starting the "Yui" application');
+    Logger.debug('Importing modules');
 
     // const commandRecognition = new CommandRecognition();
     const commandExecutor = new CommandExecutor();
@@ -19,8 +20,8 @@ async function main() {
     const spotifyController = new SpotifyController();
     const listener = new Listener();
 
-    logger.debug('Modules imported');
-    logger.debug('Modules initialisation');
+    Logger.debug('Modules imported');
+    Logger.debug('Modules initialisation');
 
     await spotifyController.init();
     await hueController.init();
@@ -34,15 +35,15 @@ async function main() {
     await GPTQL.init(commandExecutor);
     await listener.init(commandExecutor);
 
-    logger.info('Initialisation of the "Yui" application completed');
+    Logger.info('Initialisation of the "Yui" application completed');
 }
 
 main()
     .then(() => {
-        logger.info('Yui is ready to use');
+        Logger.info('Yui is ready to use');
     })
     .catch((error) => {
-        logger.error(
+        Logger.error(
             `Error during the initialisation of Yui: ${error.message}`,
         );
     });

@@ -1,6 +1,6 @@
 import Entity from './Entity';
 import SpotifyController from '../SpotifyController';
-import { logger } from '../logger';
+import Logger from '../Logger';
 
 export class Speaker extends Entity {
     constructor(name: string, public id: number, public room: string) {
@@ -48,7 +48,7 @@ export async function initSpeakers(
         speakersArray.push(
             new Speaker(speaker.name, speaker.host, 'Living room'),
         );
-        logger.info(
+        Logger.info(
             `Entities Initialisation: Speaker '${speaker.name}' in Living room added`,
         );
     });

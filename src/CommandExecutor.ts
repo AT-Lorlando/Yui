@@ -2,7 +2,7 @@ import Entity from './Entity/Entity';
 import { Light } from './Entity/Light';
 import { Speaker } from './Entity/Speaker';
 import { Door } from './Entity/Door';
-import { logger } from './logger';
+import Logger from './Logger';
 import http from 'http';
 import env from './env';
 import GPTQueryLauncher from './GPTQueryLauncher';
@@ -28,7 +28,7 @@ class CommandExecutor {
             this.GPTQueryLauncher = GPTQueryLauncher;
             this.spotifyController = spotifyController;
         } catch (error) {
-            logger.error(
+            Logger.error(
                 `Error during the initialisation of CommandExecutor: ${error}`,
             );
             throw new Error(
@@ -75,13 +75,13 @@ class CommandExecutor {
             const entity = this.getEntity(entityID);
             entity.test();
         } catch (error: any) {
-            logger.error(error.message);
+            Logger.error(error.message);
             throw error;
         }
     }
 
     async backHome(): Promise<void> {
-        logger.info('Going back home');
+        Logger.info('Going back home');
         this.PushNotification('Yui', 'Welcome back home !');
         try {
             const lights = [4, 5, 12];
@@ -94,7 +94,7 @@ class CommandExecutor {
                 throw new Error('SpotifyController is undefined');
             }
             if (await this.spotifyController.isPlaying()) {
-                logger.info('Spotify is playing');
+                Logger.info('Spotify is playing');
                 const speaker = (await this.spotifyController.getSpeakerByName(
                     'Les enceintes',
                 )) as any;
@@ -104,17 +104,17 @@ class CommandExecutor {
                 await this.spotifyController.transferPlayback(speaker.id);
             }
         } catch (error) {
-            logger.error(`Error when back home: ${error}`);
+            Logger.error(`Error when back home: ${error}`);
         }
     }
 
     async leaveHome(): Promise<void> {
-        logger.info('Leaving home');
+        Logger.info('Leaving home');
         this.PushNotification('Yui', 'See you soon !');
         try {
             this.lightsTurnOff([4, 5, 12]);
         } catch (error) {
-            logger.error(`Error when leaving home: ${error}`);
+            Logger.error(`Error when leaving home: ${error}`);
         }
     }
 
@@ -125,7 +125,7 @@ class CommandExecutor {
                 `http://www.notifymydevice.com/push?ApiKey=${apiKey}&PushTitle=${pushTitle}&PushText=${pushMessage}`,
                 (resp) => {
                     resp.on('end', () => {
-                        logger.info('Push notification sent');
+                        Logger.info('Push notification sent');
                     });
                 },
             );
@@ -141,17 +141,17 @@ class CommandExecutor {
 
     private timedCycle(): void {
         const now = Date.now();
-        logger.silly(`Timed cycle at ${now}`);
-        logger.silly(`Timed events: ${this.timedEvents.length}`);
+        Logger.silly(`Timed cycle at ${now}`);
+        Logger.silly(`Timed events: ${this.timedEvents.length}`);
         for (const event of this.timedEvents) {
-            logger.silly(`Event at ${event.time}`);
+            Logger.silly(`Event at ${event.time}`);
             if (now >= event.time) {
-                logger.silly('Event triggered');
+                Logger.silly('Event triggered');
                 try {
                     event.callback();
                     this.timedEvents.splice(this.timedEvents.indexOf(event), 1);
                 } catch (error: any) {
-                    logger.error(error.message);
+                    Logger.error(error.message);
                 }
             }
         }
@@ -165,7 +165,7 @@ class CommandExecutor {
         const now = Date.now();
         console.log(now);
         console.log(time);
-        logger.silly(`Adding timed event at ${now + time}`);
+        Logger.silly(`Adding timed event at ${now + time}`);
         this.timedEvents.push({
             time: now + time,
             callback: () => callback(...args),
@@ -177,7 +177,7 @@ class CommandExecutor {
     }
 
     lightsTurnOn(entitiesID: number[]): void {
-        logger.info(`Turning on lights ${entitiesID}`);
+        Logger.info(`Turning on lights ${entitiesID}`);
         for (const entityID of entitiesID) {
             try {
                 const entity = this.getEntity(entityID);
@@ -189,13 +189,13 @@ class CommandExecutor {
                     );
                 }
             } catch (error: any) {
-                logger.error(error.message);
+                Logger.error(error.message);
             }
         }
     }
 
     lightsTurnOff(entitiesID: number[]): void {
-        logger.info(`Turning off lights ${entitiesID}`);
+        Logger.info(`Turning off lights ${entitiesID}`);
         for (const entityID of entitiesID) {
             try {
                 const entity = this.getEntity(entityID);
@@ -207,7 +207,7 @@ class CommandExecutor {
                     );
                 }
             } catch (error: any) {
-                logger.error(error.message);
+                Logger.error(error.message);
             }
         }
     }
@@ -224,7 +224,7 @@ class CommandExecutor {
                     );
                 }
             } catch (error: any) {
-                logger.error(error.message);
+                Logger.error(error.message);
             }
         }
     }
@@ -241,7 +241,7 @@ class CommandExecutor {
                     );
                 }
             } catch (error: any) {
-                logger.error(error.message);
+                Logger.error(error.message);
             }
         }
     }
@@ -258,7 +258,7 @@ class CommandExecutor {
                     );
                 }
             } catch (error: any) {
-                logger.error(error.message);
+                Logger.error(error.message);
             }
         }
     }
@@ -274,7 +274,7 @@ class CommandExecutor {
                     );
                 }
             } catch (error: any) {
-                logger.error(error.message);
+                Logger.error(error.message);
             }
         }
     }
@@ -290,7 +290,7 @@ class CommandExecutor {
                     );
                 }
             } catch (error: any) {
-                logger.error(error.message);
+                Logger.error(error.message);
             }
         }
     }
@@ -306,7 +306,7 @@ class CommandExecutor {
                     );
                 }
             } catch (error: any) {
-                logger.error(error.message);
+                Logger.error(error.message);
             }
         }
     }
@@ -321,7 +321,7 @@ class CommandExecutor {
                     throw new Error(`Entity with id ${entityID} is not a door`);
                 }
             } catch (error: any) {
-                logger.error(error.message);
+                Logger.error(error.message);
             }
         }
     }
@@ -336,7 +336,7 @@ class CommandExecutor {
                     throw new Error(`Entity with id ${entityID} is not a door`);
                 }
             } catch (error: any) {
-                logger.error(error.message);
+                Logger.error(error.message);
             }
         }
     }

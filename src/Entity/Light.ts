@@ -1,6 +1,6 @@
 import HueController from '../HueController';
 import Entity from './Entity';
-import { logger } from '../logger';
+import Logger from '../Logger';
 
 export class Light extends Entity {
     private hueController: HueController;
@@ -92,7 +92,7 @@ export async function initLights(
                         group.name,
                         hueController,
                     );
-                    logger.info(
+                    Logger.info(
                         `Entities Initialisation: ${light.id}: Light '${light.name}' in ${group.name} added`,
                     );
                     return newLight;

@@ -9,7 +9,7 @@ function get_offset(c: string): string {
     return ' '.repeat(offset - c.length);
 }
 
-export const logger = winston.createLogger({
+const Logger = winston.createLogger({
     level: env.LOG_LEVEL || 'info',
     format: combine(
         simple(),
@@ -18,7 +18,7 @@ export const logger = winston.createLogger({
             const formattedMessage: string =
                 typeof message === 'object'
                     ? JSON.stringify(message, null, 2)
-                    : message;
+                    : String(message) || '';
             return `${timestamp} ${get_offset(
                 level,
             )}[${level.toLocaleUpperCase()}] - ${formattedMessage}`;
@@ -39,7 +39,7 @@ export const logger = winston.createLogger({
                         return (
                             `${colorizer.colorize(
                                 level,
-                                timestamp,
+                                String(timestamp),
                             )} ${get_offset(level)}` +
                             colorizer.colorize(
                                 level,
@@ -62,13 +62,13 @@ export const logger = winston.createLogger({
 });
 
 if (env.NODE_ENV === 'production') {
-    logger.add(
+    Logger.add(
         new winston.transports.File({
             filename: 'error.log',
             level: 'error',
         }),
     );
-    logger.add(
+    Logger.add(
         new winston.transports.File({
             filename: 'combined.log',
         }),
@@ -76,9 +76,11 @@ if (env.NODE_ENV === 'production') {
 }
 
 export function testLogger() {
-    logger.info('[TEST] Information message');
-    logger.verbose('[TEST] Success message');
-    logger.warn('[TEST] Warning message');
-    logger.error('[TEST] Error message');
-    logger.debug('[TEST] Debug message');
+    Logger.info('[TEST] Information message');
+    Logger.verbose('[TEST] Success message');
+    Logger.warn('[TEST] Warning message');
+    Logger.error('[TEST] Error message');
+    Logger.debug('[TEST] Debug message');
 }
+
+export default Logger;
