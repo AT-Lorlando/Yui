@@ -1,6 +1,6 @@
 import SpotifyWebApi from 'spotify-web-api-node';
 import env from './env';
-import { logger } from './logger';
+import Logger from './Logger';
 import Bonjour from 'bonjour';
 import * as fs from 'fs';
 import axios from 'axios';
@@ -26,9 +26,9 @@ export default class SpotifyController {
                         refreshToken,
                     );
                     this.spotifyApi.setAccessToken(access_token);
-                    logger.info('Yui is now authorized from refresh token');
+                    Logger.info('Yui is now authorized from refresh token');
                 } catch (error) {
-                    logger.error('Error refreshing access token:', error);
+                    Logger.error('Error refreshing access token:', error);
                 }
             } else {
                 const clientId = env.SPOTIFY_CLIENT_ID;
@@ -43,12 +43,12 @@ export default class SpotifyController {
                     redirectUri,
                     scopes,
                 );
-                logger.info(`Please go to ${authorizeUrl} and authorize Yui`);
+                Logger.info(`Please go to ${authorizeUrl} and authorize Yui`);
                 await this.isAuthorized();
-                logger.info('Yui is now authorized');
+                Logger.info('Yui is now authorized');
             }
         } catch (error) {
-            logger.error('Error initializing SpotifyController:', error);
+            Logger.error('Error initializing SpotifyController:', error);
             throw new Error(
                 'Error during the initialisation of SpotifyController',
             );
@@ -207,7 +207,7 @@ export default class SpotifyController {
 
             bonjour.find({ type: 'googlecast' }, (device) => {
                 if (device.type === 'googlecast') {
-                    logger.info(`Found Google Home device: ${device.name}`);
+                    Logger.info(`Found Google Home device: ${device.name}`);
                     devices.push({
                         name: device.txt.fn,
                         type: device.txt.md,
@@ -245,7 +245,7 @@ export default class SpotifyController {
     }
 
     async transferPlayback(deviceId: string): Promise<void> {
-        logger.info(`Transferring playback to device: ${deviceId}`);
+        Logger.info(`Transferring playback to device: ${deviceId}`);
         try {
             await this.spotifyApi.transferMyPlayback([deviceId]);
         } catch (error: any) {
