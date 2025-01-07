@@ -1,4 +1,4 @@
-import HueController from '../src/HueController';
+import HueController from '../src/Controller/HueController';
 import { Light } from '../src/Entity/Light';
 
 jest.mock('../src/HueController');
