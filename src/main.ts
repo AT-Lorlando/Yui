@@ -3,10 +3,10 @@ import { testLogger } from './Logger';
 import { initLights } from './Entity/Light';
 import { initSpeakers } from './Entity/Speaker';
 import CommandExecutor from './CommandExecutor';
-import GPTQueryLauncher from './GPTQueryLauncher';
-import HueController from './HueController';
-import SpotifyController from './SpotifyController';
-import Listener from './Listener';
+import GPTQueryLauncher from './Service/GPTQueryLauncher';
+import HueController from './Controller/HueController';
+import SpotifyController from './Controller/SpotifyController';
+import Listener from './Service/Listener';
 
 async function main() {
     testLogger();

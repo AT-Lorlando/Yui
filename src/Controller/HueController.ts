@@ -1,7 +1,7 @@
 import { v3, discovery } from 'node-hue-api';
 import { BridgeDiscoveryResponse } from 'node-hue-api/dist/esm/api/discovery/discoveryTypes';
-import Logger from './Logger';
-import { env } from './env';
+import Logger from '../Logger';
+import { env } from '../env';
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
