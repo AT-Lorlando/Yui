@@ -1,19 +1,13 @@
 import LlmController from '../Controller/LlmController';
 import Story from '../Entity/Story';
-import { Category, Order } from '../types/types';
+import { Category, Order, StoryContent } from '../types/types';
 import Logger from '../Logger';
 
 export default class Orchestrator {
     constructor(private readonly llmController = new LlmController()) {}
 
     async aNewStoryBegin(order: Order): Promise<Story> {
-        //const category = await this.getStoryCategory(order);
-        //const story = new Story(category, order.content);
-        //let response = await this.llmController.sendToLlm(
-        //    category,
-        //    story.stringify(),
-        //);
-        const category = 'domotic' as Category;
+        const category = await this.getOrderCategory(order);
         const story = new Story(category, order.content);
         let response = await this.llmController.sendToLlm(
             category,
@@ -64,14 +58,25 @@ export default class Orchestrator {
         return story;
     }
 
-    async getStoryCategory(order: Order): Promise<Category> {
+    async getOrderCategory(order: Order): Promise<Category> {
         const LLM = 'Router';
-        //const result = await this.llmController.sendToLlm(LLM, order.content);
-        const result = { category: LLM };
-        console.log(result);
+        const story = [
+            {
+                role: 'user',
+                content: order.content,
+            },
+        ] as StoryContent;
+        const result = await this.llmController.sendToLlm(LLM, story);
         Logger.debug(
             `Order ${order.content} got categorized as ${result.category}`,
         );
-        return 'Browser';
+        return result.category;
+    }
+
+    async evaluateCommand(
+        command: string,
+        parameters: string,
+    ): Promise<string> {
+        return `Output ${command}(${parameters}): Success`;
     }
 }

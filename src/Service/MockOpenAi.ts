@@ -1,6 +1,6 @@
 import { StoryContent } from '../types/types';
-
-const OPENAI_API_KEY = '';
+import env from '../env';
+const OPENAI_API_KEY = env.OPENAI_API_KEY;
 
 interface ChatMessage {
     role: 'system' | 'user' | 'assistant';

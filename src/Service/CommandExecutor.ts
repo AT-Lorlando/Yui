@@ -1,12 +1,13 @@
-import Entity from './Entity/Entity';
-import { Light } from './Entity/Light';
-import { Speaker } from './Entity/Speaker';
-import { Door } from './Entity/Door';
-import Logger from './Logger';
+import Entity from '../Entity/Entity';
+import { Light } from '../Entity/Light';
+import { Speaker } from '../Entity/Speaker';
+import { Door } from '../Entity/Door';
+import Logger from '../Logger';
 import http from 'http';
-import env from './env';
-import GPTQueryLauncher from './Service/GPTQueryLauncher';
-import SpotifyController from './Controller/SpotifyController';
+import env from '../env';
+import GPTQueryLauncher from './GPTQueryLauncher';
+import SpotifyController from '../Controller/SpotifyController';
+import { stateChange } from '../types/types';
 
 class CommandExecutor {
     entities: Entity[];
@@ -45,6 +46,17 @@ class CommandExecutor {
             throw new Error(`Entity with id ${entityID} not found`);
         }
         return entity;
+    }
+
+    public async setEntityState(
+        entityID: number,
+        stateChanges: stateChange[],
+    ): Promise<void> {
+        const entity = this.getEntity(entityID) as Entity;
+        for (const stateChange of stateChanges) {
+            const { property, value } = stateChange;
+            await entity.setState(property, value);
+        }
     }
 
     async spotifyAuth(code: string): Promise<void> {
@@ -130,13 +142,6 @@ class CommandExecutor {
                 },
             );
         }
-    }
-
-    public evalCommandFromOrder(command: string): void {
-        if (this.GPTQueryLauncher == undefined) {
-            throw new Error('GPT3Request is not initialized');
-        }
-        this.GPTQueryLauncher.evalCommandFromOrder(command);
     }
 
     private timedCycle(): void {

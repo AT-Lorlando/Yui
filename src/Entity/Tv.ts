@@ -59,4 +59,24 @@ export class TV extends Entity {
         console.log(`The TV volume is raised.`);
         // Ajoutez ici le code pour augmenter le volume
     }
+
+    async setState(property: string, value: string): Promise<void> {
+        switch (property) {
+            case 'volume':
+                await this.set_volume(parseInt(value, 10));
+                break;
+            case 'channel':
+                await this.set_channel(parseInt(value, 10));
+                break;
+            case 'state':
+                if (value === 'on') {
+                    await this.turnon();
+                } else if (value === 'off') {
+                    await this.turnoff();
+                }
+                break;
+            default:
+                throw new Error(`Property ${property} not found`);
+        }
+    }
 }

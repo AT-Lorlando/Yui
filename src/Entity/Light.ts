@@ -75,6 +75,26 @@ export class Light extends Entity {
                 throw error;
             });
     }
+
+    async setState(property: string, value: string): Promise<void> {
+        switch (property) {
+            case 'luminosity':
+                await this.set_luminosity(parseInt(value, 10));
+                break;
+            case 'color':
+                await this.set_color(value);
+                break;
+            case 'state':
+                if (value === 'on') {
+                    await this.turnon();
+                } else if (value === 'off') {
+                    await this.turnoff();
+                }
+                break;
+            default:
+                throw new Error(`Property ${property} not found`);
+        }
+    }
 }
 
 export async function initLights(
