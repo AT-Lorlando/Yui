@@ -1,4 +1,4 @@
-import PlaywrightController from '../src/PlaywrightController';
+import PlaywrightController from '../src/Controller/PlaywrightController';
 
 describe('PlaywrightController E2E Tests', () => {
     let controller: PlaywrightController;
