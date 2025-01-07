@@ -8,9 +8,9 @@ import {
     StoryContent,
     Content,
 } from '../types/types';
-import { logger } from './logger';
+import Logger from '../Logger';
 import { promises as fs } from 'fs';
-import { getChatCompletion } from './MockOpenAi';
+import { getChatCompletion } from '../Service/MockOpenAi';
 
 export default class LlmController {
     public async sendToLlm(
@@ -47,7 +47,7 @@ export default class LlmController {
     }
 
     private parseResponse(response: string, category: Category): LlmResponse {
-        logger.debug(`parsing ${response}`);
+        Logger.debug(`parsing ${response}`);
         let parsed = '';
         try {
             parsed = JSON.parse(response);
@@ -84,8 +84,8 @@ export default class LlmController {
 
     private async generate(payload: StoryContent): Promise<string> {
         const response = await getChatCompletion(payload);
-        logger.info('Sending: ' + payload[payload.length - 1].content);
-        logger.info('Response from OpenAI: ' + response);
+        Logger.info('Sending: ' + payload[payload.length - 1].content);
+        Logger.info('Response from OpenAI: ' + response);
         return response || '';
     }
 }

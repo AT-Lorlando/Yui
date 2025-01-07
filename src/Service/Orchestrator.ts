@@ -1,7 +1,7 @@
-import LlmController from './LlmController';
-import Story from './Story';
+import LlmController from '../Controller/LlmController';
+import Story from '../Entity/Story';
 import { Category, Order } from '../types/types';
-import { logger } from './logger';
+import Logger from '../Logger';
 
 export default class Orchestrator {
     constructor(private readonly llmController = new LlmController()) {}
@@ -33,7 +33,7 @@ export default class Orchestrator {
             story.addAssistantStep(response);
             let result = '';
             for (const command of response.commands) {
-                logger.info(
+                Logger.info(
                     'Plugin: Evaluating ' +
                         command.name +
                         ' command with ' +
@@ -69,7 +69,7 @@ export default class Orchestrator {
         //const result = await this.llmController.sendToLlm(LLM, order.content);
         const result = { category: LLM };
         console.log(result);
-        logger.debug(
+        Logger.debug(
             `Order ${order.content} got categorized as ${result.category}`,
         );
         return 'Browser';
