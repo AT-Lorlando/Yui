@@ -5,8 +5,8 @@ import { Door } from './Entity/Door';
 import Logger from './Logger';
 import http from 'http';
 import env from './env';
-import GPTQueryLauncher from './GPTQueryLauncher';
-import SpotifyController from './SpotifyController';
+import GPTQueryLauncher from './Service/GPTQueryLauncher';
+import SpotifyController from './Controller/SpotifyController';
 
 class CommandExecutor {
     entities: Entity[];

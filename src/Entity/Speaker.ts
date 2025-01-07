@@ -1,5 +1,5 @@
 import Entity from './Entity';
-import SpotifyController from '../SpotifyController';
+import SpotifyController from '../Controller/SpotifyController';
 import Logger from '../Logger';
 
 export class Speaker extends Entity {
