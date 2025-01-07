@@ -1,6 +1,6 @@
-import { Response } from './../types/response.d';
+import { Response } from '../types/response';
 import { chromium, Browser, Page } from 'playwright';
-import { logger } from './logger';
+import Logger from '../Logger';
 
 export default class PlaywrightController {
     browser: Browser | null;
@@ -15,7 +15,7 @@ export default class PlaywrightController {
         if (!this.browser) {
             this.browser = await chromium.launch({ headless: false });
             this.page = await this.browser.newPage();
-            logger.info('Navigateur ouvert.');
+            Logger.info('Navigateur ouvert.');
             return {
                 status: 'success',
                 message: 'Browser opened successfully.',
@@ -28,7 +28,7 @@ export default class PlaywrightController {
         if (this.page) {
             await this.page.goto(url);
             await this.page.waitForTimeout(4000);
-            logger.info(`Navigué vers : ${url}`);
+            Logger.info(`Navigué vers : ${url}`);
             return { status: 'success', message: `Navigated to: ${url}` };
         }
         return { status: 'error', message: 'Page is not initialized.' };
@@ -44,7 +44,7 @@ export default class PlaywrightController {
                 (element) => element !== null,
             );
 
-            logger.debug(`Initial elements count: ${elements.length}`);
+            Logger.debug(`Initial elements count: ${elements.length}`);
 
             const toRemove = new Set<number>();
             await Promise.all(
@@ -61,7 +61,7 @@ export default class PlaywrightController {
                                     element,
                                 );
                                 if (isSameNode) {
-                                    logger.debug(
+                                    Logger.debug(
                                         `Element at index ${index} is the same as element at index ${otherIndex}`,
                                     );
                                     toRemove.add(Math.max(index, otherIndex));
@@ -73,7 +73,7 @@ export default class PlaywrightController {
                                     element,
                                 );
                                 if (contains) {
-                                    logger.debug(
+                                    Logger.debug(
                                         `Element at index ${index} is a child of element at index ${otherIndex}`,
                                     );
                                     toRemove.add(index);
@@ -89,7 +89,7 @@ export default class PlaywrightController {
                 (_, index) => !toRemove.has(index),
             );
 
-            logger.debug(`Filtered elements count: ${filteredElements.length}`);
+            Logger.debug(`Filtered elements count: ${filteredElements.length}`);
 
             return {
                 status: 'success',
@@ -218,13 +218,13 @@ export default class PlaywrightController {
         selector: string,
         value: string,
     ): Promise<Response> {
-        logger.info(`Remplir le formulaire avec : ${value}`);
+        Logger.info(`Remplir le formulaire avec : ${value}`);
         if (this.page) {
             await this.page.fill(selector, value);
             await this.page.waitForTimeout(4000);
             await this.page.press(selector, 'Enter');
             await this.page.waitForTimeout(4000);
-            logger.info(`Formulaire rempli avec : ${value}`);
+            Logger.info(`Formulaire rempli avec : ${value}`);
             return { status: 'success', message: `Form filled with: ${value}` };
         }
         return { status: 'error', message: 'Page is not initialized.' };
@@ -234,7 +234,7 @@ export default class PlaywrightController {
         if (this.page) {
             await this.page.click(selector);
             await this.page.waitForTimeout(4000);
-            logger.info(`Cliqué sur l'élément : ${selector}`);
+            Logger.info(`Cliqué sur l'élément : ${selector}`);
             return { status: 'success', message: `Clicked on: ${selector}` };
         }
         return { status: 'error', message: 'Page is not initialized.' };
@@ -245,7 +245,7 @@ export default class PlaywrightController {
             await this.browser.close();
             this.browser = null;
             this.page = null;
-            logger.info('Navigateur fermé.');
+            Logger.info('Navigateur fermé.');
             return {
                 status: 'success',
                 message: 'Browser closed successfully.',

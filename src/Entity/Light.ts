@@ -1,4 +1,4 @@
-import HueController from '../HueController';
+import HueController from '../Controller/HueController';
 import Entity from './Entity';
 import Logger from '../Logger';
 

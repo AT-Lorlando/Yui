@@ -1,5 +1,5 @@
 import { Category, Role, StoryContent, LlmResponse } from '../types/types';
-import { logger } from './logger';
+import Logger from '../Logger';
 
 class Story {
     public resume: string | undefined;
@@ -39,8 +39,8 @@ class Story {
     }
 
     public Save(): void {
-        logger.info('Story save' + this.createdAt);
-        logger.debug(this.stringify());
+        Logger.info('Story save' + this.createdAt);
+        Logger.debug(this.stringify());
     }
 }
 

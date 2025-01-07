@@ -1,6 +1,6 @@
 import SpotifyWebApi from 'spotify-web-api-node';
-import env from './env';
-import Logger from './Logger';
+import env from '../env';
+import Logger from '../Logger';
 import Bonjour from 'bonjour';
 import * as fs from 'fs';
 import axios from 'axios';

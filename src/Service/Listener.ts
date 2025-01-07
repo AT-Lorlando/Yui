@@ -1,9 +1,9 @@
 import express from 'express';
 import * as bodyParser from 'body-parser';
 import * as fs from 'fs';
-import CommandExecutor from './CommandExecutor';
-import Logger from './Logger';
-import env from './env';
+import CommandExecutor from '../CommandExecutor';
+import Logger from '../Logger';
+import env from '../env';
 import cors from 'cors';
 
 // const BBOX_PASSWORD = env.BBOX_PASSWORD;

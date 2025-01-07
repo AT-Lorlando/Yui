@@ -3,9 +3,9 @@ import {
     Configuration,
     OpenAIApi,
 } from 'openai';
-import Logger from './Logger';
-import env from './env';
-import CommandExecutor from './CommandExecutor';
+import Logger from '../Logger';
+import env from '../env';
+import CommandExecutor from '../CommandExecutor';
 import * as fs from 'fs';
 
 // const DO_NOT_FETCH = true;
