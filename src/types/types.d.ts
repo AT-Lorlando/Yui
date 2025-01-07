@@ -50,3 +50,8 @@ export type LlmResponse =
     | DomoticLlmResponse
     | BrowserLlmResponse
     | GeneralLlmResponse;
+
+export type stateChange = {
+    property: string;
+    value: string;
+};

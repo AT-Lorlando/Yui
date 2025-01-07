@@ -10,4 +10,6 @@ export default abstract class Entity {
     test() {
         Logger.verbose(`Test of ${this.name}`);
     }
+
+    abstract setState(property: string, value: string): Promise<void>;
 }
