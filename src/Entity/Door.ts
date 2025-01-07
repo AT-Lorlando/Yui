@@ -14,4 +14,18 @@ export class Door extends Entity {
         console.log(`The door is closed.`);
         // Ajoutez ici le code pour fermer la porte
     }
+
+    async setState(property: string, value: string): Promise<void> {
+        switch (property) {
+            case 'state':
+                if (value === 'unlock') {
+                    await this.unlock();
+                } else if (value === 'lock') {
+                    await this.lock();
+                }
+                break;
+            default:
+                throw new Error(`Property ${property} not found`);
+        }
+    }
 }

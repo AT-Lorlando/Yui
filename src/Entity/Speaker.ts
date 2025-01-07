@@ -37,6 +37,27 @@ export class Speaker extends Entity {
         );
         // Ajoutez ici le code pour augmenter le volume
     }
+
+    async setState(property: string, value: string): Promise<void> {
+        switch (property) {
+            case 'volume':
+                if (value === 'up') {
+                    await this.raise_volume();
+                } else if (value === 'down') {
+                    await this.lower_volume();
+                }
+                break;
+            case 'state':
+                if (value === 'play') {
+                    await this.play(value);
+                } else if (value === 'stop') {
+                    await this.stop();
+                }
+                break;
+            default:
+                throw new Error(`Property ${property} not found`);
+        }
+    }
 }
 
 export async function initSpeakers(
