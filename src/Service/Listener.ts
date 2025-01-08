@@ -107,7 +107,7 @@ export default class Listener {
                             this.commandExecutor.leaveHome();
                             break;
                         default:
-                            this.commandExecutor.evalCommandFromOrder(command);
+                            //this.commandExecutor.evalCommandFromOrder(command);
                             res.status(200).send('Order received');
                             return;
                     }
@@ -196,7 +196,7 @@ export default class Listener {
                 `STDIN Listener: Received order ${text.replace('\n', '')}`,
             );
             try {
-                this.commandExecutor.evalCommandFromOrder(text);
+                //this.commandExecutor.evalCommandFromOrder(text);
             } catch (error) {
                 Logger.error(
                     `STDIN Listener: Error during the execution of the command: ${error}`,
