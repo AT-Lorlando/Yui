@@ -8,6 +8,7 @@ import HueController from './Controller/HueController';
 import SpotifyController from './Controller/SpotifyController';
 import Listener from './Service/Listener';
 import Orchestrator from './Service/Orchestrator';
+import { initTestLights } from './Entity/Light';
 
 async function main() {
     testLogger();
@@ -32,7 +33,7 @@ async function main() {
     ]).then((entities) => entities.flat());
     // await commandRecognition.init()
 
-    await commandExecutor.init(entities, spotifyController, GPTQL);
+    await commandExecutor.init(entities, spotifyController);
     await GPTQL.init(commandExecutor);
     await listener.init(commandExecutor);
 
@@ -40,7 +41,12 @@ async function main() {
 }
 
 async function test() {
-    const orchestrator = new Orchestrator();
+    const commandExecutor = new CommandExecutor();
+    const hueController = new HueController();
+    const spotifyController = new SpotifyController();
+    const entities = await initTestLights(hueController);
+    commandExecutor.init(entities, spotifyController);
+    const orchestrator = new Orchestrator(commandExecutor);
 
     const order = {
         content: 'Allume la lumière du salon',
