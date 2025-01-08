@@ -2,9 +2,13 @@ import LlmController from '../Controller/LlmController';
 import Story from '../Entity/Story';
 import { Category, Order, StoryContent } from '../types/types';
 import Logger from '../Logger';
+import CommandExecutor from './CommandExecutor';
 
 export default class Orchestrator {
-    constructor(private readonly llmController = new LlmController()) {}
+    constructor(
+        private readonly CommandExecutor: CommandExecutor,
+        private readonly llmController = new LlmController(),
+    ) {}
 
     async aNewStoryBegin(order: Order): Promise<Story> {
         const category = await this.getOrderCategory(order);
@@ -33,7 +37,6 @@ export default class Orchestrator {
                         ' command with ' +
                         command.parameters,
                 );
-
                 result += `Output ${command.name}(${command.parameters}): Success\n`;
 
                 if (String(command.name) == 'Say') {
@@ -43,6 +46,10 @@ export default class Orchestrator {
                 if (command.name == 'AskUser') {
                     story.addStep('user', result);
                 } else {
+                    await this.evaluateCommand(
+                        command.name,
+                        command.parameters,
+                    );
                     story.addStep('system', result);
                 }
             }
@@ -73,10 +80,16 @@ export default class Orchestrator {
         return result.category;
     }
 
-    async evaluateCommand(
-        command: string,
-        parameters: string,
-    ): Promise<string> {
-        return `Output ${command}(${parameters}): Success`;
+    async evaluateCommand(command: string, parameters: any): Promise<void> {
+        const entity = parameters.entity;
+        const state = parameters.stateChanges;
+        Logger.info(entity);
+        Logger.info(state);
+        switch (command) {
+            case 'setEntityState':
+                return this.CommandExecutor.setEntityState(entity, state);
+            default:
+                return;
+        }
     }
 }

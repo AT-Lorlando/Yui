@@ -122,3 +122,11 @@ export async function initLights(
     });
     return await Promise.all(lightPromises);
 }
+
+export async function initTestLights(
+    hueController: HueController,
+): Promise<Entity[]> {
+    const light1 = new Light('Light1', 1, 'Living Room', hueController);
+    const light2 = new Light('Light2', 2, 'Living Room', hueController);
+    return [light1, light2];
+}

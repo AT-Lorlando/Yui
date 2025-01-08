@@ -5,13 +5,11 @@ import { Door } from '../Entity/Door';
 import Logger from '../Logger';
 import http from 'http';
 import env from '../env';
-import GPTQueryLauncher from './GPTQueryLauncher';
 import SpotifyController from '../Controller/SpotifyController';
 import { stateChange } from '../types/types';
 
-class CommandExecutor {
+export default class CommandExecutor {
     entities: Entity[];
-    GPTQueryLauncher!: GPTQueryLauncher;
     private spotifyController!: SpotifyController;
     private timedEvents: { time: number; callback: () => void }[] = [];
 
@@ -22,11 +20,9 @@ class CommandExecutor {
     async init(
         entities: Entity[],
         spotifyController: SpotifyController,
-        GPTQueryLauncher: GPTQueryLauncher,
     ): Promise<void> {
         try {
             this.entities = entities;
-            this.GPTQueryLauncher = GPTQueryLauncher;
             this.spotifyController = spotifyController;
         } catch (error) {
             Logger.error(
@@ -52,6 +48,8 @@ class CommandExecutor {
         entityID: number,
         stateChanges: stateChange[],
     ): Promise<void> {
+        Logger.info(`Setting state of entity ${entityID}`);
+        Logger.info(`State changes: ${stateChanges}`);
         const entity = this.getEntity(entityID) as Entity;
         for (const stateChange of stateChanges) {
             const { property, value } = stateChange;
@@ -346,5 +344,3 @@ class CommandExecutor {
         }
     }
 }
-
-export default CommandExecutor;
