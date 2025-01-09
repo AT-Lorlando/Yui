@@ -1,61 +1,97 @@
 import Entity from './Entity';
 import SpotifyController from '../Controller/SpotifyController';
 import Logger from '../Logger';
+import { Response } from '../types/types';
 
 export class Speaker extends Entity {
     constructor(name: string, public id: number, public room: string) {
         super(name, id, room);
     }
 
-    async stop(): Promise<void> {
-        console.log(`The speaker ${this.name} in ${this.room} are off.`);
-        // Ajoutez ici le code pour éteindre les haut-parleurs
+    async stop(): Promise<Response> {
+        try {
+            console.log(`The speaker ${this.name} in ${this.room} is off.`);
+            // Add code here to stop the speaker
+            return { status: 'success', message: 'Speaker stopped' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
+        }
     }
 
-    async play(url: string): Promise<void> {
-        console.log(`The speaker ${this.name} in ${this.room} play ${url}.`);
-        // Ajoutez ici le code pour allumer les haut-parleurs
+    async play(url: string): Promise<Response> {
+        try {
+            console.log(
+                `The speaker ${this.name} in ${this.room} plays ${url}.`,
+            );
+            // Add code here to play the speaker
+            return { status: 'success', message: 'Speaker playing' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
+        }
     }
 
-    async set_volume(volume: number): Promise<void> {
-        console.log(
-            `The speaker ${this.name} in ${this.room} volume is set to ${volume}.`,
-        );
-        // Ajoutez ici le code pour changer le volume
+    async set_volume(volume: number): Promise<Response> {
+        try {
+            console.log(
+                `The speaker ${this.name} in ${this.room} volume is set to ${volume}.`,
+            );
+            // Add code here to set the volume
+            return { status: 'success', message: 'Volume set' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
+        }
     }
 
-    async lower_volume(): Promise<void> {
-        console.log(
-            `The speaker ${this.name} in ${this.room} volume is lowered.`,
-        );
-        // Ajoutez ici le code pour baisser le volume
+    async lower_volume(): Promise<Response> {
+        try {
+            console.log(
+                `The speaker ${this.name} in ${this.room} volume is lowered.`,
+            );
+            // Add code here to lower the volume
+            return { status: 'success', message: 'Volume lowered' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
+        }
     }
 
-    async raise_volume(): Promise<void> {
-        console.log(
-            `The speaker ${this.name} in ${this.room} volume is raised.`,
-        );
-        // Ajoutez ici le code pour augmenter le volume
+    async raise_volume(): Promise<Response> {
+        try {
+            console.log(
+                `The speaker ${this.name} in ${this.room} volume is raised.`,
+            );
+            // Add code here to raise the volume
+            return { status: 'success', message: 'Volume raised' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
+        }
     }
 
-    async setState(property: string, value: string): Promise<void> {
-        switch (property) {
-            case 'volume':
-                if (value === 'up') {
-                    await this.raise_volume();
-                } else if (value === 'down') {
-                    await this.lower_volume();
-                }
-                break;
-            case 'power':
-                if (value === '1') {
-                    await this.play(value);
-                } else if (value === '0') {
-                    await this.stop();
-                }
-                break;
-            default:
-                throw new Error(`Property ${property} not found`);
+    async setState(property: string, value: string): Promise<Response> {
+        try {
+            switch (property) {
+                case 'volume':
+                    if (value === 'up') {
+                        return await this.raise_volume();
+                    } else if (value === 'down') {
+                        return await this.lower_volume();
+                    }
+                    throw new Error(
+                        `Invalid value ${value} for property ${property}`,
+                    );
+                case 'power':
+                    if (value === '1') {
+                        return await this.play(value);
+                    } else if (value === '0') {
+                        return await this.stop();
+                    }
+                    throw new Error(
+                        `Invalid value ${value} for property ${property}`,
+                    );
+                default:
+                    throw new Error(`Property ${property} not found`);
+            }
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
         }
     }
 }
