@@ -188,160 +188,126 @@ export default class HueController {
     }
 
     public async setLightState(lightId: number, on: boolean): Promise<void> {
-        try {
-            if (!this.api) {
-                throw new Error(
-                    'Hue API not initialized. Call connect() first.',
-                );
-            }
-            await this.getLightById(lightId).catch((error: any) => {
-                throw error;
-            });
-
-            const lightState = new v3.lightStates.LightState().on(on);
-
-            await this.api.lights.setLightState(lightId, lightState);
-            Logger.info(`Light ${lightId} turned ${on ? 'on' : 'off'}`);
-        } catch (error: any) {
-            throw new Error(
-                `Error setting light state for light ${lightId}: ` + error,
-            );
+        if (!this.api) {
+            throw new Error('Hue API not initialized. Call connect() first.');
         }
+        await this.getLightById(lightId).catch((error: any) => {
+            throw error;
+        });
+
+        const lightState = new v3.lightStates.LightState().on(on);
+
+        await this.api.lights.setLightState(lightId, lightState);
+        Logger.info(`Light ${lightId} turned ${on ? 'on' : 'off'}`);
     }
 
     public async setLightBrightness(
         lightId: number,
         brightness: number,
     ): Promise<void> {
-        try {
-            if (!this.api) {
-                throw new Error(
-                    'Hue API not initialized. Call connect() first.',
-                );
-            }
-            await this.getLightById(lightId).catch((error) => {
-                throw error;
-            });
-
-            const lightState = new v3.lightStates.LightState()
-                .on()
-                .brightness(brightness);
-
-            await this.api.lights.setLightState(lightId, lightState);
-            Logger.info(`Light ${lightId} brightness set to ${brightness}`);
-        } catch (error) {
-            Logger.error(
-                `Error setting light brightness for light ${lightId}:`,
-                error,
-            );
-            throw error;
+        if (!this.api) {
+            throw new Error('Hue API not initialized. Call connect() first.');
         }
+        await this.getLightById(lightId).catch((error) => {
+            throw error;
+        });
+
+        const lightState = new v3.lightStates.LightState()
+            .on()
+            .brightness(brightness);
+
+        await this.api.lights.setLightState(lightId, lightState);
+        Logger.info(`Light ${lightId} brightness set to ${brightness}`);
     }
 
     public async setLightColor(lightId: number, color: string): Promise<void> {
-        try {
-            if (!this.api) {
-                throw new Error(
-                    'Hue API not initialized. Call connect() first.',
-                );
+        if (!this.api) {
+            throw new Error('Hue API not initialized. Call connect() first.');
+        }
+
+        await this.getLightById(lightId).catch((error: any) => {
+            throw error;
+        });
+
+        function hexToRgb(hex: string) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(
+                hex,
+            );
+            if (result === null) {
+                throw new Error('Error converting hex to RGB');
+            }
+            return {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16),
+            };
+        }
+
+        function rgbToHueSat(rgb: { r: number; g: number; b: number }) {
+            const r = rgb.r / 255;
+            const g = rgb.g / 255;
+            const b = rgb.b / 255;
+
+            const max = Math.max(r, g, b),
+                min = Math.min(r, g, b);
+            let h,
+                s = (max + min) / 2;
+            const l = s;
+            if (max === min) {
+                h = s = 0; // achromatic
+            } else {
+                const d = max - min;
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                switch (max) {
+                    case r:
+                        h = (g - b) / d + (g < b ? 6 : 0);
+                        break;
+                    case g:
+                        h = (b - r) / d + 2;
+                        break;
+                    case b:
+                        h = (r - g) / d + 4;
+                        break;
+                }
+                if (h === undefined) {
+                    throw new Error('Error converting RGB to HSL');
+                }
+                h /= 6;
             }
 
-            await this.getLightById(lightId).catch((error: any) => {
+            return {
+                hue: Math.round(h * 65535),
+                sat: Math.round(s * 254),
+            };
+        }
+        const newColor = rgbToHueSat(hexToRgb(color));
+        const hue = newColor.hue;
+        const sat = newColor.sat;
+        Logger.debug(`Hue: ${hue}, Sat: ${sat}`);
+        const lightState = new v3.lightStates.LightState()
+            .on()
+            .hue(hue)
+            .sat(sat);
+        Logger.info(
+            `Call api with lightId: ${lightId}, lightState: ${lightState}`,
+        );
+        await this.api.lights
+            .setLightState(lightId, lightState)
+            .catch((error: any) => {
                 throw error;
             });
-
-            function hexToRgb(hex: string) {
-                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(
-                    hex,
-                );
-                if (result === null) {
-                    throw new Error('Error converting hex to RGB');
-                }
-                return {
-                    r: parseInt(result[1], 16),
-                    g: parseInt(result[2], 16),
-                    b: parseInt(result[3], 16),
-                };
-            }
-
-            function rgbToHueSat(rgb: { r: number; g: number; b: number }) {
-                const r = rgb.r / 255;
-                const g = rgb.g / 255;
-                const b = rgb.b / 255;
-
-                const max = Math.max(r, g, b),
-                    min = Math.min(r, g, b);
-                let h,
-                    s = (max + min) / 2;
-                const l = s;
-                if (max === min) {
-                    h = s = 0; // achromatic
-                } else {
-                    const d = max - min;
-                    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-                    switch (max) {
-                        case r:
-                            h = (g - b) / d + (g < b ? 6 : 0);
-                            break;
-                        case g:
-                            h = (b - r) / d + 2;
-                            break;
-                        case b:
-                            h = (r - g) / d + 4;
-                            break;
-                    }
-                    if (h === undefined) {
-                        throw new Error('Error converting RGB to HSL');
-                    }
-                    h /= 6;
-                }
-
-                return {
-                    hue: Math.round(h * 65535),
-                    sat: Math.round(s * 254),
-                };
-            }
-            const newColor = rgbToHueSat(hexToRgb(color));
-            const hue = newColor.hue;
-            const sat = newColor.sat;
-            Logger.debug(`Hue: ${hue}, Sat: ${sat}`);
-            const lightState = new v3.lightStates.LightState()
-                .on()
-                .hue(hue)
-                .sat(sat);
-            Logger.info(
-                `Call api with lightId: ${lightId}, lightState: ${lightState}`,
-            );
-            await this.api.lights
-                .setLightState(lightId, lightState)
-                .catch((error: any) => {
-                    throw error;
-                });
-            Logger.info(`Light ${lightId} color set to ${color}`);
-        } catch (error: any) {
-            Logger.error(
-                `Error setting light color for light ${lightId}:`,
-                error,
-            );
-        }
+        Logger.info(`Light ${lightId} color set to ${color}`);
     }
 
     public async getLightState(lightId: number): Promise<any> {
-        try {
-            if (!this.api) {
-                throw new Error('Hue API not initialized.');
-            }
-            const light = await this.getLightById(lightId).catch(
-                (error: any) => {
-                    throw error;
-                },
-            );
-            const lightState = light.state;
-            lightState.bri = Math.round((lightState.bri / 254) * 100);
-            return lightState;
-        } catch (error: any) {
-            Logger.error('Error getting light state');
-            throw error;
+        if (!this.api) {
+            throw new Error('Hue API not initialized.');
         }
+        const light = await this.getLightById(lightId).catch((error: any) => {
+            throw error;
+        });
+        const lightState = light.state;
+        lightState.bri = Math.round((lightState.bri / 254) * 100);
+        return lightState;
     }
 }
