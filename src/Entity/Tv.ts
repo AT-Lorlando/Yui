@@ -68,10 +68,10 @@ export class TV extends Entity {
             case 'channel':
                 await this.set_channel(parseInt(value, 10));
                 break;
-            case 'state':
-                if (value === 'on') {
+            case 'power':
+                if (value === '0') {
                     await this.turnon();
-                } else if (value === 'off') {
+                } else if (value === '1') {
                     await this.turnoff();
                 }
                 break;
@@ -79,4 +79,8 @@ export class TV extends Entity {
                 throw new Error(`Property ${property} not found`);
         }
     }
+}
+
+export async function initTestTVs(): Promise<Entity[]> {
+    return [new TV('TV', 301, 'Living room')];
 }

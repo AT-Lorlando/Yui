@@ -203,9 +203,8 @@ export default class HueController {
             await this.api.lights.setLightState(lightId, lightState);
             Logger.info(`Light ${lightId} turned ${on ? 'on' : 'off'}`);
         } catch (error: any) {
-            Logger.error(
-                `Error setting light state for light ${lightId}:`,
-                error.message,
+            throw new Error(
+                `Error setting light state for light ${lightId}:` + error,
             );
         }
     }
