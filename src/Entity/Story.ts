@@ -1,16 +1,19 @@
 import { Category, Role, StoryContent, LlmResponse } from '../types/types';
 import Logger from '../Logger';
-
+import fs from 'fs';
 class Story {
     public resume: string | undefined;
     public content = [] as StoryContent;
+    private id = Math.floor(Math.random() * 1000000);
 
     constructor(
         public category: Category,
-        order: string,
+        public readonly systemPrompt: string,
+        public readonly order: string,
         public readonly createdAt: Date = new Date(),
     ) {
         this.content = [];
+        this.addStep('system', systemPrompt);
         this.addStep('user', order);
     }
 
@@ -24,23 +27,45 @@ class Story {
     public addAssistantStep(response: LlmResponse) {
         let content = `{"commands":[`;
         for (const command of response.commands) {
-            content += `"command":${command.name}","payload":"${command.parameters}"`;
+            content += `"command":${command.name}"`;
+            if ('parameters' in command) {
+                if (command.parameters.text) {
+                    content += `,"text":"${command.parameters.text}"`;
+                } else {
+                    content += `,"payload":"{"entity":${
+                        command.parameters.entity
+                    }, "stateChanges":${command.parameters.stateChanges.map(
+                        (stateChange) =>
+                            `{"property":${stateChange.property},"value":${stateChange.value}}`,
+                    )}"`;
+                }
+            }
         }
         content += ']}';
         this.addStep('assistant', content);
     }
 
     public stringify() {
-        let result = '';
-        for (const step of this.content) {
-            result += `{"role":"${step.role}","content":"${step.content}"}`;
+        let result = '[';
+        result += `{"role":"system","content":"SYSTEM PROMPT"},`;
+        for (let i = 1; i < this.content.length; i++) {
+            const step = this.content[i];
+            result += `{"role":"${step.role}","content":"${step.content
+                .replace(/"/g, '\\"')
+                .replace(/\n/g, '\\n')
+                .trim()}"}`;
+            if (i !== this.content.length - 1) {
+                result += ',';
+            }
         }
+        result += ']';
         return result;
     }
 
     public Save(): void {
-        Logger.info('Story save' + this.createdAt);
-        Logger.debug(this.stringify());
+        const data = this.stringify();
+        fs.writeFileSync(`stories/story-${this.id}.json`, data);
+        Logger.info('Story saved');
     }
 }
 

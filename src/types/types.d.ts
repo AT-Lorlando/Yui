@@ -13,21 +13,27 @@ export interface Content {
     content: string;
 }
 
+export interface parameters {
+    entity: string;
+    stateChanges: stateChange[];
+    text?: string;
+}
+
 export type StoryContent = Content[];
 
 export interface DomoticCommand {
     name: 'SetEntityState' | 'GetWeather';
-    parameters: string;
+    parameters: parameters;
 }
 
 export interface BrowserCommand {
     name: 'OpenBrowser' | 'GoToUrl';
-    parameters: string;
+    parameters: parameters;
 }
 
 export interface GeneralCommand {
     name: 'AskUser' | 'Say';
-    parameters: string;
+    parameters: parameters;
 }
 
 export type RouterLlmResponse = {

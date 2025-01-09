@@ -1,65 +1,85 @@
 import LlmController from '../Controller/LlmController';
 import Story from '../Entity/Story';
-import { Category, Order, StoryContent } from '../types/types';
+import {
+    BrowserCommand,
+    Category,
+    DomoticCommand,
+    GeneralCommand,
+    Order,
+    StoryContent,
+} from '../types/types';
 import Logger from '../Logger';
 import CommandExecutor from './CommandExecutor';
+import Entity from '../Entity/Entity';
 
 export default class Orchestrator {
+    public entities: Entity[];
     constructor(
         private readonly CommandExecutor: CommandExecutor,
         private readonly llmController = new LlmController(),
-    ) {}
+    ) {
+        this.entities = CommandExecutor.entities;
+    }
 
     async aNewStoryBegin(order: Order): Promise<Story> {
         const category = await this.getOrderCategory(order);
-        const story = new Story(category, order.content);
-        let response = await this.llmController.sendToLlm(
-            category,
-            story.content,
-        );
-        const systemPrompt = await this.llmController.getLlmSystemPrompt(
+        let systemPrompt = await this.llmController.getLlmSystemPrompt(
             category,
         );
-        story.addStep('system', systemPrompt);
+        systemPrompt = systemPrompt.replace(
+            '<entities_placeholder>',
+            this.entities.map((entity) => entity.__str__()).join('\n'),
+        );
 
+        const story = new Story(category, systemPrompt, order.content);
         let shouldBreak = false;
 
-        for (let turn = 0; turn <= 10; turn++) {
+        for (let turn = 0; turn <= 5; turn++) {
             if (shouldBreak) {
                 break;
             }
+
+            const response = await this.llmController.sendToLlm(
+                category,
+                story.content,
+            );
             story.addAssistantStep(response);
             let result = '';
-            for (const command of response.commands) {
-                Logger.info(
-                    'Plugin: Evaluating ' +
-                        command.name +
-                        ' command with ' +
-                        command.parameters,
-                );
-                result += `Output ${command.name}(${command.parameters}): Success\n`;
 
-                if (String(command.name) == 'Say') {
+            for (let command of response.commands) {
+                if (String(command.name) === 'Say') {
+                    command = command as GeneralCommand;
+                    Logger.info('Plugin: Evaluating Say command');
+                    Logger.info(command.parameters.text);
                     shouldBreak = true;
                     break;
                 }
-                if (command.name == 'AskUser') {
+
+                if (command.name === 'AskUser') {
                     story.addStep('user', result);
                 } else {
-                    await this.evaluateCommand(
-                        command.name,
-                        command.parameters,
+                    command = command as DomoticCommand | BrowserCommand;
+                    Logger.info(
+                        'Plugin: Evaluating ' +
+                            command.name +
+                            ' command with ' +
+                            command.parameters.entity +
+                            ' and ' +
+                            command.parameters.stateChanges.map(
+                                (stateChange) =>
+                                    stateChange.property +
+                                    ':' +
+                                    stateChange.value,
+                            ),
                     );
-                    story.addStep('system', result);
+                    result +=
+                        (await this.evaluateCommand(
+                            command.name,
+                            command.parameters,
+                        )) + '\n';
                 }
             }
-
-            if (!shouldBreak) {
-                response = await this.llmController.sendToLlm(
-                    category,
-                    story.content,
-                );
-            }
+            story.addStep('system', result);
         }
         story.Save();
         return story;
@@ -80,16 +100,23 @@ export default class Orchestrator {
         return result.category;
     }
 
-    async evaluateCommand(command: string, parameters: any): Promise<void> {
+    async evaluateCommand(command: string, parameters: any): Promise<string> {
         const entity = parameters.entity;
         const state = parameters.stateChanges;
-        Logger.info(entity);
-        Logger.info(state);
         switch (command) {
-            case 'setEntityState':
-                return this.CommandExecutor.setEntityState(entity, state);
+            case 'SetEntityState':
+                try {
+                    await this.CommandExecutor.setEntityState(entity, state);
+                    return 'Entity state set';
+                } catch (e) {
+                    if (e instanceof Error) {
+                        return e.message;
+                    } else {
+                        return String(e);
+                    }
+                }
             default:
-                return;
+                return 'Command not found';
         }
     }
 }

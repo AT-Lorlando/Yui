@@ -9,7 +9,7 @@ import SpotifyController from '../Controller/SpotifyController';
 import { stateChange } from '../types/types';
 
 export default class CommandExecutor {
-    entities: Entity[];
+    public entities: Entity[];
     private spotifyController!: SpotifyController;
     private timedEvents: { time: number; callback: () => void }[] = [];
 
@@ -49,8 +49,10 @@ export default class CommandExecutor {
         stateChanges: stateChange[],
     ): Promise<void> {
         Logger.info(`Setting state of entity ${entityID}`);
-        Logger.info(`State changes: ${stateChanges}`);
         const entity = this.getEntity(entityID) as Entity;
+        if (entity === undefined) {
+            throw new Error(`Entity with id ${entityID} not found`);
+        }
         for (const stateChange of stateChanges) {
             const { property, value } = stateChange;
             await entity.setState(property, value);
