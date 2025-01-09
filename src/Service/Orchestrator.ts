@@ -44,7 +44,7 @@ export default class Orchestrator {
                 story.content,
             );
             story.addAssistantStep(response);
-            let result = '';
+            let result = 'Result for each commands:\n';
 
             for (let command of response.commands) {
                 if (String(command.name) === 'Say') {
@@ -73,10 +73,11 @@ export default class Orchestrator {
                             ),
                     );
                     result +=
+                        `\n${command.name}(${command.parameters.entity}): ` +
                         (await this.evaluateCommand(
                             command.name,
                             command.parameters,
-                        )) + '\n';
+                        ));
                 }
             }
             story.addStep('system', result);
@@ -101,7 +102,7 @@ export default class Orchestrator {
     }
 
     async evaluateCommand(command: string, parameters: any): Promise<string> {
-        const entity = parameters.entity;
+        const entity = parseInt(parameters.entity);
         const state = parameters.stateChanges;
         switch (command) {
             case 'SetEntityState':
