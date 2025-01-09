@@ -1,5 +1,11 @@
 export type Category = 'Router' | 'Domotic' | 'Browser' | 'General';
 
+export interface Response {
+    status: string;
+    message: string;
+    content?: any;
+}
+
 export type Order = {
     content: string;
     // user ?

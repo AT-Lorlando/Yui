@@ -47,16 +47,27 @@ export default class CommandExecutor {
     public async setEntityState(
         entityID: number,
         stateChanges: stateChange[],
-    ): Promise<void> {
-        Logger.info(`Setting state of entity ${entityID}`);
+    ): Promise<string> {
+        Logger.debug(`Setting state of entity ${entityID}`);
         const entity = this.getEntity(entityID) as Entity;
         if (entity === undefined) {
             throw new Error(`Entity with id ${entityID} not found`);
         }
+
         for (const stateChange of stateChanges) {
             const { property, value } = stateChange;
-            await entity.setState(property, value);
+            try {
+                const response = await entity.setState(property, value);
+                if (response.status === 'error') {
+                    return response.message;
+                    // throw new Error(response.message);
+                }
+            } catch (error: any) {
+                Logger.error(error.message);
+                return error.message;
+            }
         }
+        return 'Success';
     }
 
     async spotifyAuth(code: string): Promise<void> {
