@@ -69,9 +69,9 @@ export class TV extends Entity {
                 await this.set_channel(parseInt(value, 10));
                 break;
             case 'power':
-                if (value === '0') {
+                if (value === '1') {
                     await this.turnon();
-                } else if (value === '1') {
+                } else if (value === '0') {
                     await this.turnoff();
                 }
                 break;
