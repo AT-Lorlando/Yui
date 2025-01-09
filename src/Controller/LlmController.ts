@@ -11,7 +11,7 @@ import {
 import Logger from '../Logger';
 import { promises as fs } from 'fs';
 import { getChatCompletion } from '../Service/MockOpenAi';
-
+import { removeJsonComments } from '../Service/JsonUtils';
 export default class LlmController {
     public async sendToLlm(
         category: 'Router',
@@ -50,7 +50,7 @@ export default class LlmController {
         Logger.debug(`parsing ${response}`);
         let parsed = '';
         try {
-            parsed = JSON.parse(response);
+            parsed = JSON.parse(removeJsonComments(response));
         } catch (error) {
             throw new Error(
                 'Invalid response, the response is not a JSON\n' + response,

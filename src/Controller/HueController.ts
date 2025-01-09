@@ -204,7 +204,7 @@ export default class HueController {
             Logger.info(`Light ${lightId} turned ${on ? 'on' : 'off'}`);
         } catch (error: any) {
             throw new Error(
-                `Error setting light state for light ${lightId}:` + error,
+                `Error setting light state for light ${lightId}: ` + error,
             );
         }
     }
