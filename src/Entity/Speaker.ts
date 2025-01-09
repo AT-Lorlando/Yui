@@ -47,10 +47,10 @@ export class Speaker extends Entity {
                     await this.lower_volume();
                 }
                 break;
-            case 'state':
-                if (value === 'play') {
+            case 'power':
+                if (value === '1') {
                     await this.play(value);
-                } else if (value === 'stop') {
+                } else if (value === '0') {
                     await this.stop();
                 }
                 break;
@@ -74,4 +74,8 @@ export async function initSpeakers(
         );
     });
     return speakersArray;
+}
+
+export async function initTestSpeakers(): Promise<Entity[]> {
+    return [new Speaker('Speaker', 201, 'Living room')];
 }

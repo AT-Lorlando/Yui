@@ -17,10 +17,10 @@ export class Door extends Entity {
 
     async setState(property: string, value: string): Promise<void> {
         switch (property) {
-            case 'state':
-                if (value === 'unlock') {
+            case 'lock':
+                if (value === '0') {
                     await this.unlock();
-                } else if (value === 'lock') {
+                } else if (value === '1') {
                     await this.lock();
                 }
                 break;
@@ -28,4 +28,8 @@ export class Door extends Entity {
                 throw new Error(`Property ${property} not found`);
         }
     }
+}
+
+export async function initTestDoors(): Promise<Entity[]> {
+    return [new Door('Door', 401, 'Entrance')];
 }

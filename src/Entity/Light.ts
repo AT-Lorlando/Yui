@@ -3,15 +3,13 @@ import Entity from './Entity';
 import Logger from '../Logger';
 
 export class Light extends Entity {
-    private hueController: HueController;
     constructor(
-        name: string,
+        public name: string,
         public id: number,
         public room: string,
-        hueController: HueController,
+        private hueController: HueController,
     ) {
         super(name, id, room);
-        this.hueController = hueController;
     }
 
     async turnoff(): Promise<void> {
@@ -84,10 +82,10 @@ export class Light extends Entity {
             case 'color':
                 await this.set_color(value);
                 break;
-            case 'state':
-                if (value === 'on') {
+            case 'power':
+                if (value === '1') {
                     await this.turnon();
-                } else if (value === 'off') {
+                } else if (value === '0') {
                     await this.turnoff();
                 }
                 break;
@@ -126,7 +124,12 @@ export async function initLights(
 export async function initTestLights(
     hueController: HueController,
 ): Promise<Entity[]> {
-    const light1 = new Light('Light1', 1, 'Living Room', hueController);
-    const light2 = new Light('Light2', 2, 'Living Room', hueController);
-    return [light1, light2];
+    return [
+        new Light('Plafond', 101, 'Living Room', hueController),
+        new Light('Lampadaire', 102, 'Living Room', hueController),
+        new Light('Cuisine', 103, 'Living Room', hueController),
+        new Light('Plafond', 104, 'Chamber', hueController),
+        new Light('Chevet', 105, 'Chamber', hueController),
+        new Light('Bureau', 106, 'Desk', hueController),
+    ];
 }

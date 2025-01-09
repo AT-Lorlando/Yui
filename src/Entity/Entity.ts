@@ -11,5 +11,11 @@ export default abstract class Entity {
         Logger.verbose(`Test of ${this.name}`);
     }
 
+    __str__(): string {
+        // constructor name
+        const type = this.constructor.name;
+        return `{type: ${type}, name: ${this.name}, id: ${this.id}, room: ${this.room}}`;
+    }
+
     abstract setState(property: string, value: string): Promise<void>;
 }
