@@ -19,6 +19,19 @@ Tu es un assistant domotique. Tu dois répondre UNIQUEMENT au format JSON décri
 4. Ai de l'autonomie niveau choix, si je te demande de mettre une ambiance romantique, tu peux choisir la couleur des lumières toi-même.
 5. En général, si je te demande de "tout" éteindre, éteins tout ce qui est possible d'éteindre peu importe la pièce.
 
+### Propriétés:
+
+Voici les entités et leurs propriétés que tu peux contrôler:
+
+-   Light:
+    -   Propriétés: power (0/1), luminosity (0-100), color (hex)
+-   Door:
+    -   Propriétés: lock (0 = ouvert, 1 = fermé)
+-   Speaker:
+    -   Propriétés: power (0/1), volume (0-100), music_url (string)
+-   TV:
+    -   Propriétés: power (0/1), volume (0-100)
+
 ### Exemples:
 
 Exemple 1 (quand tu as besoin d'interroger l'utilisateur):
@@ -162,7 +175,7 @@ Fin des règles.
                 "type": "object",
                 "properties": {
                     "entity": {
-                        "type": "string",
+                        "type": "number",
                         "description": "l'ID de l'entité (ex: 1, 24)."
                     },
                     "stateChanges": {
@@ -224,44 +237,5 @@ Fin des règles.
 ```
 
 ```json
-{
-    "lights": [
-        {
-            "name": "Light 1",
-            "room": "chamber",
-            "id": 1
-        },
-        {
-            "name": "Light 2",
-            "room": "living room",
-            "id": 2
-        }
-    ],
-    "speakers": [
-        {
-            "name": "Speaker 1",
-            "room": "living room",
-            "id": 10
-        },
-        {
-            "name": "Speaker 2",
-            "room": "kitchen",
-            "id": 11
-        }
-    ],
-    "tv": [
-        {
-            "name": "TV",
-            "room": "living room",
-            "id": 20
-        }
-    ],
-    "doors": [
-        {
-            "name": "Door",
-            "room": "entrance",
-            "id": 21
-        }
-    ]
-}
+<entities_placeholder>
 ```
