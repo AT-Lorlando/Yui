@@ -84,8 +84,8 @@ export default class LlmController {
 
     private async generate(payload: StoryContent): Promise<string> {
         const response = await getChatCompletion(payload);
-        Logger.info('Sending: ' + payload[payload.length - 1].content);
-        Logger.info('Response from OpenAI: ' + response);
+        Logger.debug('Sending: ' + payload[payload.length - 1].content);
+        Logger.debug('Response from OpenAI: ' + response);
         return response || '';
     }
 }

@@ -1,6 +1,7 @@
 import HueController from '../Controller/HueController';
 import Entity from './Entity';
 import Logger from '../Logger';
+import { Response } from '../types/types';
 
 export class Light extends Entity {
     constructor(
@@ -12,85 +13,95 @@ export class Light extends Entity {
         super(name, id, room);
     }
 
-    async turnoff(): Promise<void> {
-        await this.hueController
-            .setLightState(this.id, false)
-            .catch((error) => {
-                throw error;
-            });
-    }
-
-    async turnon(): Promise<void> {
-        await this.hueController.setLightState(this.id, true).catch((error) => {
-            throw error;
-        });
-    }
-
-    async set_luminosity(luminosity: number): Promise<void> {
-        const state = await this.hueController.getLightState(this.id);
-        if (state.on === false) {
-            await this.hueController.setLightState(this.id, true);
+    async turnoff(): Promise<Response> {
+        try {
+            await this.hueController.setLightState(this.id, false);
+            return { status: 'success', message: 'Light turned off' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
         }
-        await this.hueController
-            .setLightBrightness(this.id, luminosity)
-            .catch((error) => {
-                throw error;
-            });
     }
 
-    async set_color(color: string): Promise<void> {
-        await this.hueController
-            .setLightColor(this.id, color)
-            .catch((error) => {
-                throw error;
-            });
+    async turnon(): Promise<Response> {
+        try {
+            await this.hueController.setLightState(this.id, true);
+            return { status: 'success', message: 'Light turned on' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
+        }
     }
 
-    async lower_luminosity(): Promise<void> {
-        const state = await this.hueController
-            .getLightState(this.id)
-            .catch((error) => {
-                throw error;
-            });
-        const luminosity = state.bri;
-        await this.hueController
-            .setLightBrightness(this.id, luminosity - 10)
-            .catch((error) => {
-                throw error;
-            });
+    async set_luminosity(luminosity: number): Promise<Response> {
+        try {
+            const state = await this.hueController.getLightState(this.id);
+            if (state.on === false) {
+                await this.hueController.setLightState(this.id, true);
+            }
+            await this.hueController.setLightBrightness(this.id, luminosity);
+            return { status: 'success', message: 'Luminosity set' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
+        }
     }
 
-    async raise_luminosity(): Promise<void> {
-        const state = await this.hueController
-            .getLightState(this.id)
-            .catch((error) => {
-                throw error;
-            });
-        const luminosity = state.bri;
-        await this.hueController
-            .setLightBrightness(this.id, luminosity + 10)
-            .catch((error) => {
-                throw error;
-            });
+    async set_color(color: string): Promise<Response> {
+        try {
+            await this.hueController.setLightColor(this.id, color);
+            return { status: 'success', message: 'Color set' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
+        }
     }
 
-    async setState(property: string, value: string): Promise<void> {
-        switch (property) {
-            case 'luminosity':
-                await this.set_luminosity(parseInt(value, 10));
-                break;
-            case 'color':
-                await this.set_color(value);
-                break;
-            case 'power':
-                if (value === '1') {
-                    await this.turnon();
-                } else if (value === '0') {
-                    await this.turnoff();
-                }
-                break;
-            default:
-                throw new Error(`Property ${property} not found`);
+    async lower_luminosity(): Promise<Response> {
+        try {
+            const state = await this.hueController.getLightState(this.id);
+            const luminosity = state.bri;
+            await this.hueController.setLightBrightness(
+                this.id,
+                luminosity - 10,
+            );
+            return { status: 'success', message: 'Luminosity lowered' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
+        }
+    }
+
+    async raise_luminosity(): Promise<Response> {
+        try {
+            const state = await this.hueController.getLightState(this.id);
+            const luminosity = state.bri;
+            await this.hueController.setLightBrightness(
+                this.id,
+                luminosity + 10,
+            );
+            return { status: 'success', message: 'Luminosity raised' };
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
+        }
+    }
+
+    async setState(property: string, value: string): Promise<Response> {
+        try {
+            switch (property) {
+                case 'luminosity':
+                    return await this.set_luminosity(parseInt(value, 10));
+                case 'color':
+                    return await this.set_color(value);
+                case 'power':
+                    if (value === '1') {
+                        return await this.turnon();
+                    } else if (value === '0') {
+                        return await this.turnoff();
+                    }
+                    throw new Error(
+                        `Value ${value} not valid for property ${property}`,
+                    );
+                default:
+                    throw new Error(`Property ${property} not found`);
+            }
+        } catch (error: any) {
+            return { status: 'error', message: error.message };
         }
     }
 }

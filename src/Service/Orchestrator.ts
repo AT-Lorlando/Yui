@@ -44,7 +44,7 @@ export default class Orchestrator {
                 story.content,
             );
             story.addAssistantStep(response);
-            let result = 'Result for each commands:\n';
+            let result = 'Result for each commands:';
 
             for (let command of response.commands) {
                 if (String(command.name) === 'Say') {
@@ -59,7 +59,7 @@ export default class Orchestrator {
                     story.addStep('user', result);
                 } else {
                     command = command as DomoticCommand | BrowserCommand;
-                    Logger.info(
+                    Logger.debug(
                         'Plugin: Evaluating ' +
                             command.name +
                             ' command with ' +
@@ -107,8 +107,10 @@ export default class Orchestrator {
         switch (command) {
             case 'SetEntityState':
                 try {
-                    await this.CommandExecutor.setEntityState(entity, state);
-                    return 'Entity state set';
+                    return await this.CommandExecutor.setEntityState(
+                        entity,
+                        state,
+                    );
                 } catch (e) {
                     if (e instanceof Error) {
                         return e.message;
