@@ -8,6 +8,10 @@ export class Speaker extends Entity {
         super(name, id, room);
     }
 
+    /**
+     * Stops the speaker.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async stop(): Promise<Response> {
         try {
             console.log(`The speaker ${this.name} in ${this.room} is off.`);
@@ -18,6 +22,11 @@ export class Speaker extends Entity {
         }
     }
 
+    /**
+     * Plays a given URL on the speaker.
+     * @param {string} url - The URL to play.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async play(url: string): Promise<Response> {
         try {
             console.log(
@@ -30,6 +39,11 @@ export class Speaker extends Entity {
         }
     }
 
+    /**
+     * Sets the volume of the speaker.
+     * @param {number} volume - The desired volume level.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async set_volume(volume: number): Promise<Response> {
         try {
             console.log(
@@ -42,6 +56,10 @@ export class Speaker extends Entity {
         }
     }
 
+    /**
+     * Lowers the volume of the speaker.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async lower_volume(): Promise<Response> {
         try {
             console.log(
@@ -54,6 +72,10 @@ export class Speaker extends Entity {
         }
     }
 
+    /**
+     * Raises the volume of the speaker.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async raise_volume(): Promise<Response> {
         try {
             console.log(
@@ -65,37 +87,13 @@ export class Speaker extends Entity {
             return { status: 'error', message: error.message };
         }
     }
-
-    async setState(property: string, value: string): Promise<Response> {
-        try {
-            switch (property) {
-                case 'volume':
-                    if (value === 'up') {
-                        return await this.raise_volume();
-                    } else if (value === 'down') {
-                        return await this.lower_volume();
-                    }
-                    throw new Error(
-                        `Invalid value ${value} for property ${property}`,
-                    );
-                case 'power':
-                    if (value === '1') {
-                        return await this.play(value);
-                    } else if (value === '0') {
-                        return await this.stop();
-                    }
-                    throw new Error(
-                        `Invalid value ${value} for property ${property}`,
-                    );
-                default:
-                    throw new Error(`Property ${property} not found`);
-            }
-        } catch (error: any) {
-            return { status: 'error', message: error.message };
-        }
-    }
 }
 
+/**
+ * Initializes the speakers using the Spotify controller.
+ * @param {SpotifyController} spotifyController - The Spotify controller instance.
+ * @returns {Promise<Entity[]>} - A promise that resolves to an array of speakers.
+ */
 export async function initSpeakers(
     spotifyController: SpotifyController,
 ): Promise<Entity[]> {
@@ -112,6 +110,10 @@ export async function initSpeakers(
     return speakersArray;
 }
 
+/**
+ * Initializes test speakers.
+ * @returns {Promise<Entity[]>} - A promise that resolves to an array of test speakers.
+ */
 export async function initTestSpeakers(): Promise<Entity[]> {
     return [new Speaker('Speaker', 201, 'Living room')];
 }

@@ -13,7 +13,11 @@ export class Light extends Entity {
         super(name, id, room);
     }
 
-    async turnoff(): Promise<Response> {
+    /**
+     * Turns off the light.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
+    async turn_off(): Promise<Response> {
         try {
             await this.hueController.setLightState(this.id, false);
             return { status: 'success', message: 'Light turned off' };
@@ -22,7 +26,11 @@ export class Light extends Entity {
         }
     }
 
-    async turnon(): Promise<Response> {
+    /**
+     * Turns on the light.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
+    async turn_on(): Promise<Response> {
         try {
             await this.hueController.setLightState(this.id, true);
             return { status: 'success', message: 'Light turned on' };
@@ -31,6 +39,11 @@ export class Light extends Entity {
         }
     }
 
+    /**
+     * Sets the luminosity of the light.
+     * @param {number} luminosity - The desired luminosity level, between 0 and 254.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async set_luminosity(luminosity: number): Promise<Response> {
         try {
             const state = await this.hueController.getLightState(this.id);
@@ -44,6 +57,11 @@ export class Light extends Entity {
         }
     }
 
+    /**
+     * Sets the color of the light.
+     * @param {string} color - The desired color as HEX value, e.g. '#FF0000'
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async set_color(color: string): Promise<Response> {
         try {
             await this.hueController.setLightColor(this.id, color);
@@ -53,6 +71,10 @@ export class Light extends Entity {
         }
     }
 
+    /**
+     * Lowers the luminosity of the light by 10 units.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async lower_luminosity(): Promise<Response> {
         try {
             const state = await this.hueController.getLightState(this.id);
@@ -67,6 +89,10 @@ export class Light extends Entity {
         }
     }
 
+    /**
+     * Raises the luminosity of the light by 10 units.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async raise_luminosity(): Promise<Response> {
         try {
             const state = await this.hueController.getLightState(this.id);
@@ -76,30 +102,6 @@ export class Light extends Entity {
                 luminosity + 10,
             );
             return { status: 'success', message: 'Luminosity raised' };
-        } catch (error: any) {
-            return { status: 'error', message: error.message };
-        }
-    }
-
-    async setState(property: string, value: string): Promise<Response> {
-        try {
-            switch (property) {
-                case 'luminosity':
-                    return await this.set_luminosity(parseInt(value, 10));
-                case 'color':
-                    return await this.set_color(value);
-                case 'power':
-                    if (value === '1') {
-                        return await this.turnon();
-                    } else if (value === '0') {
-                        return await this.turnoff();
-                    }
-                    throw new Error(
-                        `Value ${value} not valid for property ${property}`,
-                    );
-                default:
-                    throw new Error(`Property ${property} not found`);
-            }
         } catch (error: any) {
             return { status: 'error', message: error.message };
         }

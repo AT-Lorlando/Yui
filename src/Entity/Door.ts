@@ -6,6 +6,10 @@ export class Door extends Entity {
         super(name, id, room);
     }
 
+    /**
+     * Locks the door.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async lock(): Promise<Response> {
         try {
             console.log(`The door is locked.`);
@@ -16,6 +20,10 @@ export class Door extends Entity {
         }
     }
 
+    /**
+     * Unlocks the door.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async unlock(): Promise<Response> {
         try {
             console.log(`The door is unlocked.`);
@@ -25,28 +33,12 @@ export class Door extends Entity {
             return { status: 'error', message: error.message };
         }
     }
-
-    async setState(property: string, value: string): Promise<Response> {
-        try {
-            switch (property) {
-                case 'lock':
-                    if (value === '0') {
-                        return await this.unlock();
-                    } else if (value === '1') {
-                        return await this.lock();
-                    }
-                    throw new Error(
-                        `Invalid value ${value} for property ${property}`,
-                    );
-                default:
-                    throw new Error(`Property ${property} not found`);
-            }
-        } catch (error: any) {
-            return { status: 'error', message: error.message };
-        }
-    }
 }
 
+/**
+ * Initializes test doors.
+ * @returns {Promise<Entity[]>} - A promise that resolves to an array of test doors.
+ */
 export async function initTestDoors(): Promise<Entity[]> {
     return [new Door('Door', 401, 'Entrance')];
 }
