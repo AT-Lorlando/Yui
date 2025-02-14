@@ -6,36 +6,11 @@ export class TV extends Entity {
         super(name, id, room);
     }
 
-    async specialCommand(command: string, args?: [any]): Promise<Response> {
-        try {
-            switch (command) {
-                case 'set_channel':
-                    if (args === undefined) {
-                        throw new Error(
-                            `Missing argument for command ${command}`,
-                        );
-                    }
-                    return await this.set_channel(args[0]);
-                case 'set_volume':
-                    if (args === undefined) {
-                        throw new Error(
-                            `Missing argument for command ${command}`,
-                        );
-                    }
-                    return await this.set_volume(args[0]);
-                case 'lower_volume':
-                    return await this.lower_volume();
-                case 'raise_volume':
-                    return await this.raise_volume();
-                default:
-                    throw new Error(`Command ${command} not supported`);
-            }
-        } catch (error: any) {
-            return { status: 'error', message: error.message };
-        }
-    }
-
-    async turnoff(): Promise<Response> {
+    /**
+     * Turns off the TV.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
+    async turn_off(): Promise<Response> {
         try {
             console.log(`The TV is off.`);
             // Add code here to turn off the TV
@@ -45,7 +20,11 @@ export class TV extends Entity {
         }
     }
 
-    async turnon(): Promise<Response> {
+    /**
+     * Turns on the TV.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
+    async turn_on(): Promise<Response> {
         try {
             console.log(`The TV is on.`);
             // Add code here to turn on the TV
@@ -55,6 +34,11 @@ export class TV extends Entity {
         }
     }
 
+    /**
+     * Sets the TV channel.
+     * @param {number} channel - The desired channel number.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async set_channel(channel: number): Promise<Response> {
         try {
             console.log(`The TV channel is set to ${channel}.`);
@@ -65,6 +49,11 @@ export class TV extends Entity {
         }
     }
 
+    /**
+     * Sets the TV volume.
+     * @param {number} volume - The desired volume level.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async set_volume(volume: number): Promise<Response> {
         try {
             console.log(`The TV volume is set to ${volume}.`);
@@ -75,6 +64,10 @@ export class TV extends Entity {
         }
     }
 
+    /**
+     * Lowers the TV volume.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async lower_volume(): Promise<Response> {
         try {
             console.log(`The TV volume is lowered.`);
@@ -85,6 +78,10 @@ export class TV extends Entity {
         }
     }
 
+    /**
+     * Raises the TV volume.
+     * @returns {Promise<Response>} - The response indicating success or failure.
+     */
     async raise_volume(): Promise<Response> {
         try {
             console.log(`The TV volume is raised.`);
@@ -94,32 +91,12 @@ export class TV extends Entity {
             return { status: 'error', message: error.message };
         }
     }
-
-    async setState(property: string, value: string): Promise<Response> {
-        try {
-            switch (property) {
-                case 'volume':
-                    return await this.set_volume(parseInt(value, 10));
-                case 'channel':
-                    return await this.set_channel(parseInt(value, 10));
-                case 'power':
-                    if (value === '1') {
-                        return await this.turnon();
-                    } else if (value === '0') {
-                        return await this.turnoff();
-                    }
-                    throw new Error(
-                        `Value ${value} not supported for property ${property}`,
-                    );
-                default:
-                    throw new Error(`Property ${property} not found`);
-            }
-        } catch (error: any) {
-            return { status: 'error', message: error.message };
-        }
-    }
 }
 
+/**
+ * Initializes test TVs.
+ * @returns {Promise<Entity[]>} - A promise that resolves to an array of test TVs.
+ */
 export async function initTestTVs(): Promise<Entity[]> {
     return [new TV('TV', 301, 'Living room')];
 }
