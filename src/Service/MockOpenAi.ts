@@ -1,4 +1,4 @@
-import { StoryContent } from '../types/types';
+import { StoryMessage } from '../types/types';
 import env from '../env';
 const OPENAI_API_KEY = env.OPENAI_API_KEY;
 
@@ -27,7 +27,7 @@ interface OpenAIResponse {
 }
 
 export async function getChatCompletion(
-    userMessage: StoryContent,
+    userMessage: StoryMessage[],
 ): Promise<string | null> {
     try {
         const response: Response = await fetch(
