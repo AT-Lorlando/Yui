@@ -6,14 +6,6 @@ import Logger from '../Logger';
 import env from '../env';
 import cors from 'cors';
 
-// const BBOX_PASSWORD = env.BBOX_PASSWORD;
-// const PHONE_MAC_ADDRESS = env.PHONE_MAC_ADDRESS;
-// const PHONE_CHECK_INTERVAL = 10;
-// const HOME_POSITION = {
-//     latitude: parseFloat(env.HOME_LATITUDE),
-//     longitude: parseFloat(env.HOME_LONGITUDE),
-// };
-
 export default class Listener {
     private commandExecutor!: CommandExecutor;
 
@@ -29,15 +21,6 @@ export default class Listener {
             throw new Error('Error during the initialisation of Listener');
         }
     }
-
-    // private isBannedIP(ip: string): boolean {
-    //     try {
-    //         const bannedIPs = fs.readFileSync('banned_ips.txt', 'utf8');
-    //         return bannedIPs.includes(ip);
-    //     } catch (error) {
-    //         throw error;
-    //     }
-    // }
 
     private checkPassword(bearer: string | undefined, ip: string): boolean {
         // Todo: Add a rate limiter
@@ -63,117 +46,12 @@ export default class Listener {
             );
             app.use(bodyParser.json());
             app.use(bodyParser.urlencoded({ extended: true }));
-            if (!fs.existsSync('banned_ips.txt')) {
-                fs.writeFileSync('banned_ips.txt', '');
-            }
-
-            app.post('/command', (req: any, res: any) => {
-                if (this.commandExecutor === undefined) {
-                    res.status(500).send('CommandExecutor is down');
-                    throw new Error(
-                        'CommandExecutor is undefined, cannot execute command',
-                    );
-                }
-                const ip =
-                    req.headers['x-forwarded-for'] ||
-                    req.connection.remoteAddress;
-                const bearer = req.headers.authorization;
-                const command = req.body.command;
-                Logger.info(
-                    `WEB Listener: Received order ${command.replace('\n', '')}`,
-                );
-
-                // if (this.isBannedIP(ip)) {
-                //     Logger.error(`Banned IP: ${ip}`);
-                //     res.status(401).send('Unauthorized');
-                //     return;
-                // }
-                if (!this.checkPassword(bearer, ip)) {
-                    Logger.error(`Wrong password from IP: ${ip}`);
-                    res.status(401).send('Unauthorized');
-                    return;
-                }
-
-                try {
-                    switch (command) {
-                        case 'backhome':
-                            Logger.info('Going back home');
-                            res.status(200).send('Going back home');
-                            this.commandExecutor.backHome();
-                            break;
-                        case 'leavehome':
-                            Logger.info('Leaving home');
-                            res.status(200).send('Leaving home');
-                            this.commandExecutor.leaveHome();
-                            break;
-                        default:
-                            //this.commandExecutor.evalCommandFromOrder(command);
-                            res.status(200).send('Order received');
-                            return;
-                    }
-                } catch (error: any) {
-                    Logger.error(error.message);
-                    res.status(500).send(error.message);
-                    return;
-                }
-            });
 
             app.get('/', (req: any, res: any) => {
-                res.status(200).sendFile('assets/index.html', {
-                    root: __dirname,
-                });
-                console.log(req.query.code);
                 if (req.query.code) {
                     this.commandExecutor.spotifyAuth(req.query.code);
                 }
-            });
-
-            app.post('/payload', (req: any, res: any) => {
-                if (this.commandExecutor === undefined) {
-                    res.status(500).send('CommandExecutor is down');
-                    throw new Error(
-                        'CommandExecutor is undefined, cannot execute command',
-                    );
-                }
-                // const ip =
-                //     req.headers['x-forwarded-for'] ||
-                //     req.connection.remoteAddress;
-                // const bearer = req.headers.authorization;
-                const payload = req.body;
-                Logger.info(
-                    `WEB Listener: Received payload ${JSON.stringify(payload)}`,
-                );
-
-                // if (this.isBannedIP(ip)) {
-                //     Logger.error(`Banned IP: ${ip}`);
-                //     res.status(401).send('Unauthorized');
-                //     return;
-                // }
-                // if (!this.checkPassword(bearer, ip)) {
-                //     Logger.error(`Wrong password from IP: ${ip}`);
-                //     res.status(401).send('Unauthorized');
-                //     return;
-                // }
-
-                try {
-                    // Analyse the payload
-                    // The payload should be a JSON object with the following structure:
-                    // {
-                    //     "id": "unique_entity_id",
-                    //     "position": {
-                    //         "latitude": 48.123456,
-                    //         "longitude": 2.123456
-                    //     },
-                    //     "status": "status"
-                    // }
-                    Logger.info(`Payload received: ${JSON.stringify(payload)}`);
-                    res.status(200).send('Payload received');
-                    return;
-                } catch (error: any) {
-                    Logger.error(error.message);
-                    res.status(500).send(error.message);
-                    return;
-                }
+                res.status(200).send('Hello World');
             });
 
             app.listen(port, () => {

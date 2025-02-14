@@ -307,7 +307,6 @@ export default class HueController {
             throw error;
         });
         const lightState = light.state;
-        lightState.bri = Math.round((lightState.bri / 254) * 100);
         return lightState;
     }
 }
