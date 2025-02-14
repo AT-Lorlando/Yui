@@ -1,4 +1,5 @@
-export type Category = 'Router' | 'Domotic' | 'Browser' | 'General';
+export type Category = 'Router' | 'Lights' | 'Browser' | 'General';
+export type Role = 'system' | 'user' | 'assistant';
 
 export interface Response {
     status: string;
@@ -8,62 +9,40 @@ export interface Response {
 
 export type Order = {
     content: string;
-    // user ?
+    timestamp: string;
     // room ?
 };
 
-export type Role = 'system' | 'user' | 'assistant';
+export interface SystemOutput {
+    name: string;
+    entities: number[];
+    success: boolean;
+    error?: string;
+}
 
-export interface Content {
+export interface Command {
+    name: string;
+    entities?: number[];
+    parameters?: Record<string, unknown>;
+}
+
+export type StoryMessage = {
     role: Role;
-    content: string;
-}
+    content?: string;
+    timestamp?: number;
+    commands?: Command[];
+    output?: SystemOutput[];
+};
 
-export interface parameters {
-    entity: string;
-    stateChanges: stateChange[];
-    text?: string;
-}
-
-export type StoryContent = Content[];
-
-export interface DomoticCommand {
-    name: 'SetEntityState' | 'GetWeather';
-    parameters: parameters;
-}
-
-export interface BrowserCommand {
-    name: 'OpenBrowser' | 'GoToUrl';
-    parameters: parameters;
-}
-
-export interface GeneralCommand {
-    name: 'AskUser' | 'Say';
-    parameters: parameters;
-}
-
-export type RouterLlmResponse = {
+export interface LlmRouterQuery {
     category: Category;
-};
+    order: string;
+}
 
-export type DomoticLlmResponse = {
-    commands: DomoticCommand[];
-};
+export interface LlmRouterResponse {
+    queries: LlmRouterQuery[];
+}
 
-export type BrowserLlmResponse = {
-    commands: BrowserCommand[];
-};
-
-export type GeneralLlmResponse = {
-    commands: GeneralCommand[];
-};
-
-export type LlmResponse =
-    | DomoticLlmResponse
-    | BrowserLlmResponse
-    | GeneralLlmResponse;
-
-export type stateChange = {
-    property: string;
-    value: string;
-};
+export interface LlmResponse {
+    commands: Command[];
+}

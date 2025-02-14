@@ -1,46 +1,21 @@
-import {
-    Category,
-    LlmResponse,
-    RouterLlmResponse,
-    DomoticLlmResponse,
-    BrowserLlmResponse,
-    GeneralLlmResponse,
-    StoryContent,
-    Content,
-} from '../types/types';
 import Logger from '../Logger';
 import { promises as fs } from 'fs';
 import { getChatCompletion } from '../Service/MockOpenAi';
 import { removeJsonComments } from '../Service/JsonUtils';
+import {
+    Category,
+    StoryMessage,
+    LlmRouterResponse,
+    LlmResponse,
+} from '../types/types';
 export default class LlmController {
-    public async sendToLlm(
-        category: 'Router',
-        payload: StoryContent,
-    ): Promise<RouterLlmResponse>;
-    public async sendToLlm(
-        category: 'Browser',
-        payload: StoryContent,
-    ): Promise<BrowserLlmResponse>;
-    public async sendToLlm(
-        category: 'Domotic',
-        payload: StoryContent,
-    ): Promise<DomoticLlmResponse>;
-    public async sendToLlm(
-        category: 'General',
-        payload: StoryContent,
-    ): Promise<GeneralLlmResponse>;
-    public async sendToLlm(
-        category: Category,
-        payload: StoryContent,
-    ): Promise<LlmResponse>;
-
     async sendToLlm(
         category: Category,
-        payload: StoryContent,
-    ): Promise<LlmResponse | RouterLlmResponse> {
+        payload: StoryMessage[],
+    ): Promise<LlmResponse | LlmRouterResponse> {
         const systemPrompt = await this.getLlmSystemPrompt(category);
         const finalPayload = [
-            { role: 'system', content: systemPrompt } as Content,
+            { role: 'system', content: systemPrompt } as StoryMessage,
             ...payload,
         ];
         return this.parseResponse(await this.generate(finalPayload), category);
@@ -60,29 +35,30 @@ export default class LlmController {
             throw new Error('JSON is not an object.');
         }
         if (category === 'Router') {
-            if (!('category' in parsed)) {
+            if (!('queries' in parsed)) {
                 throw new Error(
-                    'No Category inside a Router response ' + response,
-                );
-            }
-        } else {
-            if (!('commands' in parsed)) {
-                throw new Error(
-                    `No Commands inside a ${category} response ` + response,
+                    'No Queries inside a Router response ' + response,
                 );
             }
         }
+        // } else {
+        //     if (!('commands' in parsed)) {
+        //         throw new Error(
+        //             `No Commands inside a ${category} response ` + response,
+        //         );
+        //     }
+        // }
         return parsed;
     }
 
     public async getLlmSystemPrompt(category: Category): Promise<string> {
-        const filePath = `./prompts/${category.toLowerCase()}.md`;
+        const filePath = `./assets/prompts/${category.toLowerCase()}.md`;
         const data = await fs.readFile(filePath, 'utf-8');
         const prompt = data.replace(/```json/g, '').replace(/```/g, '');
         return prompt;
     }
 
-    private async generate(payload: StoryContent): Promise<string> {
+    private async generate(payload: StoryMessage[]): Promise<string> {
         const response = await getChatCompletion(payload);
         Logger.debug('Sending: ' + payload[payload.length - 1].content);
         Logger.debug('Response from OpenAI: ' + response);
