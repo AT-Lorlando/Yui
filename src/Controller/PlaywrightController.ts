@@ -39,10 +39,10 @@ export default class PlaywrightController {
             const main = await this.page.$('main');
             const mainId = await this.page.$('[id*="main"]');
             const mainClass = await this.page.$('[class*="main"]');
+            const mainSlot = await this.page.$('[class*="s-main-slot"]');
 
-            const elements = [main, mainId, mainClass].filter(
-                (element) => element !== null,
-            );
+            const elements = [main, mainId, mainClass, mainSlot];
+            elements.filter((element) => element != null);
 
             Logger.debug(`Initial elements count: ${elements.length}`);
 
@@ -89,7 +89,7 @@ export default class PlaywrightController {
                 (_, index) => !toRemove.has(index),
             );
 
-            Logger.debug(`Filtered elements count: ${filteredElements.length}`);
+            // Logger.debug(`Filtered elements count: ${filteredElements.length}`);
 
             return {
                 status: 'success',
@@ -101,23 +101,25 @@ export default class PlaywrightController {
     }
 
     async getPageContent(): Promise<Response> {
-        if (this.page) {
-            const content = await this.page.innerText('body');
-            const filteredContent = content
-                .split('\n')
-                .filter((line: string) => line.trim() !== '')
-                .join(' ');
-            return {
-                status: 'success',
-                message: 'Content retrieved successfully.',
-                content: filteredContent,
-            };
-        }
-        return { status: 'error', message: 'Page is not loaded.' };
+        return await this.getMainContent();
+        // if (this.page) {
+        //     const content = await this.page.innerText('body');
+        //     const filteredContent = content
+        //         .split('\n')
+        //         .filter((line: string) => line.trim() !== '')
+        //         .join(' ');
+        //     return {
+        //         status: 'success',
+        //         message: 'Content retrieved successfully.',
+        //         content: filteredContent,
+        //     };
+        // }
+        // return { status: 'error', message: 'Page is not loaded.' };
     }
 
     async getMainContent(): Promise<Response> {
         if (this.page) {
+            let data = '';
             const mainElements = await this.getMainElements();
             if (mainElements.status === 'error') {
                 return mainElements;
@@ -137,13 +139,14 @@ export default class PlaywrightController {
                         .split('\n')
                         .filter((line: string) => line.trim() !== '')
                         .join(' ');
-                    return {
-                        status: 'success',
-                        message: 'Content retrieved successfully.',
-                        content: filteredContent,
-                    };
+                    data += filteredContent;
                 }
             }
+            return {
+                status: 'success',
+                message: 'Content retrieved successfully.',
+                content: data,
+            };
         }
         return { status: 'error', message: 'Page is not loaded.' };
     }
@@ -160,13 +163,15 @@ export default class PlaywrightController {
                         value: (el as HTMLInputElement).value,
                         outerhtml: el.outerHTML,
                     }));
-                    visibleInputs.push(inputDetails);
+                    visibleInputs.push(
+                        `Tag: ${inputDetails.tagName}, Value: ${inputDetails.value}, Outer HTML: ${inputDetails.outerhtml}`,
+                    );
                 }
             }
             return {
                 status: 'success',
                 message: 'Inputs retrieved successfully.',
-                content: visibleInputs,
+                content: visibleInputs.toString(),
             };
         }
         return { status: 'error', message: 'Page is not loaded.' };
