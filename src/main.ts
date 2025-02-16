@@ -5,7 +5,7 @@ import { initSpeakers } from './Entity/Speaker';
 import CommandExecutor from './Service/CommandExecutor';
 import HueController from './Controller/HueController';
 import SpotifyController from './Controller/SpotifyController';
-import Listener from './Service/Listener';
+// import Listener from './Service/Listener';
 
 async function main() {
     testLogger();
@@ -16,7 +16,7 @@ async function main() {
     const commandExecutor = new CommandExecutor();
     const hueController = new HueController();
     const spotifyController = new SpotifyController();
-    const listener = new Listener();
+    // const listener = new Listener();
 
     Logger.debug('Modules imported');
     Logger.debug('Modules initialisation');
@@ -30,7 +30,7 @@ async function main() {
     // await commandRecognition.init()
 
     await commandExecutor.init(entities, spotifyController);
-    await listener.init(commandExecutor);
+    // await listener.init(commandExecutor);
 
     Logger.info('Initialisation of the "Yui" application completed');
 }
