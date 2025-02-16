@@ -1,4 +1,6 @@
 import { StoryMessage } from '../types/types';
+import OpenAI from 'openai';
+
 import env from '../env';
 const OPENAI_API_KEY = env.OPENAI_API_KEY;
 
@@ -26,32 +28,23 @@ interface OpenAIResponse {
     };
 }
 
+const openai = new OpenAI({
+    // baseURL: 'https://api.deepseek.com',
+    // baseURL: 'https://api.openai.com/v1/chat/completions',
+    apiKey: OPENAI_API_KEY,
+});
+
 export async function getChatCompletion(
     userMessage: StoryMessage[],
 ): Promise<string | null> {
     try {
-        const response: Response = await fetch(
-            'https://api.openai.com/v1/chat/completions',
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${OPENAI_API_KEY}`,
-                },
-                body: JSON.stringify({
-                    model: 'gpt-4-turbo',
-                    messages: userMessage,
-                }),
-            },
-        );
+        const data = (await openai.chat.completions.create({
+            messages: userMessage as any,
+            // model: 'deepseek-chat',
+            model: 'gpt-4-turbo',
+            // model: 'gpt-3.5-turbo',
+        })) as OpenAIResponse;
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error('OpenAI API error:', errorData);
-            return null;
-        }
-
-        const data: OpenAIResponse = await response.json();
         if (data.choices && data.choices.length > 0) {
             return data.choices[0].message.content.trim();
         } else {
