@@ -1,4 +1,4 @@
-export type Category = 'Router' | 'Lights' | 'Browser' | 'General';
+export type Category = 'router' | 'light' | 'browser' | 'general';
 export type Role = 'system' | 'user' | 'assistant';
 
 export interface Response {
