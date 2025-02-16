@@ -5,14 +5,19 @@ import CommandExecutor from './CommandExecutor';
 import Logger from '../Logger';
 import env from '../env';
 import cors from 'cors';
+import Orchestrator from './Orchestrator';
 
 export default class Listener {
-    private commandExecutor!: CommandExecutor;
+    constructor(
+        private readonly commandExecutor: CommandExecutor,
+        private readonly orchestrator: Orchestrator,
+    ) {
+        Logger.info('Listener created');
+    }
 
-    async init(commandExecutor: CommandExecutor): Promise<void> {
+    async init(): Promise<void> {
         try {
-            this.commandExecutor = commandExecutor;
-            await this.listenOnWeb();
+            // await this.listenOnWeb();
             await this.listenOnStdin();
         } catch (error) {
             Logger.error(
@@ -66,20 +71,23 @@ export default class Listener {
     private async listenOnStdin(): Promise<void> {
         process.stdin.resume();
         process.stdin.setEncoding('utf8');
-        process.stdin.on('data', (text: string) => {
-            if (this.commandExecutor === undefined) {
-                throw new Error('STDIN Listener: CommandExecutor is undefined');
-            }
+        process.stdin.on('data', async (text: string) => {
             Logger.info(
                 `STDIN Listener: Received order ${text.replace('\n', '')}`,
             );
             try {
-                //this.commandExecutor.evalCommandFromOrder(text);
+                const order = {
+                    content: text.replace('\n', ''),
+                    timestamp: Date.now().toString(),
+                };
+                this.orchestrator.getRouterQueriesFromOrder(order);
             } catch (error) {
                 Logger.error(
                     `STDIN Listener: Error during the execution of the command: ${error}`,
                 );
             }
+            process.stdout.write('Order received\n');
+            process.stdin.pause();
         });
     }
 }
