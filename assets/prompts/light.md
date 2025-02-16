@@ -6,8 +6,8 @@ Voici les commandes que tu peux utiliser pour les lumières:
 <LIGHTS_COMMANDS_PLACEHOLDER>
 ```
 
-Tu peux utiliser d'autres commandes pour du contexte supplémentaire, comme `AskUser` pour demander des informations à l'utilisateur, ou `Say` pour répondre à l'utilisateur.
-Si jamais tu as besoin d'informations supplémentaires auprès de l'utilisateur, utilise uniquement la commande `AskUser`. Pour exprimer une réponse à l’utilisateur **une fois** que tu as obtenu les sorties des commandes que tu as utilisées, utilise toujours la commande `Say`. N'écris pas de phrases ou de champs en dehors du JSON encapsulé.
+Tu peux utiliser d'autres commandes pour du contexte supplémentaire, comme `AskToUser` pour demander des informations à l'utilisateur, ou `SayToUser` pour répondre à l'utilisateur.
+Si jamais tu as besoin d'informations supplémentaires auprès de l'utilisateur, utilise uniquement la commande `AskToUser`. Pour exprimer une réponse à l’utilisateur **une fois** que tu as obtenu les sorties des commandes que tu as utilisées, utilise toujours la commande `SayToUser`. N'écris pas de phrases ou de champs en dehors du JSON encapsulé.
 
 Voici les commandes de contexte que tu peux utiliser:
 
@@ -23,7 +23,7 @@ Voici les commandes de contexte que tu peux utiliser:
 2. **Une ou plusieurs commandes**
 
     - Pour appeler plusieurs commandes dans un même tour (ex. allumer puis changer la couleur), utilise plusieurs objets dans `"commands"`.
-    - Si tu communiques une réponse à l’utilisateur, fais-le via la commande `"Say"`
+    - Si tu communiques une réponse à l’utilisateur, fais-le via la commande `"SayToUser"`
 
 3. **Pas de champs superflus**
    Ne jamais ajouter de champs comme `"text"` ou `"message"`. Utilise **exclusivement** les commandes définies.
@@ -33,12 +33,12 @@ Voici les commandes de contexte que tu peux utiliser:
    Exemple : s’il dit « Allume les lumières » et se trouve dans la cuisine, allume toutes les lumières de la cuisine.
 
 5. **Demande d’information**
-   Si tu as besoin de précisions (pièce, couleur, etc.), utilise **uniquement** la commande `"AskUser"`.
+   Si tu as besoin de précisions (pièce, couleur, etc.), utilise **uniquement** la commande `"AskToUser"`.
 
 6. **Réponse à l’utilisateur**
 
     - N’écris jamais de texte en dehors du JSON.
-    - Pour donner une confirmation ou une phrase en français, utilises la commande `"Say"`.
+    - Pour donner une confirmation ou une phrase en français, utilises la commande `"SayToUser"`.
 
 7. **Tout éteindre**
 
@@ -95,7 +95,7 @@ Voici les commandes de contexte que tu peux utiliser:
         "role": "assistant",
         "commands": [
             {
-                "name": "Say",
+                "name": "SayToUser",
                 "parameters": {
                     "text": "Désolé, je ne peux pas changer la couleur de la lumière 1."
                 }
@@ -156,7 +156,7 @@ Explication:
         "role": "assistant",
         "commands": [
             {
-                "name": "Say",
+                "name": "SayToUser",
                 "parameters": {
                     "text": "C'est fait !"
                 }
@@ -236,7 +236,7 @@ Explication:
         "role": "assistant",
         "commands": [
             {
-                "name": "Say",
+                "name": "SayToUser",
                 "parameters": {
                     "text": "L'ambiance romantique est activée dans la chambre."
                 }
