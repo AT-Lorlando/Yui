@@ -25,16 +25,16 @@ export default class LlmController {
         Logger.debug(`parsing ${response}`);
         let parsed = '';
         try {
-            parsed = JSON.parse(removeJsonComments(response));
+            parsed = JSON.parse(removeJsonComments(response.trim()));
         } catch (error) {
             throw new Error(
-                'Invalid response, the response is not a JSON\n' + response,
+                'Invalid response, the response is not a JSON\n' + error,
             );
         }
         if (typeof parsed !== 'object' || parsed === null) {
             throw new Error('JSON is not an object.');
         }
-        if (category === 'Router') {
+        if (category === 'router') {
             if (!('queries' in parsed)) {
                 throw new Error(
                     'No Queries inside a Router response ' + response,
@@ -61,7 +61,7 @@ export default class LlmController {
     private async generate(payload: StoryMessage[]): Promise<string> {
         const response = await getChatCompletion(payload);
         Logger.debug('Sending: ' + payload[payload.length - 1].content);
-        Logger.debug('Response from OpenAI: ' + response);
+        Logger.debug('Response from OpenAI:\n' + response);
         return response || '';
     }
 }
