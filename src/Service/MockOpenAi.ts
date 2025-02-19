@@ -41,7 +41,7 @@ export async function getChatCompletion(
         const data = (await openai.chat.completions.create({
             messages: userMessage as any,
             // model: 'deepseek-chat',
-            model: 'gpt-4-turbo',
+            model: 'gpt-4o-mini',
             // model: 'gpt-3.5-turbo',
         })) as OpenAIResponse;
 
