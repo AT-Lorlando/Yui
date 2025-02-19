@@ -11,6 +11,18 @@ export default class PlaywrightController {
         this.page = null;
     }
 
+    async evalCode(code: string): Promise<Response> {
+        try {
+            const result = await eval(`this.${code}`);
+            return result;
+        } catch (error) {
+            return {
+                status: 'error',
+                message: `Error while executing the command: ${code}`,
+            };
+        }
+    }
+
     async openBrowser(): Promise<Response> {
         if (!this.browser) {
             this.browser = await chromium.launch({ headless: false });
