@@ -11,6 +11,7 @@ import Logger from '../Logger';
 import CommandExecutor from './CommandExecutor';
 import Entity from '../Entity/Entity';
 import { Light } from '../Entity/Light';
+import { Door } from '../Entity/Door';
 import fs from 'fs';
 
 export default class Orchestrator {
@@ -38,6 +39,14 @@ export default class Orchestrator {
             ),
             '<LIGHTS_ENTITIES_PLACEHOLDER>': this.entities
                 .filter((entity) => entity instanceof Light)
+                .map((entity) => entity.__str__())
+                .join('\n'),
+            '<DOORS_COMMANDS_PLACEHOLDER>': fs.readFileSync(
+                path + 'Door.json',
+                'utf8',
+            ),
+            '<DOORS_ENTITIES_PLACEHOLDER>': this.entities
+                .filter((entity) => entity instanceof Door)
                 .map((entity) => entity.__str__())
                 .join('\n'),
             '<BROWSER_COMMANDS_PLACEHOLDER>': fs.readFileSync(

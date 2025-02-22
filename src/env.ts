@@ -16,6 +16,9 @@ export interface Env {
     BBOX_PASSWORD: string;
     HOME_LATITUDE: string;
     HOME_LONGITUDE: string;
+    NUKI_TOKEN: string;
+    NUKI_HOST: string;
+    NUKI_PORT: string;
 }
 
 export const env: Env = {
@@ -38,6 +41,9 @@ export const env: Env = {
     BBOX_PASSWORD: process.env.BBOX_PASSWORD as Env['BBOX_PASSWORD'],
     HOME_LATITUDE: process.env.HOME_LATITUDE as Env['HOME_LATITUDE'],
     HOME_LONGITUDE: process.env.HOME_LONGITUDE as Env['HOME_LONGITUDE'],
+    NUKI_TOKEN: process.env.NUKI_TOKEN as Env['NUKI_TOKEN'],
+    NUKI_HOST: process.env.NUKI_HOST as Env['NUKI_HOST'],
+    NUKI_PORT: process.env.NUKI_PORT as Env['NUKI_PORT'],
 };
 
 export default env;
