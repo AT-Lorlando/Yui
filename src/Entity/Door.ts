@@ -39,7 +39,6 @@ export class Door extends Entity {
             return { status: 'error', message: error.message };
         }
     }
-
     /**
      * Récupère l'état de la porte (locked/unlocked, batterie, etc.)
      * @returns {Promise<Response>} - Le statut (locked/unlocked) ou erreur.
