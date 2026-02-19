@@ -28,6 +28,7 @@ npm run dev:spotify   # Run mcp-spotify server standalone
 npm run dev:linear    # Run mcp-linear server standalone
 npm run dev:samsung   # Run mcp-samsung server standalone
 npm run dev:calendar  # Run mcp-calendar server standalone
+npm run dev:weather   # Run mcp-weather server standalone
 
 # Voice pipeline (run all three together for full voice loop)
 npm run xtts-server   # Start XTTS v2 TTS server (Python 3.11 venv, port 18770)
@@ -149,6 +150,7 @@ Yui/
     ├── mcp-linear/           # MCP server: Linear project management
     ├── mcp-samsung/          # MCP server: Samsung TV via SmartThings + WoL
     ├── mcp-calendar/         # MCP server: Google Calendar
+    ├── mcp-weather/          # MCP server: Weather forecasts (Open-Meteo, no API key)
     └── mcp-browser/          # MCP server: Playwright browser (Phase 2)
 ```
 
@@ -167,6 +169,7 @@ Yui/
 | MCP Linear | `packages/mcp-linear/` | Linear project management (Koya team) |
 | MCP Samsung | `packages/mcp-samsung/` | Samsung TV via SmartThings API + Wake-on-LAN |
 | MCP Calendar | `packages/mcp-calendar/` | Google Calendar (OAuth2, 11 tools) |
+| MCP Weather | `packages/mcp-weather/` | Weather forecasts via Open-Meteo (no API key, 4 tools) |
 | MCP Browser | `packages/mcp-browser/` | Playwright browser automation (Phase 2) |
 | Shared | `packages/shared/` | Types and logger |
 | Voice Pipeline | `src/voice_pipeline.py` | Mic → STT → orchestrator → TTS → Chromecast |
