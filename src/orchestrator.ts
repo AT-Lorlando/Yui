@@ -498,6 +498,157 @@ export class Orchestrator {
         return finalResponse;
     }
 
+    /**
+     * Streaming variant of processOrder. Tool-call rounds are still blocking
+     * (we must receive the full tool call before executing it), but the final
+     * text response is yielded token-by-token as the LLM generates it, so the
+     * caller can start TTS on the first sentence before the full response is
+     * ready.
+     */
+    async *processOrderStream(
+        order: string,
+    ): AsyncGenerator<string, void, unknown> {
+        const story = env.SAVE_STORIES ? new Story() : null;
+        story?.add({ role: 'user', content: order });
+
+        Logger.info(`Processing order (stream): "${order}"`);
+
+        const memCtx = buildMemoryContext();
+        const systemPrompt = buildSystemPrompt({
+            alwaysMemory: memCtx.alwaysMemory,
+            onDemandNamespaces: memCtx.onDemandNamespaces,
+            storySummaries: buildStorySummariesContext(order),
+        });
+
+        const allTools: OpenAI.Chat.ChatCompletionTool[] = [
+            ...this.getVirtualTools(),
+            ...this.collectedTools.map((ct) => ({
+                type: 'function' as const,
+                function: {
+                    name: ct.tool.name,
+                    description: ct.tool.description,
+                    parameters: ct.tool.inputSchema as Record<string, unknown>,
+                },
+            })),
+        ];
+
+        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+            { role: 'system', content: systemPrompt },
+            ...this.conversationHistory,
+            { role: 'user', content: order },
+        ];
+
+        const MAX_TURNS = 10;
+        let finalResponse = '';
+
+        for (let turn = 0; turn < MAX_TURNS; turn++) {
+            Logger.debug(`LLM turn ${turn + 1}/${MAX_TURNS} (stream)`);
+
+            const stream = await this.openai.chat.completions.create({
+                model: env.LLM_MODEL,
+                messages,
+                tools: allTools.length > 0 ? allTools : undefined,
+                tool_choice: allTools.length > 0 ? 'auto' : undefined,
+                stream: true,
+            });
+
+            // Accumulate the response from streaming chunks
+            let contentAcc = '';
+            const toolCallsAcc = new Map<
+                number,
+                { id: string; name: string; arguments: string }
+            >();
+
+            for await (const chunk of stream) {
+                const delta = chunk.choices[0]?.delta;
+
+                if (delta?.content) {
+                    contentAcc += delta.content;
+                    yield delta.content; // stream token to caller immediately
+                }
+
+                if (delta?.tool_calls) {
+                    for (const tc of delta.tool_calls) {
+                        if (!toolCallsAcc.has(tc.index)) {
+                            toolCallsAcc.set(tc.index, {
+                                id: tc.id ?? '',
+                                name: tc.function?.name ?? '',
+                                arguments: '',
+                            });
+                        }
+                        const acc = toolCallsAcc.get(tc.index)!;
+                        if (tc.id) acc.id = tc.id;
+                        if (tc.function?.name) acc.name += tc.function.name;
+                        if (tc.function?.arguments)
+                            acc.arguments += tc.function.arguments;
+                    }
+                }
+            }
+
+            if (toolCallsAcc.size > 0) {
+                // Tool call round — reconstruct full tool calls and execute them
+                const toolCalls: OpenAI.Chat.ChatCompletionMessageToolCall[] =
+                    Array.from(toolCallsAcc.values()).map((tc) => ({
+                        id: tc.id,
+                        type: 'function' as const,
+                        function: { name: tc.name, arguments: tc.arguments },
+                    }));
+
+                messages.push({
+                    role: 'assistant',
+                    content: contentAcc || null,
+                    tool_calls: toolCalls,
+                });
+
+                for (const toolCall of toolCalls) {
+                    const virtualResult = await this.handleVirtualTool(
+                        toolCall,
+                    );
+                    const result =
+                        virtualResult ?? (await this.executeToolCall(toolCall));
+
+                    story?.add({
+                        role: 'tool',
+                        content: result.content,
+                        toolCallId: result.id,
+                        toolName: toolCall.function.name,
+                    });
+
+                    messages.push({
+                        role: 'tool',
+                        tool_call_id: result.id,
+                        content: result.content,
+                    });
+                }
+            } else {
+                // Text response — we already yielded all tokens, just record it
+                finalResponse = contentAcc;
+                story?.add({ role: 'assistant', content: finalResponse });
+                break;
+            }
+        }
+
+        if (!finalResponse) {
+            finalResponse = 'Tâche effectuée.';
+            yield finalResponse;
+        }
+
+        // Update rolling conversation history
+        this.conversationHistory.push({ role: 'user', content: order });
+        this.conversationHistory.push({
+            role: 'assistant',
+            content: finalResponse,
+        });
+        if (this.conversationHistory.length > HISTORY_MAX) {
+            this.conversationHistory.splice(
+                0,
+                this.conversationHistory.length - HISTORY_MAX,
+            );
+        }
+
+        story?.save();
+    }
+
     async shutdown(): Promise<void> {
         for (const [name, client] of this.clients.entries()) {
             try {
