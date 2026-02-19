@@ -5,7 +5,7 @@ import cors from 'cors';
 import * as http from 'http';
 import Logger from '../logger';
 import env from '../env';
-import { InputSource } from './InputSource';
+import { InputSource, StreamHandler } from './InputSource';
 
 export class HttpSource implements InputSource {
     private server: http.Server | null = null;
@@ -20,7 +20,10 @@ export class HttpSource implements InputSource {
         return true;
     }
 
-    async start(handler: (order: string) => Promise<string>): Promise<void> {
+    async start(
+        handler: (order: string) => Promise<string>,
+        streamHandler?: StreamHandler,
+    ): Promise<void> {
         const port = 3000;
         const app = express();
         app.use(cors({ origin: '*' }));
@@ -31,6 +34,7 @@ export class HttpSource implements InputSource {
             res.status(200).json({ status: 'ok' });
         });
 
+        // ── Blocking endpoint (used by stdin, cron, etc.) ─────────────────────
         app.post('/order', async (req: any, res: any) => {
             const bearer = req.headers['authorization']?.split(' ')[1];
             if (!this.checkPassword(bearer, req.ip)) {
@@ -50,6 +54,45 @@ export class HttpSource implements InputSource {
                 return res.status(500).json({ error: 'Internal server error' });
             }
         });
+
+        // ── Streaming SSE endpoint (used by voice pipeline) ───────────────────
+        // Returns tokens via Server-Sent Events as the LLM generates them.
+        // Each event: data: {"token":"..."}\n\n
+        // End signal:  data: [DONE]\n\n
+        if (streamHandler) {
+            app.post('/order/stream', async (req: any, res: any) => {
+                const bearer = req.headers['authorization']?.split(' ')[1];
+                if (!this.checkPassword(bearer, req.ip)) {
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+
+                const order = req.body?.order;
+                if (!order || typeof order !== 'string') {
+                    return res
+                        .status(400)
+                        .json({ error: 'Missing "order" field' });
+                }
+
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                res.flushHeaders();
+
+                try {
+                    for await (const token of streamHandler(order)) {
+                        res.write(`data: ${JSON.stringify({ token })}\n\n`);
+                    }
+                } catch (error) {
+                    Logger.error(`SSE stream error: ${error}`);
+                    res.write(
+                        `data: ${JSON.stringify({ error: String(error) })}\n\n`,
+                    );
+                } finally {
+                    res.write('data: [DONE]\n\n');
+                    res.end();
+                }
+            });
+        }
 
         return new Promise((resolve, reject) => {
             this.server = app

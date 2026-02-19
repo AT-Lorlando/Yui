@@ -51,13 +51,15 @@ async function main() {
     await orchestrator.init();
 
     const handler = (order: string) => orchestrator.processOrder(order);
+    const streamHandler = (order: string) =>
+        orchestrator.processOrderStream(order);
 
     // Scheduler: fires cron jobs, speaks responses via voice pipeline
     initScheduler(handler, speakViaPipeline);
 
     const sources: InputSource[] = [new StdinSource(), new HttpSource()];
     for (const source of sources) {
-        await source.start(handler);
+        await source.start(handler, streamHandler);
     }
 
     const shutdown = async (signal: string) => {
