@@ -5,7 +5,7 @@ import cors from 'cors';
 import * as http from 'http';
 import Logger from '../logger';
 import env from '../env';
-import { InputSource, StreamHandler } from './InputSource';
+import { InputSource, StreamHandler, StatusHandler } from './InputSource';
 
 export class HttpSource implements InputSource {
     private server: http.Server | null = null;
@@ -23,6 +23,7 @@ export class HttpSource implements InputSource {
     async start(
         handler: (order: string) => Promise<string>,
         streamHandler?: StreamHandler,
+        statusHandler?: StatusHandler,
     ): Promise<void> {
         const port = 3000;
         const app = express();
@@ -33,6 +34,13 @@ export class HttpSource implements InputSource {
         app.get('/health', (_req: any, res: any) => {
             res.status(200).json({ status: 'ok' });
         });
+
+        // ── MCP status (used by dashboard, no auth — internal only) ───────────
+        if (statusHandler) {
+            app.get('/status', (_req: any, res: any) => {
+                res.json(statusHandler());
+            });
+        }
 
         // ── Blocking endpoint (used by stdin, cron, etc.) ─────────────────────
         app.post('/order', async (req: any, res: any) => {

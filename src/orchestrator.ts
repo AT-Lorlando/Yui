@@ -649,6 +649,22 @@ export class Orchestrator {
         story?.save();
     }
 
+    /** Returns connected MCP servers and tool counts for the dashboard. */
+    getStatus(): {
+        servers: { name: string; tools: number }[];
+        totalTools: number;
+    } {
+        const map = new Map<string, number>();
+        for (const ct of this.collectedTools) {
+            map.set(ct.serverName, (map.get(ct.serverName) ?? 0) + 1);
+        }
+        const servers = Array.from(map.entries()).map(([name, tools]) => ({
+            name,
+            tools,
+        }));
+        return { servers, totalTools: this.collectedTools.length };
+    }
+
     async shutdown(): Promise<void> {
         for (const [name, client] of this.clients.entries()) {
             try {
