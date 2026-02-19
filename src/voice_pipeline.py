@@ -18,8 +18,11 @@ TTS engines (set TTS_ENGINE env var):
 
 import asyncio
 import io
+import json
 import os
+import queue as _queue
 import socket
+import struct
 import threading
 import time
 import logging
@@ -32,9 +35,10 @@ from faster_whisper import WhisperModel
 from scipy import signal as scipy_signal
 
 # ── Config ────────────────────────────────────────────────────────────────────
-LISTEN_PORT   = int(os.getenv("VOICE_UDP_PORT", "5002"))
-YUI_URL       = os.getenv("YUI_URL", "http://localhost:3000/order")
-BEARER_TOKEN  = os.getenv("BEARER_TOKEN", "yui")
+LISTEN_PORT      = int(os.getenv("VOICE_UDP_PORT", "5002"))
+YUI_URL          = os.getenv("YUI_URL", "http://localhost:3000/order")
+YUI_STREAM_URL   = os.getenv("YUI_STREAM_URL", YUI_URL + "/stream")
+BEARER_TOKEN     = os.getenv("BEARER_TOKEN", "yui")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 WHISPER_LANG  = os.getenv("WHISPER_LANG", "fr")
 LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -291,22 +295,202 @@ def transcribe(audio_16k: np.ndarray) -> str:
     return " ".join(s.text for s in segments).strip()
 
 
-# ── Orchestrator call ─────────────────────────────────────────────────────────
-def post_order(text: str) -> None:
-    log.info(f'Order: "{text}"')
+# ── WAV helpers ───────────────────────────────────────────────────────────────
+
+def _wav_duration(wav_bytes: bytes) -> float:
+    """Return duration in seconds by scanning the WAV header for the data chunk."""
     try:
-        resp = requests.post(
-            YUI_URL,
-            json={"order": text},
-            headers={"Authorization": f"Bearer {BEARER_TOKEN}"},
-            timeout=60,
-        )
-        response_text = resp.json().get("response", "")
-        log.info(f"Yui: {response_text}")
-        if response_text:
-            speak(response_text)
+        idx = wav_bytes.find(b"data", 12)
+        if idx == -1:
+            return 3.0
+        data_size    = struct.unpack_from("<I", wav_bytes, idx + 4)[0]
+        channels     = struct.unpack_from("<H", wav_bytes, 22)[0]
+        sample_rate  = struct.unpack_from("<I", wav_bytes, 24)[0]
+        bits_per_sam = struct.unpack_from("<H", wav_bytes, 34)[0]
+        bps = bits_per_sam // 8
+        if bps == 0 or channels == 0 or sample_rate == 0:
+            return 3.0
+        return (data_size // (bps * channels)) / sample_rate
+    except Exception:
+        return 3.0
+
+
+# ── Sentence splitter ─────────────────────────────────────────────────────────
+
+def _find_sentence_end(buf: str) -> int:
+    """
+    Return the index of the first sentence-ending character (. ! ?)
+    that is followed by whitespace (or is at end of string).
+    Ignores decimal numbers like '3.5' by checking the char before '.'.
+    Returns -1 if no boundary found yet.
+    """
+    for i, ch in enumerate(buf):
+        if ch in ".!?" and i >= 5:
+            # Don't split on decimal numbers (digit before '.')
+            if ch == "." and i > 0 and buf[i - 1].isdigit():
+                continue
+            next_ch = buf[i + 1] if i + 1 < len(buf) else " "
+            if next_ch in " \n\r\t":
+                return i
+    return -1
+
+
+# ── Blocking playback on the Google speaker ───────────────────────────────────
+
+def _play_audio_blocking(audio: bytes, mime: str) -> None:
+    """
+    Store audio in the TTS HTTP server and tell the Google speaker to play it.
+    Blocks until the audio has finished playing (duration-based wait).
+    """
+    if not _cast:
+        log.debug("No cast device — skipping playback.")
+        return
+
+    audio_id = int(time.time() * 1000)
+    ext = "wav" if "wav" in mime else "mp3"
+
+    with _tts_lock:
+        global _tts_audio, _tts_mime
+        _tts_audio, _tts_mime = audio, mime
+
+    url = f"http://{LOCAL_IP}:{TTS_PORT}/tts.{ext}?t={audio_id}"
+    try:
+        mc = _cast.media_controller
+        mc.play_media(url, mime)
+        mc.block_until_active(timeout=10)
+
+        # Estimate duration and wait for playback to finish
+        if "wav" in mime:
+            duration = _wav_duration(audio)
+        else:
+            # MP3: rough estimate from byte size (assuming ~128 kbps)
+            duration = max(1.0, len(audio) / 16_000)
+
+        log.debug(f"Playback: {duration:.1f}s  ({len(audio)} bytes, {mime})")
+        time.sleep(duration + 0.35)  # 350 ms tail-buffer for network jitter
     except Exception as e:
-        log.error(f"POST failed: {e}")
+        log.error(f"Playback error: {e}")
+
+
+# ── Orchestrator call — streaming ─────────────────────────────────────────────
+
+def post_order(text: str) -> None:
+    """
+    Send the transcribed order to the orchestrator via SSE streaming.
+
+    The LLM response is split into sentences as tokens arrive; each sentence
+    is dispatched to TTS in a background thread immediately.  The playback
+    loop plays sentences sequentially in arrival order, so sentence N plays
+    while sentence N+1 is still being synthesised.
+
+    Falls back to the blocking /order endpoint on any streaming error.
+    """
+    log.info(f'Order: "{text}"')
+
+    # ── ordered queue: each slot is a Future-like object that will hold
+    #    (audio_bytes, mime) once TTS completes for that sentence ──────────────
+    play_queue: _queue.Queue = _queue.Queue()
+
+    class _Slot:
+        """A one-shot container filled by a TTS worker thread."""
+        def __init__(self):
+            self._q: _queue.Queue = _queue.Queue(maxsize=1)
+        def put(self, val):
+            self._q.put(val)
+        def get(self):
+            return self._q.get()
+
+    def _tts_worker(sentence: str, slot: _Slot) -> None:
+        try:
+            audio, mime = _generate_tts(sentence)
+            slot.put((audio, mime))
+        except Exception as e:
+            log.error(f"TTS error ({sentence[:40]!r}): {e}")
+            slot.put(None)
+
+    def _flush(sentence: str) -> None:
+        """Kick off TTS for one sentence and reserve its slot in the queue."""
+        sentence = sentence.strip()
+        if not sentence:
+            return
+        log.debug(f"TTS dispatch: {sentence[:60]!r}")
+        slot = _Slot()
+        play_queue.put(slot)
+        threading.Thread(
+            target=_tts_worker, args=(sentence, slot), daemon=True
+        ).start()
+
+    def _sse_reader() -> None:
+        """Read SSE tokens from /order/stream, split into sentences, flush TTS."""
+        buf = ""
+        try:
+            resp = requests.post(
+                YUI_STREAM_URL,
+                json={"order": text},
+                headers={"Authorization": f"Bearer {BEARER_TOKEN}"},
+                stream=True,
+                timeout=90,
+            )
+            for raw in resp.iter_lines():
+                if not raw:
+                    continue
+                line = raw.decode("utf-8")
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data == "[DONE]":
+                    if buf.strip():
+                        _flush(buf)
+                    break
+                try:
+                    obj = json.loads(data)
+                    if "error" in obj:
+                        log.error(f"Stream error from server: {obj['error']}")
+                        break
+                    token = obj.get("token", "")
+                    if not token:
+                        continue
+                    buf += token
+                    # Flush every sentence as it completes
+                    while True:
+                        end = _find_sentence_end(buf)
+                        if end == -1:
+                            break
+                        _flush(buf[: end + 1])
+                        buf = buf[end + 1 :].lstrip()
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            log.error(f"SSE reader error: {e} — falling back to blocking call")
+            # Fallback: call the blocking endpoint with the whole order
+            try:
+                resp2 = requests.post(
+                    YUI_URL,
+                    json={"order": text},
+                    headers={"Authorization": f"Bearer {BEARER_TOKEN}"},
+                    timeout=60,
+                )
+                response_text = resp2.json().get("response", "")
+                if response_text:
+                    _flush(response_text)
+            except Exception as e2:
+                log.error(f"Fallback also failed: {e2}")
+        finally:
+            play_queue.put(None)  # sentinel — tell playback loop to stop
+
+    # Start SSE reader in background
+    threading.Thread(target=_sse_reader, daemon=True).start()
+
+    # Playback loop — runs on the calling thread, plays sentences in order
+    while True:
+        item = play_queue.get()
+        if item is None:
+            break
+        result = item.get()  # blocks until TTS is ready for this sentence
+        if result is None:
+            continue
+        audio, mime = result
+        _play_audio_blocking(audio, mime)
 
 
 # ── Main VAD loop ─────────────────────────────────────────────────────────────
