@@ -1,0 +1,21 @@
+{
+  "name": "@yui/mcp-weather",
+  "version": "1.0.0",
+  "description": "MCP server for weather forecasts via Open-Meteo (no API key required)",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@yui/shared": "*",
+    "dotenv": "^16.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^18.15.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}
