@@ -32,6 +32,7 @@
     "setup:calendar": "npm run setup -w packages/mcp-calendar",
     "dev:calendar": "npx ts-node packages/mcp-calendar/src/index.ts",
     "dev:weather": "npx ts-node packages/mcp-weather/src/index.ts",
+    "dev:obsidian": "npx ts-node packages/mcp-obsidian/src/index.ts",
     "voice": "python3 src/voice_pipeline.py",
     "xtts-server": "COQUI_TOS_AGREED=1 /home/chuya/.venvs/xtts/bin/python src/xtts_server.py",
     "record-voice": "python3 src/record_voice.py",
