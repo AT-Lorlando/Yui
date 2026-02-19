@@ -1,0 +1,26 @@
+{
+  "name": "@yui/mcp-spotify",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "setup": "ts-node src/setup.ts",
+    "setup:speakers": "ts-node src/setup.ts speakers"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@yui/shared": "*",
+    "axios": "^1.6.0",
+    "bonjour-service": "^1.2.1",
+    "castv2-client": "^1.2.0",
+    "spotify-web-api-node": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^18.15.10",
+    "@types/spotify-web-api-node": "^5.0.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}
