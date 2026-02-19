@@ -494,6 +494,23 @@ def post_order(text: str) -> None:
 
 
 # ── Main VAD loop ─────────────────────────────────────────────────────────────
+def _drain_udp(sock: socket.socket) -> None:
+    """
+    Discard all bytes queued in the UDP kernel buffer.
+    Called after post_order() returns to prevent Yui's own voice (played back
+    through the room speaker and picked up by the Pi mic) from being
+    transcribed as a new voice command.
+    """
+    sock.settimeout(0.0)
+    try:
+        while True:
+            sock.recvfrom(65535)
+    except (BlockingIOError, socket.error):
+        pass
+    finally:
+        sock.settimeout(0.5)
+
+
 def main() -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
@@ -519,6 +536,7 @@ def main() -> None:
                     text = transcribe(audio)
                     if text:
                         post_order(text)
+                        _drain_udp(sock)
                 speech_buf = b""
                 recording = False
                 speech_frames = 0
@@ -562,6 +580,7 @@ def main() -> None:
                         text = transcribe(audio)
                         if text:
                             post_order(text)
+                            _drain_udp(sock)
                         else:
                             log.debug("Empty transcription.")
 
