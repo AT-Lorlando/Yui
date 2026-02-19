@@ -569,6 +569,14 @@ export function buildServerConfigs(): McpServerConfig[] {
                 path.join(root, 'packages/mcp-weather/src/index.ts'),
             ],
         },
+        {
+            name: 'mcp-obsidian',
+            command: 'npx',
+            args: [
+                'ts-node',
+                path.join(root, 'packages/mcp-obsidian/src/index.ts'),
+            ],
+        },
         // Uncomment to enable browser server (Phase 2):
         // {
         //     name: 'mcp-browser',
