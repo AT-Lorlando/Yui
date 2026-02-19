@@ -29,6 +29,7 @@ npm run dev:linear    # Run mcp-linear server standalone
 npm run dev:samsung   # Run mcp-samsung server standalone
 npm run dev:calendar  # Run mcp-calendar server standalone
 npm run dev:weather   # Run mcp-weather server standalone
+npm run dev:obsidian  # Run mcp-obsidian server standalone
 
 # Voice pipeline (run all three together for full voice loop)
 npm run xtts-server   # Start XTTS v2 TTS server (Python 3.11 venv, port 18770)
@@ -151,6 +152,7 @@ Yui/
     ├── mcp-samsung/          # MCP server: Samsung TV via SmartThings + WoL
     ├── mcp-calendar/         # MCP server: Google Calendar
     ├── mcp-weather/          # MCP server: Weather forecasts (Open-Meteo, no API key)
+    ├── mcp-obsidian/         # MCP server: Obsidian vault (read/write/search notes)
     └── mcp-browser/          # MCP server: Playwright browser (Phase 2)
 ```
 
@@ -170,6 +172,7 @@ Yui/
 | MCP Samsung | `packages/mcp-samsung/` | Samsung TV via SmartThings API + Wake-on-LAN |
 | MCP Calendar | `packages/mcp-calendar/` | Google Calendar (OAuth2, 11 tools) |
 | MCP Weather | `packages/mcp-weather/` | Weather forecasts via Open-Meteo (no API key, 4 tools) |
+| MCP Obsidian | `packages/mcp-obsidian/` | Obsidian vault notes — read, write, search, organise (10 tools) |
 | MCP Browser | `packages/mcp-browser/` | Playwright browser automation (Phase 2) |
 | Shared | `packages/shared/` | Types and logger |
 | Voice Pipeline | `src/voice_pipeline.py` | Mic → STT → orchestrator → TTS → Chromecast |
@@ -188,6 +191,10 @@ Yui/
 **mcp-samsung**: `tv_get_status`, `tv_power`, `tv_set_volume`, `tv_mute`, `tv_set_input`, `tv_prepare_chromecast`, `tv_launch_app`
 
 **mcp-calendar**: `list_calendars`, `get_today`, `get_week`, `get_schedule`, `get_event`, `create_event`, `update_event`, `delete_event`, `search_events`, `find_free_slots`, `quick_add_event`
+
+**mcp-weather**: `get_current_weather`, `get_today_forecast`, `get_forecast`, `get_weather_for_date`
+
+**mcp-obsidian**: `list_vaults`, `get_tree`, `read_note`, `create_note`, `update_note`, `append_to_note`, `create_folder`, `move_note`, `delete_note`, `search_notes`
 
 **mcp-browser**: `open_browser`, `get_page_content`, `click_element`, `fill_input`, `close_browser`
 
@@ -370,6 +377,7 @@ Copy `.env.example` to `.env`. Required variables:
 - `SMARTTHINGS_TV_IP` — TV local IP for WoL subnet broadcast (e.g. `10.0.0.133`)
 - `NODE_ENV`, `LOG_LEVEL`
 - `SAVE_STORIES` — set to `true` to enable story saving + indexing
+- `OBSIDIAN_VAULT_ROOT` — path to Obsidian vault root (default: `~/obsidian`)
 - `SPEAK_PIPELINE_URL` — URL of voice pipeline speak endpoint (default: `http://localhost:3001/speak`)
 
 ---
