@@ -561,6 +561,14 @@ export function buildServerConfigs(): McpServerConfig[] {
                 path.join(root, 'packages/mcp-calendar/src/index.ts'),
             ],
         },
+        {
+            name: 'mcp-weather',
+            command: 'npx',
+            args: [
+                'ts-node',
+                path.join(root, 'packages/mcp-weather/src/index.ts'),
+            ],
+        },
         // Uncomment to enable browser server (Phase 2):
         // {
         //     name: 'mcp-browser',
