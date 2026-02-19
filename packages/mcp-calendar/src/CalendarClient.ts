@@ -91,9 +91,17 @@ function formatEvent(
         if (endDateRaw && endDateRaw !== event.start.date) {
             const endExclusive = new Date(endDateRaw);
             endExclusive.setDate(endExclusive.getDate() - 1);
-            endLabel = ` → ${formatDate(endExclusive.toISOString())}`;
+            // Only show end if it differs from start after adjustment
+            const endStr = endExclusive.toISOString().split('T')[0];
+            if (endStr !== event.start.date) {
+                endLabel = ` → ${formatDate(endExclusive.toISOString())}`;
+            }
         }
-        lines.push(`  📅 Toute la journée — ${formatDate(event.start.date)}${endLabel}`);
+        lines.push(
+            `  📅 Toute la journée — ${formatDate(
+                event.start.date,
+            )}${endLabel}`,
+        );
     } else if (event.start?.dateTime) {
         const start = event.start.dateTime;
         const end = event.end?.dateTime;
@@ -102,7 +110,9 @@ function formatEvent(
 
         if (end) {
             lines.push(
-                `  ⏰ ${formatTime(start)} → ${formatTime(end)} (${formatDuration(start, end)})${relStr}`,
+                `  ⏰ ${formatTime(start)} → ${formatTime(
+                    end,
+                )} (${formatDuration(start, end)})${relStr}`,
             );
         } else {
             lines.push(`  ⏰ ${formatTime(start)}${relStr}`);
@@ -119,11 +129,16 @@ function formatEvent(
         const others = event.attendees.filter((a) => !a.self);
 
         if (self) {
-            lines.push(`  👤 Vous : ${RESPONSE_ICON[self.responseStatus ?? 'needsAction'] ?? '⏳'}`);
+            lines.push(
+                `  👤 Vous : ${
+                    RESPONSE_ICON[self.responseStatus ?? 'needsAction'] ?? '⏳'
+                }`,
+            );
         }
         if (others.length > 0) {
             const names = others.slice(0, 5).map((a) => {
-                const icon = RESPONSE_ICON[a.responseStatus ?? 'needsAction'] ?? '⏳';
+                const icon =
+                    RESPONSE_ICON[a.responseStatus ?? 'needsAction'] ?? '⏳';
                 return `${a.displayName ?? a.email} ${icon}`;
             });
             if (others.length > 5) names.push(`+${others.length - 5} autres`);
@@ -134,19 +149,26 @@ function formatEvent(
     // Google Meet / video conference
     const meetLink =
         event.hangoutLink ??
-        event.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri;
+        event.conferenceData?.entryPoints?.find(
+            (e) => e.entryPointType === 'video',
+        )?.uri;
     if (meetLink) lines.push(`  🎥 Google Meet : ${meetLink}`);
 
     // Description (HTML stripped + truncated)
     if (event.description) {
-        const plain = event.description.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
-        const truncated = plain.length > 200 ? plain.slice(0, 197) + '...' : plain;
+        const plain = event.description
+            .replace(/<[^>]*>/g, '')
+            .replace(/\n+/g, ' ')
+            .trim();
+        const truncated =
+            plain.length > 200 ? plain.slice(0, 197) + '...' : plain;
         if (truncated) lines.push(`  📝 ${truncated}`);
     }
 
     // Recurrence
     if (event.recurrence?.length) lines.push('  🔁 Récurrent');
-    else if (event.recurringEventId) lines.push("  🔁 Occurrence d'un événement récurrent");
+    else if (event.recurringEventId)
+        lines.push("  🔁 Occurrence d'un événement récurrent");
 
     return lines.join('\n');
 }
@@ -160,7 +182,9 @@ function todayParis(): string {
 
 /** Start of current ISO week (Monday) as YYYY-MM-DD in Europe/Paris. */
 function weekStartParis(): string {
-    const localStr = new Date().toLocaleDateString('en-CA', { timeZone: TIMEZONE });
+    const localStr = new Date().toLocaleDateString('en-CA', {
+        timeZone: TIMEZONE,
+    });
     const d = new Date(`${localStr}T00:00:00`);
     const dow = d.getDay(); // 0=Sun
     const diff = dow === 0 ? -6 : 1 - dow;
@@ -227,8 +251,8 @@ export class CalendarClient {
      * Results are grouped by day and formatted for the LLM.
      */
     async getSchedule(options: {
-        startDate?: string;     // YYYY-MM-DD, defaults to today
-        endDate?: string;       // YYYY-MM-DD, defaults to startDate
+        startDate?: string; // YYYY-MM-DD, defaults to today
+        endDate?: string; // YYYY-MM-DD, defaults to startDate
         calendarIds?: string[];
         maxResults?: number;
     }): Promise<string> {
@@ -237,19 +261,24 @@ export class CalendarClient {
         const timeMin = parisToUtcIso(start, '00:00:00');
         const timeMax = parisToUtcIso(end, '23:59:59');
 
-        // Resolve calendar list
-        let calIds = options.calendarIds ?? [];
+        // Always load calendar metadata so we know access roles (freeBusyReader
+        // calendars hide event titles — we substitute "Professional meeting").
         const calNames = new Map<string, string>();
-
-        if (calIds.length === 0) {
-            const listRes = await this.cal.calendarList.list({ showHidden: false });
-            for (const c of listRes.data.items ?? []) {
-                if (c.id) {
-                    calIds.push(c.id);
-                    calNames.set(c.id, c.summary ?? c.id);
-                }
+        const professionalCalIds = new Set<string>();
+        const listRes = await this.cal.calendarList.list({ showHidden: false });
+        for (const c of listRes.data.items ?? []) {
+            if (!c.id) continue;
+            calNames.set(c.id, c.summary ?? c.id);
+            if (c.accessRole === 'freeBusyReader') {
+                professionalCalIds.add(c.id);
             }
         }
+
+        // Use provided IDs or fall back to all calendars
+        const calIds =
+            options.calendarIds && options.calendarIds.length > 0
+                ? options.calendarIds
+                : Array.from(calNames.keys());
 
         // Fetch events from all calendars in parallel
         const allEvents: EventWithCalendar[] = [];
@@ -267,11 +296,23 @@ export class CalendarClient {
                         timeZone: TIMEZONE,
                     });
                     const name = calNames.get(calId) ?? calId;
+                    const isProfessional = professionalCalIds.has(calId);
                     for (const ev of res.data.items ?? []) {
-                        allEvents.push({ ...ev, _calendarName: name });
+                        allEvents.push({
+                            ...ev,
+                            // freeBusyReader hides titles — substitute a meaningful label
+                            summary:
+                                ev.summary ??
+                                (isProfessional
+                                    ? 'Professional meeting'
+                                    : undefined),
+                            _calendarName: name,
+                        });
                     }
                 } catch (err) {
-                    Logger.warn(`Failed to fetch events for calendar "${calId}": ${err}`);
+                    Logger.warn(
+                        `Failed to fetch events for calendar "${calId}": ${err}`,
+                    );
                 }
             }),
         );
@@ -294,7 +335,8 @@ export class CalendarClient {
         // Group by day
         const grouped = new Map<string, EventWithCalendar[]>();
         for (const ev of allEvents) {
-            const day = ev.start?.date ?? ev.start?.dateTime?.slice(0, 10) ?? 'unknown';
+            const day =
+                ev.start?.date ?? ev.start?.dateTime?.slice(0, 10) ?? 'unknown';
             if (!grouped.has(day)) grouped.set(day, []);
             grouped.get(day)!.push(ev);
         }
@@ -316,7 +358,10 @@ export class CalendarClient {
     }
 
     async getWeek(): Promise<string> {
-        return this.getSchedule({ startDate: weekStartParis(), endDate: weekEndParis() });
+        return this.getSchedule({
+            startDate: weekStartParis(),
+            endDate: weekEndParis(),
+        });
     }
 
     // ── Single event ───────────────────────────────────────────────────────────
@@ -352,8 +397,14 @@ export class CalendarClient {
             body.start = { date: options.startDate };
             body.end = { date: options.endDate ?? options.startDate };
         } else if (options.startDateTime) {
-            body.start = { dateTime: options.startDateTime, timeZone: TIMEZONE };
-            body.end = { dateTime: options.endDateTime ?? options.startDateTime, timeZone: TIMEZONE };
+            body.start = {
+                dateTime: options.startDateTime,
+                timeZone: TIMEZONE,
+            };
+            body.end = {
+                dateTime: options.endDateTime ?? options.startDateTime,
+                timeZone: TIMEZONE,
+            };
         }
 
         if (options.attendeeEmails?.length) {
@@ -394,20 +445,28 @@ export class CalendarClient {
         const calId = options.calendarId ?? 'primary';
 
         // Fetch current state so we only change what was provided
-        const current = (await this.cal.events.get({ calendarId: calId, eventId: options.eventId }))
-            .data;
+        const current = (
+            await this.cal.events.get({
+                calendarId: calId,
+                eventId: options.eventId,
+            })
+        ).data;
 
         const body: calendar_v3.Schema$Event = { ...current };
 
         if (options.title !== undefined) body.summary = options.title;
         if (options.location !== undefined) body.location = options.location;
-        if (options.description !== undefined) body.description = options.description;
+        if (options.description !== undefined)
+            body.description = options.description;
 
         if (options.startDate) {
             body.start = { date: options.startDate };
             body.end = { date: options.endDate ?? options.startDate };
         } else if (options.startDateTime) {
-            body.start = { dateTime: options.startDateTime, timeZone: TIMEZONE };
+            body.start = {
+                dateTime: options.startDateTime,
+                timeZone: TIMEZONE,
+            };
             body.end = {
                 dateTime: options.endDateTime ?? options.startDateTime,
                 timeZone: TIMEZONE,
@@ -442,7 +501,11 @@ export class CalendarClient {
             // ignore — we'll still attempt the delete
         }
 
-        await this.cal.events.delete({ calendarId, eventId, sendUpdates: 'all' });
+        await this.cal.events.delete({
+            calendarId,
+            eventId,
+            sendUpdates: 'all',
+        });
         return `✅ Événement "${title}" supprimé.`;
     }
 
@@ -463,7 +526,9 @@ export class CalendarClient {
         if (options.calendarId) {
             calIds.push(options.calendarId);
         } else {
-            const listRes = await this.cal.calendarList.list({ showHidden: false });
+            const listRes = await this.cal.calendarList.list({
+                showHidden: false,
+            });
             for (const c of listRes.data.items ?? []) {
                 if (c.id) {
                     calIds.push(c.id);
@@ -491,7 +556,9 @@ export class CalendarClient {
                         allEvents.push({ ...ev, _calendarName: name });
                     }
                 } catch (err) {
-                    Logger.warn(`Search failed for calendar "${calId}": ${err}`);
+                    Logger.warn(
+                        `Search failed for calendar "${calId}": ${err}`,
+                    );
                 }
             }),
         );
@@ -506,7 +573,9 @@ export class CalendarClient {
             return `Aucun événement trouvé pour "${options.query}".`;
         }
 
-        const lines = [`${allEvents.length} résultat(s) pour "${options.query}" :\n`];
+        const lines = [
+            `${allEvents.length} résultat(s) pour "${options.query}" :\n`,
+        ];
         for (const ev of allEvents) {
             lines.push(formatEvent(ev, ev._calendarName));
             lines.push('');
@@ -521,11 +590,11 @@ export class CalendarClient {
      * Only considers events that have a start and end dateTime (not all-day).
      */
     async findFreeSlots(options: {
-        date: string;            // YYYY-MM-DD
+        date: string; // YYYY-MM-DD
         durationMinutes: number;
         calendarIds?: string[];
-        workdayStart?: number;   // hour 0-23, default 9
-        workdayEnd?: number;     // hour 0-23, default 19
+        workdayStart?: number; // hour 0-23, default 9
+        workdayEnd?: number; // hour 0-23, default 19
     }): Promise<string> {
         const { date, durationMinutes } = options;
         const wStart = options.workdayStart ?? 9;
@@ -533,12 +602,22 @@ export class CalendarClient {
 
         let calIds = options.calendarIds ?? [];
         if (calIds.length === 0) {
-            const listRes = await this.cal.calendarList.list({ showHidden: false });
-            calIds = (listRes.data.items ?? []).map((c) => c.id!).filter(Boolean);
+            const listRes = await this.cal.calendarList.list({
+                showHidden: false,
+            });
+            calIds = (listRes.data.items ?? [])
+                .map((c) => c.id!)
+                .filter(Boolean);
         }
 
-        const timeMin = parisToUtcIso(date, `${String(wStart).padStart(2, '0')}:00:00`);
-        const timeMax = parisToUtcIso(date, `${String(wEnd).padStart(2, '0')}:00:00`);
+        const timeMin = parisToUtcIso(
+            date,
+            `${String(wStart).padStart(2, '0')}:00:00`,
+        );
+        const timeMax = parisToUtcIso(
+            date,
+            `${String(wEnd).padStart(2, '0')}:00:00`,
+        );
 
         const res = await this.cal.freebusy.query({
             requestBody: {
@@ -555,7 +634,10 @@ export class CalendarClient {
         for (const calId of calIds) {
             for (const slot of calendars[calId]?.busy ?? []) {
                 if (slot.start && slot.end) {
-                    busy.push({ start: new Date(slot.start), end: new Date(slot.end) });
+                    busy.push({
+                        start: new Date(slot.start),
+                        end: new Date(slot.end),
+                    });
                 }
             }
         }
@@ -581,25 +663,38 @@ export class CalendarClient {
         for (const b of merged) {
             if (b.start > cursor) {
                 const gap = (b.start.getTime() - cursor.getTime()) / 60000;
-                if (gap >= durationMinutes) free.push({ start: cursor, end: b.start });
+                if (gap >= durationMinutes)
+                    free.push({ start: cursor, end: b.start });
             }
             if (b.end > cursor) cursor = b.end;
         }
         if (cursor < dayEnd) {
             const gap = (dayEnd.getTime() - cursor.getTime()) / 60000;
-            if (gap >= durationMinutes) free.push({ start: cursor, end: dayEnd });
+            if (gap >= durationMinutes)
+                free.push({ start: cursor, end: dayEnd });
         }
 
         if (free.length === 0) {
-            return `Aucun créneau libre d'au moins ${durationMinutes} min le ${formatDate(date)}.`;
+            return `Aucun créneau libre d'au moins ${durationMinutes} min le ${formatDate(
+                date,
+            )}.`;
         }
 
         const lines = [
-            `Créneaux libres d'au moins ${durationMinutes} min le ${formatDate(date)} :\n`,
+            `Créneaux libres d'au moins ${durationMinutes} min le ${formatDate(
+                date,
+            )} :\n`,
         ];
         for (const slot of free) {
-            const dur = formatDuration(slot.start.toISOString(), slot.end.toISOString());
-            lines.push(`  • ${formatTime(slot.start.toISOString())} → ${formatTime(slot.end.toISOString())} (${dur})`);
+            const dur = formatDuration(
+                slot.start.toISOString(),
+                slot.end.toISOString(),
+            );
+            lines.push(
+                `  • ${formatTime(slot.start.toISOString())} → ${formatTime(
+                    slot.end.toISOString(),
+                )} (${dur})`,
+            );
         }
         return lines.join('\n');
     }
