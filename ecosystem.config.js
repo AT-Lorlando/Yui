@@ -8,6 +8,7 @@
  *   1. yui-xtts        — XTTS v2 TTS server (Python 3.11 venv, port 18770)
  *   2. yui-orchestrator — MCP orchestrator (Node, port 3000)
  *   3. yui-voice        — Voice pipeline (waits for 1 + 2 via health checks)
+ *   4. yui-dashboard    — Web control panel (Node, port 3002)
  */
 
 const ROOT = __dirname;
@@ -47,7 +48,22 @@ module.exports = {
             log_date_format: 'YYYY-MM-DD HH:mm:ss',
         },
 
-        // ── 3. Voice pipeline ────────────────────────────────────────────────
+        // ── 3. Dashboard ─────────────────────────────────────────────────────
+        {
+            name: 'yui-dashboard',
+            script: 'dist/dashboard.js',
+            cwd: ROOT,
+            env: {
+                NODE_ENV: 'production',
+                DASHBOARD_PORT: '3002',
+            },
+            autorestart: true,
+            max_restarts: 10,
+            restart_delay: 3000,
+            log_date_format: 'YYYY-MM-DD HH:mm:ss',
+        },
+
+        // ── 4. Voice pipeline ────────────────────────────────────────────────
         // scripts/start-voice.sh polls /health on both services above before
         // launching the pipeline — no race conditions.
         {
