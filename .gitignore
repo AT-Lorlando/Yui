@@ -7,3 +7,8 @@ banned_ips.txt
 refresh-token.json
 docs
 stories/*
+.entities/
+# Runtime data (user-specific, not committed)
+data/
+assets/my_voice.wav
+**/dist/
