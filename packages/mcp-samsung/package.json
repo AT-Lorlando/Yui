@@ -1,0 +1,20 @@
+{
+  "name": "@yui/mcp-samsung",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@yui/shared": "*",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.15.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}
