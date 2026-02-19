@@ -1,0 +1,14 @@
+[Unit]
+Description=Streaming audio UDP avec FFmpeg
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/chuya/udp_stream.py
+Restart=always
+User=chuya
+WorkingDirectory=/home/chuya
+StandardOutput=append:/home/chuya/udp_stream.log
+StandardError=append:/home/chuya/udp_stream_error.log
+
+[Install]
+WantedBy=multi-user.target
