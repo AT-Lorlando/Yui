@@ -1,13 +1,9 @@
 {
-    "compilerOptions": {
-      "target": "es2022",
-      "module": "commonjs",
-      "strict": true,
-      "esModuleInterop": true,
-      "typeRoots": ["./types", "./node_modules/@types"],
-      "paths": {
-        "castv2-client": ["./types/castv2-client.d.ts"]
-      }
-    },
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["packages", "node_modules", "dist"]
 }
-  
