@@ -54,13 +54,20 @@ async function main() {
     const streamHandler = (order: string) =>
         orchestrator.processOrderStream(order);
     const statusHandler = () => orchestrator.getStatus();
+    const deviceHandler = (toolName: string, args: Record<string, unknown>) =>
+        orchestrator.callTool(toolName, args);
 
     // Scheduler: fires cron jobs, speaks responses via voice pipeline
     initScheduler(handler, speakViaPipeline);
 
     const sources: InputSource[] = [new StdinSource(), new HttpSource()];
     for (const source of sources) {
-        await source.start(handler, streamHandler, statusHandler);
+        await source.start(
+            handler,
+            streamHandler,
+            statusHandler,
+            deviceHandler,
+        );
     }
 
     const shutdown = async (signal: string) => {
