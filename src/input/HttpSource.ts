@@ -5,7 +5,12 @@ import cors from 'cors';
 import * as http from 'http';
 import Logger from '../logger';
 import env from '../env';
-import { InputSource, StreamHandler, StatusHandler } from './InputSource';
+import {
+    InputSource,
+    StreamHandler,
+    StatusHandler,
+    DeviceHandler,
+} from './InputSource';
 
 export class HttpSource implements InputSource {
     private server: http.Server | null = null;
@@ -24,6 +29,7 @@ export class HttpSource implements InputSource {
         handler: (order: string) => Promise<string>,
         streamHandler?: StreamHandler,
         statusHandler?: StatusHandler,
+        deviceHandler?: DeviceHandler,
     ): Promise<void> {
         const port = 3000;
         const app = express();
@@ -100,6 +106,166 @@ export class HttpSource implements InputSource {
                     res.end();
                 }
             });
+        }
+
+        // ── Direct device control (bypasses LLM) ─────────────────────────────
+        if (deviceHandler) {
+            const dev = express.Router();
+
+            // Auth middleware for all /devices routes
+            dev.use((req: any, res: any, next: any) => {
+                const bearer = req.headers['authorization']?.split(' ')[1];
+                if (!this.checkPassword(bearer, req.ip)) {
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+                next();
+            });
+
+            const call =
+                (tool: string, args: Record<string, unknown> = {}) =>
+                async (_req: any, res: any) => {
+                    try {
+                        res.json(await deviceHandler(tool, args));
+                    } catch (e: any) {
+                        res.status(500).json({ error: e.message });
+                    }
+                };
+
+            // ── Lights ────────────────────────────────────────────────────────
+            dev.get('/lights', call('list_lights'));
+            dev.post('/lights/:id/on', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('turn_on_light', {
+                            lightId: +req.params.id,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.post('/lights/:id/off', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('turn_off_light', {
+                            lightId: +req.params.id,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.patch('/lights/:id/brightness', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('set_brightness', {
+                            lightId: +req.params.id,
+                            brightness: +req.body.brightness,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.patch('/lights/:id/color', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('set_color', {
+                            lightId: +req.params.id,
+                            color: req.body.color,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+
+            // ── Doors ─────────────────────────────────────────────────────────
+            dev.get('/doors', call('list_doors'));
+            dev.post('/doors/:id/lock', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('lock_door', {
+                            nukiId: +req.params.id,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.post('/doors/:id/unlock', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('unlock_door', {
+                            nukiId: +req.params.id,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+
+            // ── Spotify ───────────────────────────────────────────────────────
+            dev.get('/spotify', call('get_playback_state'));
+            dev.post('/spotify/play', call('play_music'));
+            dev.post('/spotify/pause', call('pause_music'));
+            dev.post('/spotify/next', call('next_track'));
+            dev.post('/spotify/previous', call('previous_track'));
+            dev.patch('/spotify/volume', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('set_volume', {
+                            percent: +req.body.percent,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+
+            // ── TV ────────────────────────────────────────────────────────────
+            dev.get('/tv', call('tv_get_status'));
+            dev.post('/tv/on', async (_req: any, res: any) => {
+                try {
+                    res.json(await deviceHandler('tv_power', { state: 'on' }));
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.post('/tv/off', async (_req: any, res: any) => {
+                try {
+                    res.json(await deviceHandler('tv_power', { state: 'off' }));
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.patch('/tv/volume', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('tv_set_volume', {
+                            level: +req.body.level,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.post('/tv/mute', async (_req: any, res: any) => {
+                try {
+                    res.json(await deviceHandler('tv_mute', { mute: true }));
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.post('/tv/unmute', async (_req: any, res: any) => {
+                try {
+                    res.json(await deviceHandler('tv_mute', { mute: false }));
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+
+            app.use('/devices', dev);
         }
 
         return new Promise((resolve, reject) => {
