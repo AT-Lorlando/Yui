@@ -578,7 +578,8 @@ export class Orchestrator {
                         }
                         const acc = toolCallsAcc.get(tc.index)!;
                         if (tc.id) acc.id = tc.id;
-                        if (tc.function?.name) acc.name += tc.function.name;
+                        if (tc.function?.name && !acc.name)
+                            acc.name = tc.function.name;
                         if (tc.function?.arguments)
                             acc.arguments += tc.function.arguments;
                     }
@@ -647,6 +648,33 @@ export class Orchestrator {
         }
 
         story?.save();
+    }
+
+    /** Directly calls an MCP tool by name, bypassing the LLM. Used by the /devices REST API. */
+    async callTool(
+        toolName: string,
+        args: Record<string, unknown> = {},
+    ): Promise<unknown> {
+        const collectedTool = this.collectedTools.find(
+            (ct) => ct.tool.name === toolName,
+        );
+        if (!collectedTool) throw new Error(`Tool "${toolName}" not found`);
+
+        const result = await collectedTool.client.callTool({
+            name: toolName,
+            arguments: args,
+        });
+
+        const textContent = (result.content as { type: string; text: string }[])
+            .filter((c) => c.type === 'text')
+            .map((c) => c.text)
+            .join('\n');
+
+        try {
+            return textContent ? JSON.parse(textContent) : null;
+        } catch {
+            return textContent || null;
+        }
     }
 
     /** Returns connected MCP servers and tool counts for the dashboard. */
