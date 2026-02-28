@@ -6,6 +6,7 @@ import { env } from './env';
 import Logger from './logger';
 import { Story } from './story';
 import { buildSystemPrompt } from './systemPrompt';
+import { StreamOptions } from './input/InputSource';
 import {
     buildMemoryContext,
     saveMemory,
@@ -409,6 +410,178 @@ export class Orchestrator {
         }
     }
 
+    // ── Tool filtering ────────────────────────────────────────────────────────
+
+    /**
+     * Returns only the MCP tools relevant to the user's order, based on
+     * keyword matching. Falls back to all tools if nothing matches so the LLM
+     * always has a way to respond.
+     *
+     * This is the biggest latency lever: reducing from 67 → ~10 tools cuts
+     * input tokens by ~60-70%, which directly lowers TTFT on every LLM call.
+     */
+    private filterToolsForOrder(order: string): CollectedTool[] {
+        const SERVER_KEYWORDS: Record<string, string[]> = {
+            'mcp-hue': [
+                'lumière',
+                'lampe',
+                'allume',
+                'éteins',
+                'éclairage',
+                'luminosité',
+                'couleur',
+                'light',
+                'lamp',
+                'chambre',
+                'salon',
+                'cuisine',
+                'bureau',
+                'salle',
+                'ambiance',
+                'bright',
+                'dim',
+            ],
+            'mcp-nuki': [
+                'porte',
+                'verrou',
+                'clé',
+                'ferme',
+                'ouvre',
+                'lock',
+                'door',
+            ],
+            'mcp-spotify': [
+                'musique',
+                'spotify',
+                'joue',
+                'chanson',
+                'playlist',
+                'album',
+                'artiste',
+                'écoute',
+                'volume',
+                'pause',
+                'music',
+                'son',
+                'radio',
+                'morceau',
+                'track',
+                'shuffle',
+                'repeat',
+            ],
+            'mcp-linear': [
+                'linear',
+                'ticket',
+                'issue',
+                'tâche',
+                'projet',
+                'koya',
+                'bug',
+            ],
+            'mcp-samsung': [
+                'tv',
+                'télé',
+                'télévision',
+                'samsung',
+                'écran',
+                'hdmi',
+                'cinéma',
+                'film',
+                'série',
+            ],
+            'mcp-calendar': [
+                'calendrier',
+                'agenda',
+                'réunion',
+                'rendez-vous',
+                'événement',
+                'planning',
+                'semaine',
+                'demain',
+                'lundi',
+                'mardi',
+                'mercredi',
+                'jeudi',
+                'vendredi',
+                'samedi',
+                'dimanche',
+                'aujourd',
+                'mois',
+            ],
+            'mcp-weather': [
+                'météo',
+                'temps',
+                'température',
+                'pluie',
+                'soleil',
+                'vent',
+                'chaud',
+                'froid',
+                'nuage',
+                'weather',
+                'demain',
+                'prévision',
+                'semaine prochaine',
+                'après-demain',
+                'forecast',
+            ],
+            'mcp-obsidian': [
+                'note',
+                'obsidian',
+                'fichier',
+                'document',
+                'écris',
+                'journal',
+                'vault',
+            ],
+            'mcp-gmail': [
+                'email',
+                'mail',
+                'gmail',
+                'message',
+                'inbox',
+                'boîte',
+                'envoie',
+                'reçu',
+                'expéditeur',
+                'destinataire',
+                'objet',
+                'pièce jointe',
+                'brouillon',
+                'archive',
+                'corbeille',
+                'non lu',
+                'marque',
+            ],
+        };
+
+        const lc = order.toLowerCase();
+        const relevantServers = new Set<string>();
+        for (const [server, keywords] of Object.entries(SERVER_KEYWORDS)) {
+            if (keywords.some((kw) => lc.includes(kw))) {
+                relevantServers.add(server);
+            }
+        }
+
+        // No keyword matched → generic/unknown request, send everything
+        if (relevantServers.size === 0) {
+            Logger.debug(
+                `Tool filter: no match — sending all ${this.collectedTools.length} tools`,
+            );
+            return this.collectedTools;
+        }
+
+        const filtered = this.collectedTools.filter((ct) =>
+            relevantServers.has(ct.serverName),
+        );
+        Logger.debug(
+            `Tool filter: [${[...relevantServers].join(', ')}] → ${
+                filtered.length
+            }/${this.collectedTools.length} tools`,
+        );
+        return filtered;
+    }
+
     // ── Main entry point ─────────────────────────────────────────────────────
 
     async processOrder(order: string): Promise<string> {
@@ -426,7 +599,7 @@ export class Orchestrator {
 
         const allTools: OpenAI.Chat.ChatCompletionTool[] = [
             ...this.getVirtualTools(),
-            ...this.collectedTools.map((ct) => ({
+            ...this.filterToolsForOrder(order).map((ct) => ({
                 type: 'function' as const,
                 function: {
                     name: ct.tool.name,
@@ -562,9 +735,21 @@ export class Orchestrator {
             storySummaries: buildStorySummariesContext(order),
         });
 
+        // Build filter context: current order + all previous user messages in the
+        // session so follow-up phrases like "laisse tomber" or "annule" still have
+        // access to the same tools as the earlier exchange they refer to.
+        const sessionContext =
+            this.sessionStory?.entries
+                .filter((e) => e.role === 'user')
+                .map((e) => e.content)
+                .join(' ') ?? '';
+        const filterInput = sessionContext
+            ? `${sessionContext} ${order}`
+            : order;
+
         const allTools: OpenAI.Chat.ChatCompletionTool[] = [
             ...this.getVirtualTools(),
-            ...this.collectedTools.map((ct) => ({
+            ...this.filterToolsForOrder(filterInput).map((ct) => ({
                 type: 'function' as const,
                 function: {
                     name: ct.tool.name,
