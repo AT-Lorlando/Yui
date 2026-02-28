@@ -59,11 +59,11 @@ function relativeTime(isoOrDate: string): string {
     return '';
 }
 
-const RESPONSE_ICON: Record<string, string> = {
-    accepted: '✅',
-    declined: '❌',
-    tentative: '❓',
-    needsAction: '⏳',
+const RESPONSE_LABEL: Record<string, string> = {
+    accepted: '[OK]',
+    declined: '[Refusé]',
+    tentative: '[Peut-être]',
+    needsAction: '[En attente]',
 };
 
 function formatEvent(
@@ -73,14 +73,14 @@ function formatEvent(
     const lines: string[] = [];
 
     const title = event.summary ?? '(Sans titre)';
-    lines.push(`📌 **${title}** [id: ${event.id}]`);
+    lines.push(`${title} [id: ${event.id}]`);
 
     if (event.status === 'cancelled') {
-        lines.push('  ❌ Annulé');
+        lines.push('  [Annulé]');
         return lines.join('\n');
     }
     if (event.status === 'tentative') {
-        lines.push('  ❓ Tentative (non confirmé)');
+        lines.push('  [Non confirmé]');
     }
 
     // Time
@@ -98,7 +98,7 @@ function formatEvent(
             }
         }
         lines.push(
-            `  📅 Toute la journée — ${formatDate(
+            `  Toute la journée — ${formatDate(
                 event.start.date,
             )}${endLabel}`,
         );
@@ -110,18 +110,18 @@ function formatEvent(
 
         if (end) {
             lines.push(
-                `  ⏰ ${formatTime(start)} → ${formatTime(
+                `  Horaire : ${formatTime(start)} → ${formatTime(
                     end,
                 )} (${formatDuration(start, end)})${relStr}`,
             );
         } else {
-            lines.push(`  ⏰ ${formatTime(start)}${relStr}`);
+            lines.push(`  Horaire : ${formatTime(start)}${relStr}`);
         }
-        lines.push(`  📅 ${formatDate(start)}`);
+        lines.push(`  Date : ${formatDate(start)}`);
     }
 
-    if (calendarName) lines.push(`  📁 ${calendarName}`);
-    if (event.location) lines.push(`  📍 ${event.location}`);
+    if (calendarName) lines.push(`  Calendrier : ${calendarName}`);
+    if (event.location) lines.push(`  Lieu : ${event.location}`);
 
     // Attendees
     if (event.attendees && event.attendees.length > 0) {
@@ -130,19 +130,19 @@ function formatEvent(
 
         if (self) {
             lines.push(
-                `  👤 Vous : ${
-                    RESPONSE_ICON[self.responseStatus ?? 'needsAction'] ?? '⏳'
+                `  Vous : ${
+                    RESPONSE_LABEL[self.responseStatus ?? 'needsAction'] ?? '[En attente]'
                 }`,
             );
         }
         if (others.length > 0) {
             const names = others.slice(0, 5).map((a) => {
-                const icon =
-                    RESPONSE_ICON[a.responseStatus ?? 'needsAction'] ?? '⏳';
-                return `${a.displayName ?? a.email} ${icon}`;
+                const label =
+                    RESPONSE_LABEL[a.responseStatus ?? 'needsAction'] ?? '[En attente]';
+                return `${a.displayName ?? a.email} ${label}`;
             });
             if (others.length > 5) names.push(`+${others.length - 5} autres`);
-            lines.push(`  👥 ${names.join(', ')}`);
+            lines.push(`  Participants : ${names.join(', ')}`);
         }
     }
 
@@ -152,7 +152,7 @@ function formatEvent(
         event.conferenceData?.entryPoints?.find(
             (e) => e.entryPointType === 'video',
         )?.uri;
-    if (meetLink) lines.push(`  🎥 Google Meet : ${meetLink}`);
+    if (meetLink) lines.push(`  Google Meet : ${meetLink}`);
 
     // Description (HTML stripped + truncated)
     if (event.description) {
@@ -162,13 +162,13 @@ function formatEvent(
             .trim();
         const truncated =
             plain.length > 200 ? plain.slice(0, 197) + '...' : plain;
-        if (truncated) lines.push(`  📝 ${truncated}`);
+        if (truncated) lines.push(`  Note : ${truncated}`);
     }
 
     // Recurrence
-    if (event.recurrence?.length) lines.push('  🔁 Récurrent');
+    if (event.recurrence?.length) lines.push('  [Récurrent]');
     else if (event.recurringEventId)
-        lines.push("  🔁 Occurrence d'un événement récurrent");
+        lines.push("  [Occurrence d'un événement récurrent]");
 
     return lines.join('\n');
 }
@@ -235,8 +235,8 @@ export class CalendarClient {
 
         const lines = ['Vos calendriers :\n'];
         for (const c of cals) {
-            const primary = c.primary ? ' ★ (principal)' : '';
-            lines.push(`• **${c.summary}**${primary}`);
+            const primary = c.primary ? ' (principal)' : '';
+            lines.push(`• ${c.summary}${primary}`);
             lines.push(`  ID : ${c.id}`);
             lines.push(`  Rôle : ${c.accessRole ?? 'unknown'}`);
             if (c.description) lines.push(`  ${c.description}`);
@@ -343,7 +343,7 @@ export class CalendarClient {
 
         const lines: string[] = [];
         for (const [day, events] of grouped) {
-            lines.push(`\n━━ ${formatDate(day).toUpperCase()} ━━`);
+            lines.push(`\n--- ${formatDate(day)} ---`);
             for (const ev of events) {
                 lines.push('');
                 lines.push(formatEvent(ev, ev._calendarName));
@@ -422,7 +422,7 @@ export class CalendarClient {
         });
 
         return (
-            `✅ Événement créé : **${res.data.summary}**\n` +
+            `Événement créé : ${res.data.summary}\n` +
             `  ID : ${res.data.id}\n` +
             `  Lien : ${res.data.htmlLink}`
         );
@@ -484,7 +484,7 @@ export class CalendarClient {
         });
 
         return (
-            `✅ Événement mis à jour : **${res.data.summary}**\n` +
+            `Événement mis à jour : ${res.data.summary}\n` +
             `  Lien : ${res.data.htmlLink}`
         );
     }
@@ -506,7 +506,7 @@ export class CalendarClient {
             eventId,
             sendUpdates: 'all',
         });
-        return `✅ Événement "${title}" supprimé.`;
+        return `Événement "${title}" supprimé.`;
     }
 
     // ── Search ─────────────────────────────────────────────────────────────────
@@ -705,7 +705,7 @@ export class CalendarClient {
         const res = await this.cal.events.quickAdd({ calendarId, text });
         const ev = res.data;
         return (
-            `✅ Événement ajouté : **${ev.summary}**\n` +
+            `Événement ajouté : ${ev.summary}\n` +
             `  ID : ${ev.id}\n` +
             `  Lien : ${ev.htmlLink}`
         );

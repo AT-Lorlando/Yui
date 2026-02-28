@@ -198,21 +198,21 @@ export class WeatherClient {
         const sunset = data.daily.sunset[0] ? formatTime(data.daily.sunset[0]) : '—';
 
         const lines = [
-            `📍 **${this.city}** — ${now}`,
-            `${w.emoji} **${w.label}**`,
-            `🌡️ **${Math.round(c.temperature_2m)}°C** (ressenti ${Math.round(c.apparent_temperature)}°C)`,
-            `💧 Humidité : ${c.relative_humidity_2m}%`,
-            `💨 Vent : ${Math.round(c.wind_speed_10m)} km/h ${windDir(c.wind_direction_10m)} (rafales ${Math.round(c.wind_gusts_10m)} km/h)`,
+            `${this.city} — ${now}`,
+            `${w.label}`,
+            `Température : ${Math.round(c.temperature_2m)}°C (ressenti ${Math.round(c.apparent_temperature)}°C)`,
+            `Humidité : ${c.relative_humidity_2m}%`,
+            `Vent : ${Math.round(c.wind_speed_10m)} km/h ${windDir(c.wind_direction_10m)} (rafales ${Math.round(c.wind_gusts_10m)} km/h)`,
         ];
 
         if (c.precipitation > 0) {
-            lines.push(`🌧️ Précipitations en cours : ${c.precipitation} mm`);
+            lines.push(`Précipitations en cours : ${c.precipitation} mm`);
         }
 
         lines.push(
-            `☁️ Nébulosité : ${c.cloud_cover}%`,
-            `🔆 Indice UV : ${Math.round(c.uv_index)} (${uvLabel(c.uv_index)})`,
-            `🌅 Lever ${sunrise} — Coucher ${sunset}`,
+            `Nébulosité : ${c.cloud_cover}%`,
+            `Indice UV : ${Math.round(c.uv_index)} (${uvLabel(c.uv_index)})`,
+            `Lever ${sunrise} — Coucher ${sunset}`,
         );
 
         return lines.join('\n');
@@ -232,14 +232,14 @@ export class WeatherClient {
 
         if (indices.length === 0) return 'Données horaires indisponibles pour aujourd\'hui.';
 
-        const lines = [`**Prévisions heure par heure — ${formatDate(todayStr)}**\n`];
+        const lines = [`Prévisions heure par heure — ${formatDate(todayStr)}\n`];
 
         // Group into 4 time blocks
         const blocks: Array<{ label: string; hours: number[] }> = [
-            { label: '🌙 Nuit (0h–5h)', hours: [0, 1, 2, 3, 4, 5] },
-            { label: '🌅 Matin (6h–11h)', hours: [6, 7, 8, 9, 10, 11] },
-            { label: '☀️ Après-midi (12h–17h)', hours: [12, 13, 14, 15, 16, 17] },
-            { label: '🌆 Soir (18h–23h)', hours: [18, 19, 20, 21, 22, 23] },
+            { label: 'Nuit (0h–5h)', hours: [0, 1, 2, 3, 4, 5] },
+            { label: 'Matin (6h–11h)', hours: [6, 7, 8, 9, 10, 11] },
+            { label: 'Après-midi (12h–17h)', hours: [12, 13, 14, 15, 16, 17] },
+            { label: 'Soir (18h–23h)', hours: [18, 19, 20, 21, 22, 23] },
         ];
 
         for (const block of blocks) {
@@ -266,12 +266,12 @@ export class WeatherClient {
 
             const precipStr =
                 maxPrecipProb > 15
-                    ? ` 💧${maxPrecipProb}%${totalPrecip > 0.1 ? ` (${totalPrecip.toFixed(1)}mm)` : ''}`
+                    ? ` pluie ${maxPrecipProb}%${totalPrecip > 0.1 ? ` (${totalPrecip.toFixed(1)}mm)` : ''}`
                     : '';
-            const windStr = wind > 20 ? ` 💨${wind}km/h` : '';
+            const windStr = wind > 20 ? ` vent ${wind}km/h` : '';
 
             lines.push(
-                `${block.label}\n  ${w.emoji} ${w.label} · ${minT === maxT ? `${minT}°C` : `${minT}–${maxT}°C`}${precipStr}${windStr}`,
+                `${block.label}\n  ${w.label} · ${minT === maxT ? `${minT}°C` : `${minT}–${maxT}°C`}${precipStr}${windStr}`,
             );
         }
 
@@ -285,7 +285,7 @@ export class WeatherClient {
         const data = await this.fetchAll(cappedDays);
         const d = data.daily;
 
-        const lines = [`**Prévisions ${cappedDays} jours — ${this.city}**\n`];
+        const lines = [`Prévisions ${cappedDays} jours — ${this.city}\n`];
 
         for (let i = 0; i < d.time.length; i++) {
             const w = wmo(d.weather_code[i]);
@@ -298,12 +298,12 @@ export class WeatherClient {
 
             const precipStr =
                 precipProb > 15
-                    ? ` 💧${precipProb}%${precipSum > 0.1 ? ` (${precipSum.toFixed(1)}mm)` : ''}`
+                    ? ` pluie ${precipProb}%${precipSum > 0.1 ? ` (${precipSum.toFixed(1)}mm)` : ''}`
                     : '';
-            const windStr = wind > 25 ? ` 💨${wind}km/h` : '';
+            const windStr = wind > 25 ? ` vent ${wind}km/h` : '';
 
             lines.push(
-                `• **${dateLabel}** ${w.emoji} ${w.label} · ${min}°/${max}°${precipStr}${windStr}`,
+                `• ${dateLabel} ${w.label} · ${min}°/${max}°${precipStr}${windStr}`,
             );
         }
 
@@ -347,23 +347,23 @@ export class WeatherClient {
         const sunset = d.sunset[dayIdx] ? formatTime(d.sunset[dayIdx]) : '—';
 
         const lines = [
-            `**Météo du ${formatDate(dateStr)} — ${this.city}**`,
-            `${w.emoji} ${w.label}`,
-            `🌡️ ${min}°C / ${max}°C`,
+            `Météo du ${formatDate(dateStr)} — ${this.city}`,
+            `${w.label}`,
+            `Température : ${min}°C / ${max}°C`,
         ];
 
         if (precipProb > 15) {
             lines.push(
-                `💧 Précipitations : ${precipProb}% de chances${precipSum > 0.1 ? ` (${precipSum.toFixed(1)} mm)` : ''}`,
+                `Précipitations : ${precipProb}% de chances${precipSum > 0.1 ? ` (${precipSum.toFixed(1)} mm)` : ''}`,
             );
         } else {
-            lines.push('💧 Pas de précipitations significatives prévues');
+            lines.push('Pas de précipitations significatives prévues');
         }
 
         lines.push(
-            `💨 Vent max : ${wind} km/h`,
-            `🔆 UV max : ${uv} (${uvLabel(uv)})`,
-            `🌅 Lever ${sunrise} — Coucher ${sunset}`,
+            `Vent max : ${wind} km/h`,
+            `UV max : ${uv} (${uvLabel(uv)})`,
+            `Lever ${sunrise} — Coucher ${sunset}`,
         );
 
         // Add hourly blocks for that day
@@ -396,10 +396,10 @@ export class WeatherClient {
                 const pw = wmo(data.hourly.weather_code[peakIdx]);
                 const pWind = Math.round(data.hourly.wind_speed_10m[peakIdx]);
 
-                const precipStr = maxProb > 15 ? ` · 💧${maxProb}%` : '';
-                const windStr = pWind > 25 ? ` · 💨${pWind}km/h` : '';
+                const precipStr = maxProb > 15 ? ` · pluie ${maxProb}%` : '';
+                const windStr = pWind > 25 ? ` · vent ${pWind}km/h` : '';
 
-                lines.push(`  • ${period.label} : ${pw.emoji} ${avgTemp}°C${precipStr}${windStr}`);
+                lines.push(`  • ${period.label} : ${pw.label} ${avgTemp}°C${precipStr}${windStr}`);
             }
         }
 
