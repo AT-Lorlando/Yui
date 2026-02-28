@@ -10,7 +10,41 @@ import {
     StreamHandler,
     StatusHandler,
     DeviceHandler,
+    ScenesHandler,
+    ToolsHandler,
 } from './InputSource';
+
+// ── TTS helper ────────────────────────────────────────────────────────────────
+// Calls the XTTS server to synthesise text and returns WAV audio as base64.
+// Returns null if the server is not available — caller degrades gracefully.
+
+const TTS_SERVER_URL =
+    process.env.TTS_SERVER_URL ?? 'http://localhost:18770/tts';
+const TTS_SPEAKER = process.env.XTTS_SPEAKER ?? 'Lilya Stainthorpe';
+const TTS_SPEED = parseFloat(process.env.XTTS_SPEED ?? '1.0');
+
+async function generateTtsAudio(
+    text: string,
+): Promise<{ base64: string; mime: string } | null> {
+    try {
+        const res = await fetch(TTS_SERVER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text,
+                language: 'fr',
+                speaker: TTS_SPEAKER,
+                speed: TTS_SPEED,
+            }),
+            signal: AbortSignal.timeout(20_000),
+        });
+        if (!res.ok) return null;
+        const buf = Buffer.from(await res.arrayBuffer());
+        return { base64: buf.toString('base64'), mime: 'audio/wav' };
+    } catch {
+        return null;
+    }
+}
 
 export class HttpSource implements InputSource {
     private server: http.Server | null = null;
@@ -26,10 +60,12 @@ export class HttpSource implements InputSource {
     }
 
     async start(
-        handler: (order: string) => Promise<string>,
+        handler: (order: string, reset?: boolean) => Promise<string>,
         streamHandler?: StreamHandler,
         statusHandler?: StatusHandler,
         deviceHandler?: DeviceHandler,
+        scenesHandler?: ScenesHandler,
+        toolsHandler?: ToolsHandler,
     ): Promise<void> {
         const port = 3000;
         const app = express();
@@ -48,7 +84,35 @@ export class HttpSource implements InputSource {
             });
         }
 
-        // ── Blocking endpoint (used by stdin, cron, etc.) ─────────────────────
+        // ── MCP tools list (no auth — internal only) ──────────────────────────
+        if (toolsHandler) {
+            app.get('/tools', (_req: any, res: any) => {
+                res.json(toolsHandler.list());
+            });
+
+            // Call a tool directly (bypasses LLM) — requires auth
+            app.post('/tools/:name', async (req: any, res: any) => {
+                const bearer = req.headers['authorization']?.split(' ')[1];
+                if (!this.checkPassword(bearer, req.ip)) {
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+                try {
+                    const result = await toolsHandler.call(
+                        req.params.name,
+                        req.body || {},
+                    );
+                    return res.json({ result });
+                } catch (e: any) {
+                    return res.status(500).json({ error: e.message });
+                }
+            });
+        }
+
+        // ── Blocking endpoint (used by mobile app, cron, etc.) ───────────────
+        // If the request body contains `audio: true`, the response includes
+        // TTS audio as base64 WAV so the caller can play it locally.
+        // The voice pipeline sends `voice: true` (not `audio: true`) and handles
+        // its own TTS — it never receives audio bytes here.
         app.post('/order', async (req: any, res: any) => {
             const bearer = req.headers['authorization']?.split(' ')[1];
             if (!this.checkPassword(bearer, req.ip)) {
@@ -60,9 +124,22 @@ export class HttpSource implements InputSource {
                 return res.status(400).json({ error: 'Missing "order" field' });
             }
 
+            const wantsAudio = req.body?.audio === true;
+            const reset = req.body?.reset === true;
+
             try {
-                const result = await handler(order);
-                return res.status(200).json({ response: result });
+                const result = await handler(order, reset);
+                const response: Record<string, unknown> = { response: result };
+
+                if (wantsAudio) {
+                    const tts = await generateTtsAudio(result);
+                    if (tts) {
+                        response.audio = tts.base64;
+                        response.audioMime = tts.mime;
+                    }
+                }
+
+                return res.status(200).json(response);
             } catch (error) {
                 Logger.error(`HTTP order error: ${error}`);
                 return res.status(500).json({ error: 'Internal server error' });
@@ -87,13 +164,21 @@ export class HttpSource implements InputSource {
                         .json({ error: 'Missing "order" field' });
                 }
 
+                // Voice pipeline sends "voice: true" → cap response length
+                const isVoice = req.body?.voice === true;
+                const reset = req.body?.reset === true;
+
                 res.setHeader('Content-Type', 'text/event-stream');
                 res.setHeader('Cache-Control', 'no-cache');
                 res.setHeader('Connection', 'keep-alive');
                 res.flushHeaders();
 
                 try {
-                    for await (const token of streamHandler(order)) {
+                    for await (const token of streamHandler(
+                        order,
+                        undefined,
+                        reset,
+                    )) {
                         res.write(`data: ${JSON.stringify({ token })}\n\n`);
                     }
                 } catch (error) {
@@ -266,6 +351,56 @@ export class HttpSource implements InputSource {
             });
 
             app.use('/devices', dev);
+        }
+
+        // ── Scenes ────────────────────────────────────────────────────────────
+        if (scenesHandler) {
+            const sc = express.Router();
+
+            sc.use((req: any, res: any, next: any) => {
+                const bearer = req.headers['authorization']?.split(' ')[1];
+                if (!this.checkPassword(bearer, req.ip)) {
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+                next();
+            });
+
+            // List all scenes
+            sc.get('/', (_req: any, res: any) => {
+                res.json(scenesHandler.list());
+            });
+
+            // Trigger a scene
+            sc.post('/:id/trigger', async (req: any, res: any) => {
+                try {
+                    const result = await scenesHandler.trigger(req.params.id);
+                    res.json(result);
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+
+            // Create a custom scene
+            sc.post('/', (req: any, res: any) => {
+                try {
+                    const scene = scenesHandler.create(req.body);
+                    res.status(201).json(scene);
+                } catch (e: any) {
+                    res.status(400).json({ error: e.message });
+                }
+            });
+
+            // Delete a custom scene
+            sc.delete('/:id', (req: any, res: any) => {
+                const ok = scenesHandler.remove(req.params.id);
+                if (!ok)
+                    return res
+                        .status(404)
+                        .json({ error: 'Scene not found or is built-in' });
+                res.json({ success: true });
+            });
+
+            app.use('/scenes', sc);
         }
 
         return new Promise((resolve, reject) => {
