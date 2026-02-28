@@ -385,7 +385,11 @@ export class Orchestrator {
             if (result.isError) {
                 Logger.warn(`Tool ${toolName} returned an error: ${content}`);
             } else {
-                Logger.debug(`Tool ${toolName} result: ${content}`);
+                const preview =
+                    content.length > 300
+                        ? content.slice(0, 300) + '…'
+                        : content;
+                Logger.info(`Tool result [${toolName}]: ${preview}`);
             }
 
             return { id: toolCall.id, content };
@@ -480,6 +484,12 @@ export class Orchestrator {
         }
 
         if (!finalResponse) finalResponse = 'Tâche effectuée.';
+
+        const preview =
+            finalResponse.length > 300
+                ? finalResponse.slice(0, 300) + '…'
+                : finalResponse;
+        Logger.info(`[Response] ${preview}`);
 
         // Update rolling conversation history
         this.conversationHistory.push({ role: 'user', content: order });
@@ -633,6 +643,12 @@ export class Orchestrator {
             finalResponse = 'Tâche effectuée.';
             yield finalResponse;
         }
+
+        const preview =
+            finalResponse.length > 300
+                ? finalResponse.slice(0, 300) + '…'
+                : finalResponse;
+        Logger.info(`[Response] ${preview}`);
 
         // Update rolling conversation history
         this.conversationHistory.push({ role: 'user', content: order });
