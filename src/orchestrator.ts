@@ -52,6 +52,13 @@ export class Orchestrator {
     private servers: McpServerConfig[];
     private conversationHistory: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 
+    /**
+     * Persistent story that spans multiple processOrderStream calls within
+     * the same voice conversation session (10 s window). Finalized (saved +
+     * summarized) on reset or server shutdown.
+     */
+    private sessionStory: Story | null = null;
+
     constructor(servers: McpServerConfig[]) {
         this.openai = new OpenAI({
             apiKey: env.LLM_API_KEY,
@@ -517,9 +524,28 @@ export class Orchestrator {
      */
     async *processOrderStream(
         order: string,
+        options?: StreamOptions,
+        reset?: boolean,
     ): AsyncGenerator<string, void, unknown> {
-        const story = env.SAVE_STORIES ? new Story() : null;
-        story?.add({ role: 'user', content: order });
+        if (reset) {
+            // Finalize the previous session story (triggers summarization)
+            if (this.sessionStory) {
+                this.sessionStory.save();
+                this.sessionStory = null;
+                Logger.info('Previous session story finalized');
+            }
+            this.conversationHistory = [];
+            Logger.info(
+                'Conversation history reset (new conversation, stream)',
+            );
+        }
+
+        // Reuse or create the session story for this conversation window
+        if (env.SAVE_STORIES && !this.sessionStory) {
+            this.sessionStory = new Story();
+            Logger.info(`Session story started: story-${this.sessionStory.id}`);
+        }
+        const story = this.sessionStory;
 
         Logger.info(`Processing order (stream): "${order}"`);
 
@@ -541,6 +567,8 @@ export class Orchestrator {
                 },
             })),
         ];
+
+        story?.add({ role: 'user', content: order });
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
             { role: 'system', content: systemPrompt },
@@ -663,7 +691,9 @@ export class Orchestrator {
             );
         }
 
-        story?.save();
+        // Flush to disk after every exchange — session stays open for continuation.
+        // The story is finalized (summarized) when the next reset arrives or on shutdown.
+        story?.flush();
     }
 
     /** Directly calls an MCP tool by name, bypassing the LLM. Used by the /devices REST API. */
@@ -710,6 +740,12 @@ export class Orchestrator {
     }
 
     async shutdown(): Promise<void> {
+        if (this.sessionStory) {
+            this.sessionStory.save();
+            this.sessionStory = null;
+            Logger.info('Session story finalized on shutdown');
+        }
+
         for (const [name, client] of this.clients.entries()) {
             try {
                 await client.close();
