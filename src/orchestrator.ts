@@ -584,7 +584,12 @@ export class Orchestrator {
 
     // ── Main entry point ─────────────────────────────────────────────────────
 
-    async processOrder(order: string): Promise<string> {
+    async processOrder(order: string, reset?: boolean): Promise<string> {
+        if (reset) {
+            this.conversationHistory = [];
+            Logger.info('Conversation history reset (new conversation)');
+        }
+
         const story = env.SAVE_STORIES ? new Story() : null;
 
         Logger.info(`Processing order: "${order}"`);
@@ -633,6 +638,7 @@ export class Orchestrator {
                 messages,
                 tools: allTools.length > 0 ? allTools : undefined,
                 tool_choice: allTools.length > 0 ? 'auto' : undefined,
+                temperature: 0,
             });
 
             const choice = response.choices[0];
@@ -648,19 +654,29 @@ export class Orchestrator {
                 break;
             }
 
-            for (const toolCall of assistantMessage.tool_calls) {
-                // Virtual tools are handled in-process; MCP tools go to servers
-                const virtualResult = await this.handleVirtualTool(toolCall);
-                const result =
-                    virtualResult ?? (await this.executeToolCall(toolCall));
-
+            // Execute all tool calls in parallel — independent tools (lights, music,
+            // doors, etc.) don't need to wait for each other.
+            const toolResults = await Promise.all(
+                assistantMessage.tool_calls.map(async (toolCall) => {
+                    const virtualResult = await this.handleVirtualTool(
+                        toolCall,
+                    );
+                    const result =
+                        virtualResult ?? (await this.executeToolCall(toolCall));
+                    const args = JSON.parse(
+                        toolCall.function.arguments || '{}',
+                    ) as Record<string, unknown>;
+                    return { toolName: toolCall.function.name, result, args };
+                }),
+            );
+            for (const { toolName, result, args } of toolResults) {
                 story?.add({
                     role: 'tool',
                     content: result.content,
                     toolCallId: result.id,
-                    toolName: toolCall.function.name,
+                    toolName,
+                    toolArgs: args,
                 });
-
                 messages.push({
                     role: 'tool',
                     tool_call_id: result.id,
@@ -783,11 +799,20 @@ export class Orchestrator {
                 messages,
                 tools: allTools.length > 0 ? allTools : undefined,
                 tool_choice: allTools.length > 0 ? 'auto' : undefined,
+                temperature: 0,
                 stream: true,
+                ...(options?.maxTokens
+                    ? { max_tokens: options.maxTokens }
+                    : {}),
             });
 
-            // Accumulate the response from streaming chunks
+            // Accumulate the response from streaming chunks.
+            // Tokens are buffered and NOT yielded yet — we must first confirm
+            // this is the final text turn (no tool calls). If the LLM emits
+            // content alongside tool calls (Kimi K2 / DeepSeek do this), we
+            // must discard that content so TTS doesn't speak before tools run.
             let contentAcc = '';
+            const tokenBuffer: string[] = [];
             const toolCallsAcc = new Map<
                 number,
                 { id: string; name: string; arguments: string }
@@ -798,7 +823,7 @@ export class Orchestrator {
 
                 if (delta?.content) {
                     contentAcc += delta.content;
-                    yield delta.content; // stream token to caller immediately
+                    tokenBuffer.push(delta.content); // buffer — don't yield yet
                 }
 
                 if (delta?.tool_calls) {
@@ -811,7 +836,7 @@ export class Orchestrator {
                             });
                         }
                         const acc = toolCallsAcc.get(tc.index)!;
-                        if (tc.id) acc.id = tc.id;
+                        if (tc.id && !acc.id) acc.id = tc.id; // only set once
                         if (tc.function?.name && !acc.name)
                             acc.name = tc.function.name;
                         if (tc.function?.arguments)
@@ -821,7 +846,9 @@ export class Orchestrator {
             }
 
             if (toolCallsAcc.size > 0) {
-                // Tool call round — reconstruct full tool calls and execute them
+                // Tool call round — reconstruct full tool calls and execute them.
+                // Any content the LLM emitted alongside tool calls is discarded
+                // (it's reasoning/preamble text, not the final spoken response).
                 const toolCalls: OpenAI.Chat.ChatCompletionMessageToolCall[] =
                     Array.from(toolCallsAcc.values()).map((tc) => ({
                         id: tc.id,
@@ -831,24 +858,37 @@ export class Orchestrator {
 
                 messages.push({
                     role: 'assistant',
-                    content: contentAcc || null,
+                    content: null, // discard any tool-round preamble text
                     tool_calls: toolCalls,
                 });
 
-                for (const toolCall of toolCalls) {
-                    const virtualResult = await this.handleVirtualTool(
-                        toolCall,
-                    );
-                    const result =
-                        virtualResult ?? (await this.executeToolCall(toolCall));
-
+                // Execute all tool calls in parallel
+                const toolResults = await Promise.all(
+                    toolCalls.map(async (toolCall) => {
+                        const virtualResult = await this.handleVirtualTool(
+                            toolCall,
+                        );
+                        const result =
+                            virtualResult ??
+                            (await this.executeToolCall(toolCall));
+                        const args = JSON.parse(
+                            toolCall.function.arguments || '{}',
+                        ) as Record<string, unknown>;
+                        return {
+                            toolName: toolCall.function.name,
+                            result,
+                            args,
+                        };
+                    }),
+                );
+                for (const { toolName, result, args } of toolResults) {
                     story?.add({
                         role: 'tool',
                         content: result.content,
                         toolCallId: result.id,
-                        toolName: toolCall.function.name,
+                        toolName,
+                        toolArgs: args,
                     });
-
                     messages.push({
                         role: 'tool',
                         tool_call_id: result.id,
@@ -856,7 +896,10 @@ export class Orchestrator {
                     });
                 }
             } else {
-                // Text response — we already yielded all tokens, just record it
+                // Final text response — now yield the buffered tokens
+                for (const token of tokenBuffer) {
+                    yield token;
+                }
                 finalResponse = contentAcc;
                 story?.add({ role: 'assistant', content: finalResponse });
                 break;
@@ -935,6 +978,21 @@ export class Orchestrator {
         return { servers, totalTools: this.collectedTools.length };
     }
 
+    /** Returns all collected tools with their schemas, grouped by server. */
+    getTools(): {
+        serverName: string;
+        name: string;
+        description: string;
+        inputSchema: Record<string, unknown>;
+    }[] {
+        return this.collectedTools.map((ct) => ({
+            serverName: ct.serverName,
+            name: ct.tool.name,
+            description: ct.tool.description,
+            inputSchema: ct.tool.inputSchema,
+        }));
+    }
+
     async shutdown(): Promise<void> {
         if (this.sessionStory) {
             this.sessionStory.save();
@@ -958,73 +1016,37 @@ export class Orchestrator {
 export function buildServerConfigs(): McpServerConfig[] {
     const root = path.resolve(__dirname, '..');
 
+    // In production (compiled dist/main.js) use pre-built node packages to avoid
+    // ts-node compilation overhead (~2-3s × 8 servers = ~20s extra cold start).
+    // In dev (ts-node src/main.ts) use ts-node so changes are picked up immediately.
+    const compiled = __filename.endsWith('.js');
+
+    const mcp = (pkg: string): McpServerConfig =>
+        compiled
+            ? {
+                  name: pkg,
+                  command: 'node',
+                  args: [path.join(root, `packages/${pkg}/dist/index.js`)],
+              }
+            : {
+                  name: pkg,
+                  command: 'npx',
+                  args: [
+                      'ts-node',
+                      path.join(root, `packages/${pkg}/src/index.ts`),
+                  ],
+              };
+
     return [
-        {
-            name: 'mcp-hue',
-            command: 'npx',
-            args: ['ts-node', path.join(root, 'packages/mcp-hue/src/index.ts')],
-        },
-        {
-            name: 'mcp-nuki',
-            command: 'npx',
-            args: [
-                'ts-node',
-                path.join(root, 'packages/mcp-nuki/src/index.ts'),
-            ],
-        },
-        {
-            name: 'mcp-spotify',
-            command: 'npx',
-            args: [
-                'ts-node',
-                path.join(root, 'packages/mcp-spotify/src/index.ts'),
-            ],
-        },
-        {
-            name: 'mcp-linear',
-            command: 'npx',
-            args: [
-                'ts-node',
-                path.join(root, 'packages/mcp-linear/src/index.ts'),
-            ],
-        },
-        {
-            name: 'mcp-samsung',
-            command: 'npx',
-            args: [
-                'ts-node',
-                path.join(root, 'packages/mcp-samsung/src/index.ts'),
-            ],
-        },
-        {
-            name: 'mcp-calendar',
-            command: 'npx',
-            args: [
-                'ts-node',
-                path.join(root, 'packages/mcp-calendar/src/index.ts'),
-            ],
-        },
-        {
-            name: 'mcp-weather',
-            command: 'npx',
-            args: [
-                'ts-node',
-                path.join(root, 'packages/mcp-weather/src/index.ts'),
-            ],
-        },
-        {
-            name: 'mcp-obsidian',
-            command: 'npx',
-            args: [
-                'ts-node',
-                path.join(root, 'packages/mcp-obsidian/src/index.ts'),
-            ],
-        },
-        // Uncomment to enable browser server (Phase 2):
-        // {
-        //     name: 'mcp-browser',
-        //     command: 'npx',
-        //     args: ['ts-node', path.join(root, 'packages/mcp-browser/src/index.ts')],
-        // },
+        mcp('mcp-hue'),
+        mcp('mcp-nuki'),
+        mcp('mcp-spotify'),
+        mcp('mcp-linear'),
+        mcp('mcp-samsung'),
+        mcp('mcp-calendar'),
+        mcp('mcp-weather'),
+        mcp('mcp-obsidian'),
+        mcp('mcp-gmail'),
+        // mcp('mcp-browser'), // Phase 2
     ];
 }
