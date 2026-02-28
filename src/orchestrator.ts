@@ -413,7 +413,6 @@ export class Orchestrator {
 
     async processOrder(order: string): Promise<string> {
         const story = env.SAVE_STORIES ? new Story() : null;
-        story?.add({ role: 'user', content: order });
 
         Logger.info(`Processing order: "${order}"`);
 
@@ -436,6 +435,13 @@ export class Orchestrator {
                 },
             })),
         ];
+
+        story?.add({
+            role: 'system',
+            content: systemPrompt,
+            tools: allTools.map((t) => t.function.name),
+        });
+        story?.add({ role: 'user', content: order });
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
             { role: 'system', content: systemPrompt },
@@ -568,6 +574,11 @@ export class Orchestrator {
             })),
         ];
 
+        story?.add({
+            role: 'system',
+            content: systemPrompt,
+            tools: allTools.map((t) => t.function.name),
+        });
         story?.add({ role: 'user', content: order });
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
