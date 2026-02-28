@@ -104,6 +104,41 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
 
+            case 'turn_off_all_lights': {
+                const lights = store.getAll();
+                const ids = lights.map((l) => Number(l.id));
+                await hue.setAllLightsState(ids, false);
+                lights.forEach((l) => store.updateState(l.id, { on: false }));
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `All ${ids.length} lights turned off.`,
+                        },
+                    ],
+                };
+            }
+
+            case 'turn_on_all_lights': {
+                const brightness = (args as any)?.brightness !== undefined
+                    ? Number((args as any).brightness)
+                    : undefined;
+                const lights = store.getAll();
+                const ids = lights.map((l) => Number(l.id));
+                await hue.setAllLightsState(ids, true, brightness);
+                lights.forEach((l) =>
+                    store.updateState(l.id, { on: true, ...(brightness !== undefined && { brightness }) }),
+                );
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `All ${ids.length} lights turned on${brightness !== undefined ? ` at brightness ${brightness}` : ''}.`,
+                        },
+                    ],
+                };
+            }
+
             case 'refresh_lights': {
                 await discoverLights(hue, store);
                 const lights = store.getAll();

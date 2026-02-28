@@ -2,7 +2,7 @@ export const HUE_TOOLS = [
     {
         name: 'list_lights',
         description:
-            'List all Philips Hue lights with their current state (on/off, brightness, color)',
+            'List all Philips Hue lights with their ID, name, room and current state. Call this to discover light IDs before controlling specific lights. Do NOT call this before turn_off_all_lights or turn_on_all_lights — those work without IDs.',
         inputSchema: {
             type: 'object' as const,
             properties: {},
@@ -76,6 +76,33 @@ export const HUE_TOOLS = [
                 },
             },
             required: ['lightId', 'color'],
+        },
+    },
+    {
+        name: 'turn_off_all_lights',
+        description:
+            'Turn off ALL Hue lights at once. Use this instead of listing lights and calling turn_off_light individually when the user wants to turn off all lights.',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {},
+            required: [],
+        },
+    },
+    {
+        name: 'turn_on_all_lights',
+        description:
+            'Turn on ALL Hue lights at once. Optionally set brightness for all lights.',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {
+                brightness: {
+                    type: 'number',
+                    description: 'Optional brightness level (0-254) to apply to all lights',
+                    minimum: 0,
+                    maximum: 254,
+                },
+            },
+            required: [],
         },
     },
     {

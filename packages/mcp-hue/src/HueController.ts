@@ -130,4 +130,18 @@ export default class HueController {
         const light = await this.getLightById(lightId);
         return light.state;
     }
+
+    /** Turn all lights on or off in parallel. Skips per-light validation for speed. */
+    public async setAllLightsState(
+        lightIds: number[],
+        on: boolean,
+        brightness?: number,
+    ): Promise<void> {
+        const lightState = new v3.lightStates.LightState().on(on);
+        if (on && brightness !== undefined) lightState.brightness(brightness);
+        await Promise.all(
+            lightIds.map((id) => this.api.lights.setLightState(id, lightState)),
+        );
+        Logger.info(`All lights (${lightIds.length}) turned ${on ? 'on' : 'off'}`);
+    }
 }
