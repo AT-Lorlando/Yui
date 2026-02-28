@@ -25,7 +25,7 @@ UDP_PORT    = int(os.getenv("VOICE_UDP_PORT", "5002"))
 SAMPLE_RATE = 48_000   # Pi streams at 48kHz
 SAMPLE_WIDTH = 2       # int16
 
-DURATION    = float(sys.argv[1]) if len(sys.argv) > 1 else 10.0
+DURATION    = float(sys.argv[1]) if len(sys.argv) > 1 else 20.0
 OUT_PATH    = sys.argv[2] if len(sys.argv) > 2 else "assets/my_voice.wav"
 OUT_RATE    = 22050    # XTTS v2 expects ≥22050 Hz for best quality
 
