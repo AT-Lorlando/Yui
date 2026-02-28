@@ -3,6 +3,7 @@ import http from 'http';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
 import { InputSource, StdinSource, HttpSource } from './input';
 import { initScheduler } from './scheduler';
+import { listScenes, createScene, deleteScene, runScene } from './scenes';
 import Logger from './logger';
 
 // voice_pipeline.py exposes a /speak endpoint on this port
@@ -50,12 +51,29 @@ async function main() {
     const orchestrator = new Orchestrator(servers);
     await orchestrator.init();
 
-    const handler = (order: string) => orchestrator.processOrder(order);
-    const streamHandler = (order: string) =>
-        orchestrator.processOrderStream(order);
+    const handler = (order: string, reset?: boolean) =>
+        orchestrator.processOrder(order, reset);
+    const streamHandler: import('./input/InputSource').StreamHandler = (
+        order,
+        options,
+        reset,
+    ) => orchestrator.processOrderStream(order, options, reset);
     const statusHandler = () => orchestrator.getStatus();
     const deviceHandler = (toolName: string, args: Record<string, unknown>) =>
         orchestrator.callTool(toolName, args);
+
+    const scenesHandler = {
+        list: listScenes,
+        trigger: (id: string) => runScene(id, deviceHandler),
+        create: createScene,
+        remove: deleteScene,
+    };
+
+    const toolsHandler = {
+        list: () => orchestrator.getTools(),
+        call: (name: string, args: Record<string, unknown>) =>
+            orchestrator.callTool(name, args),
+    };
 
     // Scheduler: fires cron jobs, speaks responses via voice pipeline
     initScheduler(handler, speakViaPipeline);
@@ -67,6 +85,8 @@ async function main() {
             streamHandler,
             statusHandler,
             deviceHandler,
+            scenesHandler,
+            toolsHandler,
         );
     }
 
