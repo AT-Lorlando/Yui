@@ -44,7 +44,7 @@ export class ObsidianClient {
             .map((e) => e.name);
 
         if (vaults.length === 0) return 'No vaults found.';
-        const lines = ['📚 Available vaults:', ...vaults.map((v) => `  • ${v}`)];
+        const lines = ['Available vaults:', ...vaults.map((v) => `  • ${v}`)];
         return lines.join('\n');
     }
 
@@ -58,7 +58,7 @@ export class ObsidianClient {
         if (!stat.isDirectory()) throw new Error(`Not a directory: ${folderPath}`);
 
         const label = folderPath || '/';
-        const lines: string[] = [`📁 ${label}`];
+        const lines: string[] = [`[dir] ${label}`];
         this._treeLines(abs, '', lines);
         return lines.join('\n');
     }
@@ -74,7 +74,7 @@ export class ObsidianClient {
         visible.forEach((e, i) => {
             const isLast = i === visible.length - 1;
             const branch = isLast ? '└── ' : '├── ';
-            const icon = e.isDirectory() ? '📁 ' : '📄 ';
+            const icon = e.isDirectory() ? '[dir] ' : '[file] ';
             lines.push(`${indent}${branch}${icon}${e.name}`);
             if (e.isDirectory()) {
                 this._treeLines(
@@ -98,9 +98,9 @@ export class ObsidianClient {
             day: 'numeric', month: 'long', year: 'numeric',
         });
         return [
-            `📄 **${path.basename(notePath)}**`,
-            `📁 ${this.rel(path.dirname(abs))}`,
-            `🕐 Modified: ${modified}`,
+            `Note: ${path.basename(notePath)}`,
+            `Dossier: ${this.rel(path.dirname(abs))}`,
+            `Modifié: ${modified}`,
             '',
             content,
         ].join('\n');
@@ -117,18 +117,18 @@ export class ObsidianClient {
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, content, 'utf-8');
         Logger.info(`Created note: ${notePath}`);
-        return `✅ Note created: ${notePath}`;
+        return `Note created: ${notePath}`;
     }
 
     /** Create a folder (and any parents). */
     createFolder(folderPath: string): string {
         const abs = this.resolve(folderPath);
         if (fs.existsSync(abs)) {
-            return `📁 Folder already exists: ${folderPath}`;
+            return `Folder already exists: ${folderPath}`;
         }
         fs.mkdirSync(abs, { recursive: true });
         Logger.info(`Created folder: ${folderPath}`);
-        return `✅ Folder created: ${folderPath}`;
+        return `Folder created: ${folderPath}`;
     }
 
     // ── Update ────────────────────────────────────────────────────────────────
@@ -139,7 +139,7 @@ export class ObsidianClient {
         if (!fs.existsSync(abs)) throw new Error(`Note not found: ${notePath}`);
         fs.writeFileSync(abs, content, 'utf-8');
         Logger.info(`Updated note: ${notePath}`);
-        return `✅ Note updated: ${notePath}`;
+        return `Note updated: ${notePath}`;
     }
 
     /** Append text to an existing note. */
@@ -150,7 +150,7 @@ export class ObsidianClient {
         const separator = current.endsWith('\n') ? '' : '\n';
         fs.writeFileSync(abs, current + separator + text, 'utf-8');
         Logger.info(`Appended to note: ${notePath}`);
-        return `✅ Text appended to: ${notePath}`;
+        return `Text appended to: ${notePath}`;
     }
 
     // ── Move / rename ─────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ export class ObsidianClient {
         fs.mkdirSync(path.dirname(absTo), { recursive: true });
         fs.renameSync(absFrom, absTo);
         Logger.info(`Moved ${fromPath} → ${toPath}`);
-        return `✅ Moved: ${fromPath} → ${toPath}`;
+        return `Moved: ${fromPath} → ${toPath}`;
     }
 
     // ── Delete ────────────────────────────────────────────────────────────────
@@ -177,7 +177,7 @@ export class ObsidianClient {
         if (stat.isDirectory()) throw new Error(`Use delete_folder to delete a directory: ${notePath}`);
         fs.unlinkSync(abs);
         Logger.info(`Deleted note: ${notePath}`);
-        return `🗑️ Note deleted: ${notePath}`;
+        return `Note deleted: ${notePath}`;
     }
 
     // ── Search ────────────────────────────────────────────────────────────────
@@ -218,13 +218,13 @@ export class ObsidianClient {
             }
         });
 
-        if (results.length === 0) return `🔍 No results for "${query}"${vault ? ` in ${vault}` : ''}.`;
+        if (results.length === 0) return `No results for "${query}"${vault ? ` in ${vault}` : ''}.`;
 
         const lines = [
-            `🔍 ${results.length} result${results.length === 1 ? '' : 's'} for "${query}"${vault ? ` in ${vault}` : ''}:`,
+            `${results.length} result${results.length === 1 ? '' : 's'} for "${query}"${vault ? ` in ${vault}` : ''}:`,
         ];
         for (const r of results) {
-            lines.push(`\n📄 ${r.path}  [${r.matchType}]`);
+            lines.push(`\n${r.path}  [${r.matchType}]`);
             if (r.excerpt) lines.push(`   ${r.excerpt}`);
         }
         return lines.join('\n');
