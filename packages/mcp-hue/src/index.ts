@@ -13,11 +13,12 @@ import { EntityStore } from '@yui/shared';
 import type { LightEntity } from '@yui/shared';
 import HueBridge from './HueBridge';
 import HueController from './HueController';
-import { HUE_TOOLS } from './tools';
+import { buildHueTools } from './tools';
 import { discoverLights } from './discovery';
 import Logger from './logger';
 
 let hue: HueController;
+let HUE_TOOLS = buildHueTools([]);
 const store = new EntityStore<LightEntity>('mcp-hue');
 
 const server = new Server(
@@ -34,6 +35,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     try {
         switch (name) {
+            case 'set_room_lights': {
+                const room = String((args as any).room);
+                const on = (args as any).on !== undefined ? Boolean((args as any).on) : undefined;
+                const brightness = (args as any).brightness !== undefined
+                    ? Number((args as any).brightness)
+                    : undefined;
+                const color = (args as any).color !== undefined
+                    ? String((args as any).color)
+                    : undefined;
+                const msg = await hue.setRoomLights(room, { on, brightness, color });
+                return {
+                    content: [{ type: 'text', text: msg }],
+                };
+            }
+
             case 'list_lights': {
                 const lights = store.getAll();
                 return {
@@ -174,7 +190,11 @@ async function main() {
     Logger.info('Connecting to Hue bridge...');
     const api = await HueBridge.connect();
     hue = new HueController(api);
-    Logger.info('Hue bridge connected. Discovering lights...');
+    Logger.info('Hue bridge connected. Initialising room cache and discovering lights...');
+
+    await hue.initCache();
+    HUE_TOOLS = buildHueTools(hue.getRoomNames());
+    Logger.info(`Tools built with rooms: ${hue.getRoomNames().join(', ')}`);
 
     await discoverLights(hue, store);
 
