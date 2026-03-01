@@ -319,18 +319,20 @@ export async function indexMissingStories(): Promise<void> {
 // ── System prompt injection ───────────────────────────────────────────────────
 
 /**
- * Returns the 10 most recent non-domotics story summaries for injection into
+ * Returns the 3 most recent non-domotics story summaries for injection into
  * every system prompt. Domotics stories (lights, music, doors, TV) are excluded
- * as they are rarely relevant to recall. Specific recall uses search_stories.
+ * as they are rarely relevant to recall.
+ * The LLM can retrieve more via search_stories(query), which paginates 10 by 10.
  */
 export function buildStorySummariesContext(): string {
     const index = loadIndex();
     if (index.length === 0) return '';
 
-    // Non-domotics, 10 most recent, newest first
+    // Non-domotics, 3 most recent, newest first.
+    // The LLM can retrieve more via search_stories(query) which paginates 10 by 10.
     const recent = index
         .filter((e) => !e.domotics)
-        .slice(-10)
+        .slice(-3)
         .reverse();
     if (recent.length === 0) return '';
 
