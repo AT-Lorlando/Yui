@@ -14,7 +14,11 @@ import {
     readNamespace,
     listNamespaces,
 } from './memory';
-import { buildStorySummariesContext, getStoryDetail } from './storyArchive';
+import {
+    buildStorySummariesContext,
+    searchStoriesWithLLM,
+    indexMissingStories,
+} from './storyArchive';
 import {
     addSchedule,
     listSchedules,
@@ -60,6 +64,9 @@ export class Orchestrator {
      */
     private sessionStory: Story | null = null;
 
+    /** Compact entity summary built at startup (rooms, doors, speakers). */
+    private entitySnapshot: string = '';
+
     constructor(servers: McpServerConfig[]) {
         this.openai = new OpenAI({
             apiKey: env.LLM_API_KEY,
@@ -87,6 +94,69 @@ export class Orchestrator {
             `Connected to ${this.clients.size} MCP server(s). ` +
                 `Total tools available: ${this.collectedTools.length}`,
         );
+
+        await this.refreshEntitySnapshot();
+
+        // Index any stories written to disk but not yet summarized
+        // (happens when the process is killed without a clean shutdown).
+        if (env.SAVE_STORIES) {
+            indexMissingStories().catch((e) =>
+                Logger.warn(`Background story indexing failed: ${e}`),
+            );
+        }
+    }
+
+    /** Fetch entities from MCP servers and build a compact snapshot string. */
+    private async refreshEntitySnapshot(): Promise<void> {
+        const parts: string[] = [];
+
+        try {
+            const raw = await this.callTool('list_lights');
+            const lights = Array.isArray(raw) ? raw : [];
+            if (lights.length > 0) {
+                const rooms = [
+                    ...new Set(
+                        lights
+                            .map((l: any) => l.room ?? l.name)
+                            .filter(Boolean),
+                    ),
+                ];
+                parts.push(
+                    `Lumières (${lights.length}) — pièces : ${rooms.join(
+                        ', ',
+                    )}`,
+                );
+            }
+        } catch (e) {
+            Logger.debug(`Entity snapshot: list_lights failed — ${e}`);
+        }
+
+        try {
+            const raw = await this.callTool('list_doors');
+            const doors = Array.isArray(raw) ? raw : [];
+            if (doors.length > 0) {
+                const names = doors.map((d: any) => d.name).filter(Boolean);
+                parts.push(`Portes Nuki : ${names.join(', ')}`);
+            }
+        } catch (e) {
+            Logger.debug(`Entity snapshot: list_doors failed — ${e}`);
+        }
+
+        try {
+            const raw = await this.callTool('list_speakers');
+            const speakers = Array.isArray(raw) ? raw : [];
+            if (speakers.length > 0) {
+                const names = speakers.map((s: any) => s.name).filter(Boolean);
+                parts.push(`Enceintes Spotify : ${names.join(', ')}`);
+            }
+        } catch (e) {
+            Logger.debug(`Entity snapshot: list_speakers failed — ${e}`);
+        }
+
+        this.entitySnapshot = parts.join('\n');
+        if (this.entitySnapshot) {
+            Logger.info(`Entity snapshot: ${this.entitySnapshot}`);
+        }
     }
 
     private async connectServer(config: McpServerConfig): Promise<void> {
@@ -203,19 +273,19 @@ export class Orchestrator {
             {
                 type: 'function',
                 function: {
-                    name: 'get_story_detail',
+                    name: 'search_stories',
                     description:
-                        "Obtenir le transcript complet d'une discussion passée par son id",
+                        'Recherche sémantique dans les discussions passées. Utilise cet outil quand Jérémy fait référence à une conversation précédente ("tu te souviens quand...", "la dernière fois qu\'on a parlé de..."). Retourne le transcript complet des discussions les plus pertinentes.',
                     parameters: {
                         type: 'object',
                         properties: {
-                            id: {
+                            query: {
                                 type: 'string',
                                 description:
-                                    'ID de la discussion (visible dans les résumés)',
+                                    'Description en langage naturel de ce que tu cherches (ex: "quand j\'ai demandé d\'envoyer un email", "la discussion sur la météo d\'hier")',
                             },
                         },
-                        required: ['id'],
+                        required: ['query'],
                     },
                 },
             },
@@ -323,8 +393,11 @@ export class Orchestrator {
             case 'memory_list':
                 return { id: toolCall.id, content: listNamespaces() };
 
-            case 'get_story_detail':
-                return { id: toolCall.id, content: getStoryDetail(args.id) };
+            case 'search_stories':
+                return {
+                    id: toolCall.id,
+                    content: await searchStoriesWithLLM(args.query as string),
+                };
 
             case 'schedule_add': {
                 const result = addSchedule(args.name, args.cron, args.prompt);
@@ -599,7 +672,8 @@ export class Orchestrator {
         const systemPrompt = buildSystemPrompt({
             alwaysMemory: memCtx.alwaysMemory,
             onDemandNamespaces: memCtx.onDemandNamespaces,
-            storySummaries: buildStorySummariesContext(order),
+            storySummaries: buildStorySummariesContext(),
+            entities: this.entitySnapshot || undefined,
         });
 
         const allTools: OpenAI.Chat.ChatCompletionTool[] = [
@@ -748,7 +822,8 @@ export class Orchestrator {
         const systemPrompt = buildSystemPrompt({
             alwaysMemory: memCtx.alwaysMemory,
             onDemandNamespaces: memCtx.onDemandNamespaces,
-            storySummaries: buildStorySummariesContext(order),
+            storySummaries: buildStorySummariesContext(),
+            entities: this.entitySnapshot || undefined,
         });
 
         // Build filter context: current order + all previous user messages in the
