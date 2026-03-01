@@ -2,15 +2,65 @@ import axios from 'axios';
 import NukiBridge from './NukiBridge';
 import Logger from './logger';
 
+interface DoorEntry {
+    nukiId: number;
+    name: string;
+    deviceType: number;
+}
+
 export default class NukiController {
     private baseUrl: string;
     private token: string;
+    private doorCache: DoorEntry[] = [];
 
     constructor() {
         const { host, port, token } = NukiBridge.connect();
         this.baseUrl = `http://${host}:${port}`;
         this.token = token;
         Logger.info(`NukiController connected with host: ${this.baseUrl}`);
+    }
+
+    // ── Startup cache ──────────────────────────────────────────────────────────
+
+    public async initCache(): Promise<void> {
+        const locks = await this.getAllLocks();
+        this.doorCache = locks.map((l: any) => ({
+            nukiId: Number(l.nukiId),
+            name: String(l.name),
+            deviceType: Number(l.deviceType ?? 0),
+        }));
+        Logger.info(`Door cache: ${this.doorCache.map((d) => d.name).join(', ')}`);
+    }
+
+    public getDoorNames(): string[] {
+        return this.doorCache.map((d) => d.name);
+    }
+
+    private findDoor(name: string): DoorEntry | null {
+        const lc = name.toLowerCase().trim();
+        return (
+            this.doorCache.find((d) => d.name.toLowerCase() === lc) ??
+            this.doorCache.find(
+                (d) =>
+                    d.name.toLowerCase().includes(lc) ||
+                    lc.includes(d.name.toLowerCase()),
+            ) ??
+            null
+        );
+    }
+
+    public async controlDoor(name: string, action: 'lock' | 'unlock'): Promise<string> {
+        const door = this.findDoor(name);
+        if (!door) {
+            const available = this.getDoorNames().join(', ');
+            throw new Error(`Porte "${name}" introuvable. Portes disponibles : ${available}`);
+        }
+        if (action === 'lock') {
+            await this.lock(door.nukiId, door.deviceType);
+        } else {
+            await this.unlock(door.nukiId, door.deviceType);
+        }
+        return `${door.name} : ${action === 'lock' ? 'verrouillée' : 'déverrouillée'}`;
     }
 
     public async getAllLocks(): Promise<any[]> {

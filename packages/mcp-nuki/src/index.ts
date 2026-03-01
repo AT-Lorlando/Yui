@@ -12,11 +12,12 @@ import {
 import { EntityStore } from '@yui/shared';
 import type { DoorEntity } from '@yui/shared';
 import NukiController from './NukiController';
-import { NUKI_TOOLS } from './tools';
+import { buildNukiTools } from './tools';
 import { discoverDoors } from './discovery';
 import Logger from './logger';
 
 const nuki = new NukiController();
+let NUKI_TOOLS = buildNukiTools([]);
 const store = new EntityStore<DoorEntity>('mcp-nuki');
 
 const server = new Server(
@@ -33,6 +34,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     try {
         switch (name) {
+            case 'control_door': {
+                const doorName = String((args as any).name);
+                const action = String((args as any).action) as 'lock' | 'unlock';
+                const msg = await nuki.controlDoor(doorName, action);
+                return {
+                    content: [{ type: 'text', text: msg }],
+                };
+            }
+
             case 'list_doors': {
                 const doors = store.getAll();
                 return {
@@ -127,6 +137,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 async function main() {
     Logger.info('Starting Nuki MCP server...');
+
+    await nuki.initCache();
+    NUKI_TOOLS = buildNukiTools(nuki.getDoorNames());
+    Logger.info(`Tools built with doors: ${nuki.getDoorNames().join(', ')}`);
 
     await discoverDoors(nuki, store);
 
