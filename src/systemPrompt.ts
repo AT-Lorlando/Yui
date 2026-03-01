@@ -6,6 +6,8 @@ export interface SystemPromptContext {
     alwaysMemory: string;
     onDemandNamespaces: string;
     storySummaries: string;
+    /** Compact entity summary fetched at startup (lights, doors, speakers). */
+    entities?: string;
 }
 
 function formatDatetime(): string {
@@ -105,12 +107,15 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
         sections.push(mem);
     }
 
+    if (ctx.entities) {
+        sections.push(`## Appareils connus\n\n${ctx.entities}`);
+    }
+
     if (ctx.storySummaries) {
         sections.push(
-            '## Discussions passées pertinentes\n\n' +
-                "Si tu manques de contexte pour cette demande, ces discussions passées pourraient t'aider :\n\n" +
+            '## Discussions récentes\n\n' +
                 ctx.storySummaries +
-                '\n\nAppelle `get_story_detail(id)` pour lire le transcript complet.',
+                '\n\nPour retrouver une discussion spécifique ("tu te souviens quand..."), appelle `search_stories(query)` avec une description en langage naturel.',
         );
     }
 

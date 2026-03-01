@@ -106,7 +106,7 @@ SILERO_CHUNK          = 512   # samples at 16kHz (required by Silero)
 
 # Conversation mode — after Yui responds, the next utterance(s) don't need the
 # trigger word. Window resets on each response.
-CONVERSATION_WINDOW_S = float(os.getenv("CONVERSATION_WINDOW_S", "10"))
+CONVERSATION_WINDOW_S = float(os.getenv("CONVERSATION_WINDOW_S", "20"))
 
 # Stop words — saying any of these during playback interrupts the assistant.
 _RAW_STOP_WORDS = os.getenv("STOP_WORDS", "stop,arrête,attends,tais-toi,silence,pause")
