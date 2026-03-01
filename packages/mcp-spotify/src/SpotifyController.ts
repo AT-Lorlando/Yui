@@ -226,6 +226,17 @@ export class SpotifyController {
         return result.body.devices;
     }
 
+    /**
+     * Exchange the stored refresh token for a new access token and update the
+     * internal state. Called proactively every 55 minutes so the token never
+     * expires mid-session (Spotify tokens last 1 hour).
+     */
+    async refreshToken(): Promise<void> {
+        const data = await this.api.refreshAccessToken();
+        this.api.setAccessToken(data.body.access_token);
+        Logger.info('Spotify access token refreshed');
+    }
+
     async transferPlayback(deviceId: string): Promise<void> {
         await this.api.transferMyPlayback([deviceId]);
         Logger.debug(`Playback transferred to device ${deviceId}`);
