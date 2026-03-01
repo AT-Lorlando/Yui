@@ -115,6 +115,31 @@ interface OpenMeteoResponse {
     };
 }
 
+// ── Geocoding ─────────────────────────────────────────────────────────────────
+
+interface GeoResult {
+    name: string;
+    latitude: number;
+    longitude: number;
+    country?: string;
+}
+
+/**
+ * Resolve a city name to coordinates using Open-Meteo's free geocoding API.
+ * Returns null if the city is not found.
+ */
+export async function geocodeCity(
+    city: string,
+): Promise<{ lat: number; lon: number; name: string } | null> {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=fr&format=json`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Geocoding API error: ${res.status}`);
+    const data = (await res.json()) as { results?: GeoResult[] };
+    if (!data.results?.length) return null;
+    const r = data.results[0];
+    return { lat: r.latitude, lon: r.longitude, name: r.name };
+}
+
 // ── WeatherClient ─────────────────────────────────────────────────────────────
 
 export class WeatherClient {
