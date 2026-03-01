@@ -1,3 +1,11 @@
+const LOCATION_PROP = {
+    location: {
+        type: 'string',
+        description:
+            'Ville pour laquelle obtenir la météo (ex: "Toulouse", "Lyon"). Optionnel — utilise la ville par défaut configurée si omis.',
+    },
+};
+
 export const WEATHER_TOOLS = [
     {
         name: 'get_current_weather',
@@ -5,7 +13,7 @@ export const WEATHER_TOOLS = [
             'Get current weather conditions: temperature, feels-like, humidity, wind speed and direction, precipitation, cloud cover, UV index, sunrise/sunset. Use this for "what is the weather right now" questions.',
         inputSchema: {
             type: 'object' as const,
-            properties: {},
+            properties: { ...LOCATION_PROP },
             required: [],
         },
     },
@@ -15,7 +23,7 @@ export const WEATHER_TOOLS = [
             "Get today's weather broken down into 4 time blocks (night, morning, afternoon, evening) with temperature range, precipitation probability, and wind for each block. Use this for planning the day or answering 'will it rain today?'",
         inputSchema: {
             type: 'object' as const,
-            properties: {},
+            properties: { ...LOCATION_PROP },
             required: [],
         },
     },
@@ -26,6 +34,7 @@ export const WEATHER_TOOLS = [
         inputSchema: {
             type: 'object' as const,
             properties: {
+                ...LOCATION_PROP,
                 days: {
                     type: 'number',
                     description: 'Number of days to forecast (default 7, max 14).',
@@ -41,6 +50,7 @@ export const WEATHER_TOOLS = [
         inputSchema: {
             type: 'object' as const,
             properties: {
+                ...LOCATION_PROP,
                 date: {
                     type: 'string',
                     description:
