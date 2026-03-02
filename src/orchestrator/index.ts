@@ -1,52 +1,26 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import OpenAI from 'openai';
-import * as path from 'path';
 import { env } from '../env';
 import Logger from '../logger';
 import { Story } from './story';
 import { buildSystemPrompt } from './systemPrompt';
 import { StreamOptions } from '../input/InputSource';
-import {
-    buildMemoryContext,
-    saveMemory,
-    deleteMemory,
-    readNamespace,
-    listNamespaces,
-} from './memory';
+import { buildMemoryContext } from './memory';
 import {
     buildStorySummariesContext,
-    searchStoriesWithLLM,
     indexMissingStories,
 } from './storyArchive';
+import { filterToolsForOrder } from './serverKeywords';
 import {
-    addSchedule,
-    listSchedules,
-    deleteSchedule,
-    toggleSchedule,
-} from './scheduler';
-import { SERVER_KEYWORDS } from './serverKeywords';
+    getVirtualTools,
+    handleVirtualTool,
+    ToolCallResult,
+} from './virtualTools';
+import type { McpServerConfig, CollectedTool } from './types';
 
-export interface McpServerConfig {
-    name: string;
-    command: string;
-    args: string[];
-}
-
-export interface CollectedTool {
-    serverName: string;
-    client: Client;
-    tool: {
-        name: string;
-        description: string;
-        inputSchema: Record<string, unknown>;
-    };
-}
-
-interface ToolCallResult {
-    id: string;
-    content: string;
-}
+export type { McpServerConfig, CollectedTool };
+export { buildServerConfigs } from './serverConfigs';
 
 /** Max messages kept in the rolling conversation buffer (user + assistant pairs). */
 const HISTORY_MAX = 10;
@@ -195,240 +169,6 @@ export class Orchestrator {
         );
     }
 
-    // ── Virtual tools ────────────────────────────────────────────────────────
-
-    private getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
-        return [
-            {
-                type: 'function',
-                function: {
-                    name: 'memory_save',
-                    description:
-                        'Sauvegarder un fait en mémoire persistante (par namespace/catégorie)',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            namespace: {
-                                type: 'string',
-                                description:
-                                    'Catégorie (ex: personnel, musique, recettes, notes)',
-                            },
-                            key: {
-                                type: 'string',
-                                description: 'Nom/clé du fait',
-                            },
-                            value: {
-                                type: 'string',
-                                description: 'Valeur à retenir',
-                            },
-                            priority: {
-                                type: 'string',
-                                enum: ['always', 'on-demand'],
-                                description:
-                                    'always = injecté dans chaque prompt (petit et fréquent), on-demand = disponible sur demande (volumineux ou rare)',
-                            },
-                        },
-                        required: ['namespace', 'key', 'value'],
-                    },
-                },
-            },
-            {
-                type: 'function',
-                function: {
-                    name: 'memory_delete',
-                    description: 'Supprimer un fait de la mémoire',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            namespace: { type: 'string' },
-                            key: { type: 'string' },
-                        },
-                        required: ['namespace', 'key'],
-                    },
-                },
-            },
-            {
-                type: 'function',
-                function: {
-                    name: 'memory_read',
-                    description:
-                        "Lire le contenu d'un namespace mémoire (pour les namespaces on-demand)",
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            namespace: { type: 'string' },
-                        },
-                        required: ['namespace'],
-                    },
-                },
-            },
-            {
-                type: 'function',
-                function: {
-                    name: 'memory_list',
-                    description:
-                        'Lister tous les namespaces mémoire disponibles avec leur taille',
-                    parameters: { type: 'object', properties: {} },
-                },
-            },
-            {
-                type: 'function',
-                function: {
-                    name: 'search_stories',
-                    description:
-                        'Recherche sémantique dans les discussions passées. Utilise cet outil quand Jérémy fait référence à une conversation précédente ("tu te souviens quand...", "la dernière fois qu\'on a parlé de..."). Retourne le transcript complet des discussions les plus pertinentes.',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            query: {
-                                type: 'string',
-                                description:
-                                    'Description en langage naturel de ce que tu cherches (ex: "quand j\'ai demandé d\'envoyer un email", "la discussion sur la météo d\'hier")',
-                            },
-                        },
-                        required: ['query'],
-                    },
-                },
-            },
-            {
-                type: 'function',
-                function: {
-                    name: 'schedule_add',
-                    description:
-                        'Créer une tâche planifiée (cron job) — ex: rappels, automatisations récurrentes',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            name: {
-                                type: 'string',
-                                description: 'Nom lisible de la tâche',
-                            },
-                            cron: {
-                                type: 'string',
-                                description:
-                                    'Expression cron (ex: "30 8 * * 1-5" = lun-ven 8h30)',
-                            },
-                            prompt: {
-                                type: 'string',
-                                description:
-                                    'Ordre à envoyer à Yui quand le cron se déclenche',
-                            },
-                        },
-                        required: ['name', 'cron', 'prompt'],
-                    },
-                },
-            },
-            {
-                type: 'function',
-                function: {
-                    name: 'schedule_list',
-                    description: 'Lister toutes les tâches planifiées',
-                    parameters: { type: 'object', properties: {} },
-                },
-            },
-            {
-                type: 'function',
-                function: {
-                    name: 'schedule_delete',
-                    description: 'Supprimer une tâche planifiée par son id',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            id: { type: 'string' },
-                        },
-                        required: ['id'],
-                    },
-                },
-            },
-            {
-                type: 'function',
-                function: {
-                    name: 'schedule_toggle',
-                    description:
-                        'Activer ou désactiver une tâche planifiée sans la supprimer',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            id: { type: 'string' },
-                        },
-                        required: ['id'],
-                    },
-                },
-            },
-        ];
-    }
-
-    /**
-     * Handles virtual (in-process) tool calls. Returns null if the tool is
-     * not virtual and should be routed to an MCP server instead.
-     */
-    private async handleVirtualTool(
-        toolCall: OpenAI.Chat.ChatCompletionMessageToolCall,
-    ): Promise<ToolCallResult | null> {
-        const name = toolCall.function.name;
-        const args = JSON.parse(toolCall.function.arguments || '{}');
-
-        Logger.info(`Virtual tool: ${name}(${JSON.stringify(args)})`);
-
-        switch (name) {
-            case 'memory_save':
-                saveMemory(args.namespace, args.key, args.value, args.priority);
-                return {
-                    id: toolCall.id,
-                    content: `Mémorisé : [${args.namespace}] ${args.key} = ${args.value}`,
-                };
-
-            case 'memory_delete':
-                deleteMemory(args.namespace, args.key);
-                return {
-                    id: toolCall.id,
-                    content: `Oublié : [${args.namespace}] ${args.key}`,
-                };
-
-            case 'memory_read':
-                return {
-                    id: toolCall.id,
-                    content: readNamespace(args.namespace),
-                };
-
-            case 'memory_list':
-                return { id: toolCall.id, content: listNamespaces() };
-
-            case 'search_stories':
-                return {
-                    id: toolCall.id,
-                    content: await searchStoriesWithLLM(args.query as string),
-                };
-
-            case 'schedule_add': {
-                const result = addSchedule(args.name, args.cron, args.prompt);
-                if (typeof result === 'string')
-                    return { id: toolCall.id, content: result };
-                return {
-                    id: toolCall.id,
-                    content: `Schedule "${args.name}" créé (id: ${result.id}, cron: ${result.cron})`,
-                };
-            }
-
-            case 'schedule_list':
-                return { id: toolCall.id, content: listSchedules() };
-
-            case 'schedule_delete':
-                return {
-                    id: toolCall.id,
-                    content: deleteSchedule(args.id)
-                        ? `Schedule "${args.id}" supprimé.`
-                        : `Schedule "${args.id}" introuvable.`,
-                };
-
-            case 'schedule_toggle':
-                return { id: toolCall.id, content: toggleSchedule(args.id) };
-
-            default:
-                return null;
-        }
-    }
-
     // ── MCP tool execution ───────────────────────────────────────────────────
 
     private async executeToolCall(
@@ -484,42 +224,73 @@ export class Orchestrator {
         }
     }
 
-    // ── Tool filtering ────────────────────────────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
-    /**
-     * Returns only the MCP tools relevant to the user's order, based on
-     * keyword matching. Falls back to all tools if nothing matches so the LLM
-     * always has a way to respond.
-     *
-     * This is the biggest latency lever: reducing from 67 → ~10 tools cuts
-     * input tokens by ~60-70%, which directly lowers TTFT on every LLM call.
-     */
-    private filterToolsForOrder(order: string): CollectedTool[] {
-        const lc = order.toLowerCase();
-        const relevantServers = new Set<string>();
-        for (const [server, keywords] of Object.entries(SERVER_KEYWORDS)) {
-            if (keywords.some((kw) => lc.includes(kw))) {
-                relevantServers.add(server);
-            }
+    private buildAllTools(order: string): OpenAI.Chat.ChatCompletionTool[] {
+        return [
+            ...getVirtualTools(),
+            ...filterToolsForOrder(order, this.collectedTools).map((ct) => ({
+                type: 'function' as const,
+                function: {
+                    name: ct.tool.name,
+                    description: ct.tool.description,
+                    parameters: ct.tool.inputSchema as Record<string, unknown>,
+                },
+            })),
+        ];
+    }
+
+    private async runToolCalls(
+        toolCalls: OpenAI.Chat.ChatCompletionMessageToolCall[],
+        story: Story | null,
+        messages: OpenAI.Chat.ChatCompletionMessageParam[],
+    ): Promise<void> {
+        const toolResults = await Promise.all(
+            toolCalls.map(async (toolCall) => {
+                const virtualResult = await handleVirtualTool(toolCall);
+                const result =
+                    virtualResult ?? (await this.executeToolCall(toolCall));
+                const args = JSON.parse(
+                    toolCall.function.arguments || '{}',
+                ) as Record<string, unknown>;
+                return { toolName: toolCall.function.name, result, args };
+            }),
+        );
+        for (const { toolName, result, args } of toolResults) {
+            story?.add({
+                role: 'tool',
+                content: result.content,
+                toolCallId: result.id,
+                toolName,
+                toolArgs: args,
+            });
+            messages.push({
+                role: 'tool',
+                tool_call_id: result.id,
+                content: result.content,
+            });
         }
+    }
 
-        // No keyword matched → generic/unknown request, send everything
-        if (relevantServers.size === 0) {
-            Logger.debug(
-                `Tool filter: no match — sending all ${this.collectedTools.length} tools`,
+    private updateHistory(order: string, response: string): void {
+        this.conversationHistory.push({ role: 'user', content: order });
+        this.conversationHistory.push({ role: 'assistant', content: response });
+        if (this.conversationHistory.length > HISTORY_MAX) {
+            this.conversationHistory.splice(
+                0,
+                this.conversationHistory.length - HISTORY_MAX,
             );
-            return this.collectedTools;
         }
+    }
 
-        const filtered = this.collectedTools.filter((ct) =>
-            relevantServers.has(ct.serverName),
-        );
-        Logger.debug(
-            `Tool filter: [${[...relevantServers].join(', ')}] → ${
-                filtered.length
-            }/${this.collectedTools.length} tools`,
-        );
-        return filtered;
+    private buildSystemPrompt(): string {
+        const memCtx = buildMemoryContext();
+        return buildSystemPrompt({
+            alwaysMemory: memCtx.alwaysMemory,
+            onDemandNamespaces: memCtx.onDemandNamespaces,
+            storySummaries: buildStorySummariesContext(),
+            entities: this.entitySnapshot || undefined,
+        });
     }
 
     // ── Main entry point ─────────────────────────────────────────────────────
@@ -531,29 +302,10 @@ export class Orchestrator {
         }
 
         const story = env.SAVE_STORIES ? new Story() : null;
-
         Logger.info(`Processing order: "${order}"`);
 
-        // Build dynamic system prompt (re-reads prompts/*.md on every call)
-        const memCtx = buildMemoryContext();
-        const systemPrompt = buildSystemPrompt({
-            alwaysMemory: memCtx.alwaysMemory,
-            onDemandNamespaces: memCtx.onDemandNamespaces,
-            storySummaries: buildStorySummariesContext(),
-            entities: this.entitySnapshot || undefined,
-        });
-
-        const allTools: OpenAI.Chat.ChatCompletionTool[] = [
-            ...this.getVirtualTools(),
-            ...this.filterToolsForOrder(order).map((ct) => ({
-                type: 'function' as const,
-                function: {
-                    name: ct.tool.name,
-                    description: ct.tool.description,
-                    parameters: ct.tool.inputSchema as Record<string, unknown>,
-                },
-            })),
-        ];
+        const systemPrompt = this.buildSystemPrompt();
+        const allTools = this.buildAllTools(order);
 
         story?.add({
             role: 'system',
@@ -595,35 +347,11 @@ export class Orchestrator {
                 break;
             }
 
-            // Execute all tool calls in parallel — independent tools (lights, music,
-            // doors, etc.) don't need to wait for each other.
-            const toolResults = await Promise.all(
-                assistantMessage.tool_calls.map(async (toolCall) => {
-                    const virtualResult = await this.handleVirtualTool(
-                        toolCall,
-                    );
-                    const result =
-                        virtualResult ?? (await this.executeToolCall(toolCall));
-                    const args = JSON.parse(
-                        toolCall.function.arguments || '{}',
-                    ) as Record<string, unknown>;
-                    return { toolName: toolCall.function.name, result, args };
-                }),
+            await this.runToolCalls(
+                assistantMessage.tool_calls,
+                story,
+                messages,
             );
-            for (const { toolName, result, args } of toolResults) {
-                story?.add({
-                    role: 'tool',
-                    content: result.content,
-                    toolCallId: result.id,
-                    toolName,
-                    toolArgs: args,
-                });
-                messages.push({
-                    role: 'tool',
-                    tool_call_id: result.id,
-                    content: result.content,
-                });
-            }
         }
 
         if (!finalResponse) finalResponse = 'Tâche effectuée.';
@@ -634,19 +362,7 @@ export class Orchestrator {
                 : finalResponse;
         Logger.info(`[Response] ${preview}`);
 
-        // Update rolling conversation history
-        this.conversationHistory.push({ role: 'user', content: order });
-        this.conversationHistory.push({
-            role: 'assistant',
-            content: finalResponse,
-        });
-        if (this.conversationHistory.length > HISTORY_MAX) {
-            this.conversationHistory.splice(
-                0,
-                this.conversationHistory.length - HISTORY_MAX,
-            );
-        }
-
+        this.updateHistory(order, finalResponse);
         story?.save();
         return finalResponse;
     }
@@ -685,13 +401,7 @@ export class Orchestrator {
 
         Logger.info(`Processing order (stream): "${order}"`);
 
-        const memCtx = buildMemoryContext();
-        const systemPrompt = buildSystemPrompt({
-            alwaysMemory: memCtx.alwaysMemory,
-            onDemandNamespaces: memCtx.onDemandNamespaces,
-            storySummaries: buildStorySummariesContext(),
-            entities: this.entitySnapshot || undefined,
-        });
+        const systemPrompt = this.buildSystemPrompt();
 
         // Build filter context: current order + all previous user messages in the
         // session so follow-up phrases like "laisse tomber" or "annule" still have
@@ -704,18 +414,7 @@ export class Orchestrator {
         const filterInput = sessionContext
             ? `${sessionContext} ${order}`
             : order;
-
-        const allTools: OpenAI.Chat.ChatCompletionTool[] = [
-            ...this.getVirtualTools(),
-            ...this.filterToolsForOrder(filterInput).map((ct) => ({
-                type: 'function' as const,
-                function: {
-                    name: ct.tool.name,
-                    description: ct.tool.description,
-                    parameters: ct.tool.inputSchema as Record<string, unknown>,
-                },
-            })),
-        ];
+        const allTools = this.buildAllTools(filterInput);
 
         story?.add({
             role: 'system',
@@ -778,7 +477,7 @@ export class Orchestrator {
                             });
                         }
                         const acc = toolCallsAcc.get(tc.index)!;
-                        if (tc.id && !acc.id) acc.id = tc.id; // only set once
+                        if (tc.id && !acc.id) acc.id = tc.id;
                         if (tc.function?.name && !acc.name)
                             acc.name = tc.function.name;
                         if (tc.function?.arguments)
@@ -804,39 +503,7 @@ export class Orchestrator {
                     tool_calls: toolCalls,
                 });
 
-                // Execute all tool calls in parallel
-                const toolResults = await Promise.all(
-                    toolCalls.map(async (toolCall) => {
-                        const virtualResult = await this.handleVirtualTool(
-                            toolCall,
-                        );
-                        const result =
-                            virtualResult ??
-                            (await this.executeToolCall(toolCall));
-                        const args = JSON.parse(
-                            toolCall.function.arguments || '{}',
-                        ) as Record<string, unknown>;
-                        return {
-                            toolName: toolCall.function.name,
-                            result,
-                            args,
-                        };
-                    }),
-                );
-                for (const { toolName, result, args } of toolResults) {
-                    story?.add({
-                        role: 'tool',
-                        content: result.content,
-                        toolCallId: result.id,
-                        toolName,
-                        toolArgs: args,
-                    });
-                    messages.push({
-                        role: 'tool',
-                        tool_call_id: result.id,
-                        content: result.content,
-                    });
-                }
+                await this.runToolCalls(toolCalls, story, messages);
             } else {
                 // Final text response — now yield the buffered tokens
                 for (const token of tokenBuffer) {
@@ -859,18 +526,7 @@ export class Orchestrator {
                 : finalResponse;
         Logger.info(`[Response] ${preview}`);
 
-        // Update rolling conversation history
-        this.conversationHistory.push({ role: 'user', content: order });
-        this.conversationHistory.push({
-            role: 'assistant',
-            content: finalResponse,
-        });
-        if (this.conversationHistory.length > HISTORY_MAX) {
-            this.conversationHistory.splice(
-                0,
-                this.conversationHistory.length - HISTORY_MAX,
-            );
-        }
+        this.updateHistory(order, finalResponse);
 
         // Flush to disk after every exchange — session stays open for continuation.
         // The story is finalized (summarized) when the next reset arrives or on shutdown.
@@ -953,43 +609,4 @@ export class Orchestrator {
         this.clients.clear();
         this.collectedTools = [];
     }
-}
-
-export function buildServerConfigs(): McpServerConfig[] {
-    const root = path.resolve(__dirname, '../..');
-
-    // In production (compiled dist/main.js) use pre-built node packages to avoid
-    // ts-node compilation overhead (~2-3s × 8 servers = ~20s extra cold start).
-    // In dev (ts-node src/main.ts) use ts-node so changes are picked up immediately.
-    const compiled = __filename.endsWith('.js');
-
-    const mcp = (pkg: string): McpServerConfig =>
-        compiled
-            ? {
-                  name: pkg,
-                  command: 'node',
-                  args: [path.join(root, `packages/${pkg}/dist/index.js`)],
-              }
-            : {
-                  name: pkg,
-                  command: 'npx',
-                  args: [
-                      'ts-node',
-                      path.join(root, `packages/${pkg}/src/index.ts`),
-                  ],
-              };
-
-    return [
-        mcp('mcp-hue'),
-        mcp('mcp-nuki'),
-        mcp('mcp-spotify'),
-        mcp('mcp-linear'),
-        mcp('mcp-samsung'),
-        mcp('mcp-chromecast'),
-        mcp('mcp-calendar'),
-        mcp('mcp-weather'),
-        mcp('mcp-obsidian'),
-        mcp('mcp-gmail'),
-        // mcp('mcp-browser'), // Phase 2
-    ];
 }
