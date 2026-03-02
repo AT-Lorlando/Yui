@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import cron from 'node-cron';
-import Logger from './logger';
+import Logger from '../logger';
 
 const SCHEDULES_FILE = path.resolve(process.cwd(), 'data/schedules.json');
 

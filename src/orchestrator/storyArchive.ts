@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import OpenAI from 'openai';
-import { env } from './env';
-import Logger from './logger';
+import { env } from '../env';
+import Logger from '../logger';
 import { StoryEntry } from './story';
 
 const INDEX_FILE = path.resolve(process.cwd(), 'data/story-index.json');
@@ -53,6 +53,14 @@ const DOMOTICS_TOOLS = new Set([
     'tv_set_input',
     'tv_prepare_chromecast',
     'tv_launch_app',
+    // Chromecast
+    'cast_youtube',
+    'cast_netflix',
+    'cast_crunchyroll',
+    'cast_disney',
+    'cast_prime',
+    'cast_media',
+    'cast_stop',
 ]);
 
 function isDomotics(entries: StoryEntry[]): boolean {

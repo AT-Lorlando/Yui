@@ -18,7 +18,7 @@ module.exports = {
         // ── 1. XTTS TTS server ──────────────────────────────────────────────
         {
             name: 'yui-xtts',
-            script: 'src/xtts_server.py',
+            script: 'src/tts/xtts_server.py',
             interpreter: '/home/chuya/.venvs/xtts/bin/python',
             cwd: ROOT,
             env: {

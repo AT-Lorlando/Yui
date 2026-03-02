@@ -2,8 +2,13 @@ import './env'; // load env first
 import http from 'http';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
 import { InputSource, StdinSource, HttpSource } from './input';
-import { initScheduler } from './scheduler';
-import { listScenes, createScene, deleteScene, runScene } from './scenes';
+import { initScheduler } from './orchestrator/scheduler';
+import {
+    listScenes,
+    createScene,
+    deleteScene,
+    runScene,
+} from './orchestrator/scenes';
 import Logger from './logger';
 
 // voice_pipeline.py exposes a /speak endpoint on this port

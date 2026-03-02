@@ -17,11 +17,11 @@ export type DeviceHandler = (
 ) => Promise<unknown>;
 
 export interface ScenesHandler {
-    list: () => import('../scenes').Scene[];
+    list: () => import('../orchestrator/scenes').Scene[];
     trigger: (id: string) => Promise<{ success: boolean; error?: string }>;
     create: (
-        data: import('../scenes').CreateSceneInput,
-    ) => import('../scenes').Scene;
+        data: import('../orchestrator/scenes').CreateSceneInput,
+    ) => import('../orchestrator/scenes').Scene;
     remove: (id: string) => boolean;
 }
 

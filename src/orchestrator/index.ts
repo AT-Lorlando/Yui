@@ -2,11 +2,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import OpenAI from 'openai';
 import * as path from 'path';
-import { env } from './env';
-import Logger from './logger';
+import { env } from '../env';
+import Logger from '../logger';
 import { Story } from './story';
 import { buildSystemPrompt } from './systemPrompt';
-import { StreamOptions } from './input/InputSource';
+import { StreamOptions } from '../input/InputSource';
 import {
     buildMemoryContext,
     saveMemory,
@@ -25,6 +25,7 @@ import {
     deleteSchedule,
     toggleSchedule,
 } from './scheduler';
+import { SERVER_KEYWORDS } from './serverKeywords';
 
 export interface McpServerConfig {
     name: string;
@@ -494,140 +495,6 @@ export class Orchestrator {
      * input tokens by ~60-70%, which directly lowers TTFT on every LLM call.
      */
     private filterToolsForOrder(order: string): CollectedTool[] {
-        const SERVER_KEYWORDS: Record<string, string[]> = {
-            'mcp-hue': [
-                'lumière',
-                'lampe',
-                'allume',
-                'éteins',
-                'éclairage',
-                'luminosité',
-                'couleur',
-                'light',
-                'lamp',
-                'chambre',
-                'salon',
-                'cuisine',
-                'bureau',
-                'salle',
-                'ambiance',
-                'bright',
-                'dim',
-            ],
-            'mcp-nuki': [
-                'porte',
-                'verrou',
-                'clé',
-                'ferme',
-                'ouvre',
-                'lock',
-                'door',
-            ],
-            'mcp-spotify': [
-                'musique',
-                'spotify',
-                'joue',
-                'chanson',
-                'playlist',
-                'album',
-                'artiste',
-                'écoute',
-                'volume',
-                'pause',
-                'music',
-                'son',
-                'radio',
-                'morceau',
-                'track',
-                'shuffle',
-                'repeat',
-            ],
-            'mcp-linear': [
-                'linear',
-                'ticket',
-                'issue',
-                'tâche',
-                'projet',
-                'koya',
-                'bug',
-            ],
-            'mcp-samsung': [
-                'tv',
-                'télé',
-                'télévision',
-                'samsung',
-                'écran',
-                'hdmi',
-                'cinéma',
-                'film',
-                'série',
-            ],
-            'mcp-calendar': [
-                'calendrier',
-                'agenda',
-                'réunion',
-                'rendez-vous',
-                'événement',
-                'planning',
-                'semaine',
-                'demain',
-                'lundi',
-                'mardi',
-                'mercredi',
-                'jeudi',
-                'vendredi',
-                'samedi',
-                'dimanche',
-                'aujourd',
-                'mois',
-            ],
-            'mcp-weather': [
-                'météo',
-                'temps',
-                'température',
-                'pluie',
-                'soleil',
-                'vent',
-                'chaud',
-                'froid',
-                'nuage',
-                'weather',
-                'demain',
-                'prévision',
-                'semaine prochaine',
-                'après-demain',
-                'forecast',
-            ],
-            'mcp-obsidian': [
-                'note',
-                'obsidian',
-                'fichier',
-                'document',
-                'écris',
-                'journal',
-                'vault',
-            ],
-            'mcp-gmail': [
-                'email',
-                'mail',
-                'gmail',
-                'message',
-                'inbox',
-                'boîte',
-                'envoie',
-                'reçu',
-                'expéditeur',
-                'destinataire',
-                'objet',
-                'pièce jointe',
-                'brouillon',
-                'archive',
-                'corbeille',
-                'non lu',
-                'marque',
-            ],
-        };
-
         const lc = order.toLowerCase();
         const relevantServers = new Set<string>();
         for (const [server, keywords] of Object.entries(SERVER_KEYWORDS)) {
@@ -1089,7 +956,7 @@ export class Orchestrator {
 }
 
 export function buildServerConfigs(): McpServerConfig[] {
-    const root = path.resolve(__dirname, '..');
+    const root = path.resolve(__dirname, '../..');
 
     // In production (compiled dist/main.js) use pre-built node packages to avoid
     // ts-node compilation overhead (~2-3s × 8 servers = ~20s extra cold start).
@@ -1118,6 +985,7 @@ export function buildServerConfigs(): McpServerConfig[] {
         mcp('mcp-spotify'),
         mcp('mcp-linear'),
         mcp('mcp-samsung'),
+        mcp('mcp-chromecast'),
         mcp('mcp-calendar'),
         mcp('mcp-weather'),
         mcp('mcp-obsidian'),
