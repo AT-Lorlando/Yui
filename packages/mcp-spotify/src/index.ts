@@ -16,15 +16,6 @@ import { SPOTIFY_TOOLS } from './tools';
 import Logger from './logger';
 
 let spotify: SpotifyController;
-let _tokenRefreshedAt = 0; // timestamp of last token refresh
-
-/** Refresh the access token if it's older than 55 minutes (tokens last 1h). */
-async function ensureFreshToken(): Promise<void> {
-    if (Date.now() - _tokenRefreshedAt > 55 * 60 * 1000) {
-        await spotify.refreshToken();
-        _tokenRefreshedAt = Date.now();
-    }
-}
 
 const server = new Server(
     { name: 'mcp-spotify', version: '1.0.0' },
@@ -72,8 +63,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
     try {
-        await ensureFreshToken();
-
         switch (name) {
             case 'list_speakers': {
                 const devices = await spotify.getDevices();
@@ -249,7 +238,16 @@ async function main() {
     const api = await SpotifyAuth.connect();
     spotify = new SpotifyController(api);
     Logger.info('Spotify authenticated.');
-    _tokenRefreshedAt = Date.now();
+
+    // Spotify access tokens expire after 1 hour. Refresh every 50 minutes so the
+    // token is always valid regardless of how long the process runs.
+    const REFRESH_INTERVAL_MS = 50 * 60 * 1000;
+    setInterval(() => {
+        spotify.refreshToken().catch((err) =>
+            Logger.warn(`Spotify token refresh failed: ${err}`),
+        );
+    }, REFRESH_INTERVAL_MS);
+    Logger.info(`Spotify token auto-refresh scheduled every ${REFRESH_INTERVAL_MS / 60_000} minutes`);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);
