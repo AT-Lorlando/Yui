@@ -1,3 +1,6 @@
+import Logger from '../logger';
+import type { CollectedTool } from './types';
+
 /**
  * Keyword → MCP server mapping for tool filtering.
  * If ANY keyword in an order matches, that server's tools are included.
@@ -142,3 +145,41 @@ export const SERVER_KEYWORDS: Record<string, string[]> = {
         'marque',
     ],
 };
+
+/**
+ * Returns only the MCP tools relevant to the user's order, based on keyword
+ * matching. Falls back to all tools if nothing matches so the LLM always has
+ * a way to respond.
+ *
+ * This is the biggest latency lever: reducing from 67 → ~10 tools cuts input
+ * tokens by ~60-70%, which directly lowers TTFT on every LLM call.
+ */
+export function filterToolsForOrder(
+    order: string,
+    collectedTools: CollectedTool[],
+): CollectedTool[] {
+    const lc = order.toLowerCase();
+    const relevantServers = new Set<string>();
+    for (const [server, keywords] of Object.entries(SERVER_KEYWORDS)) {
+        if (keywords.some((kw) => lc.includes(kw))) {
+            relevantServers.add(server);
+        }
+    }
+
+    if (relevantServers.size === 0) {
+        Logger.debug(
+            `Tool filter: no match — sending all ${collectedTools.length} tools`,
+        );
+        return collectedTools;
+    }
+
+    const filtered = collectedTools.filter((ct) =>
+        relevantServers.has(ct.serverName),
+    );
+    Logger.debug(
+        `Tool filter: [${[...relevantServers].join(', ')}] → ${
+            filtered.length
+        }/${collectedTools.length} tools`,
+    );
+    return filtered;
+}
