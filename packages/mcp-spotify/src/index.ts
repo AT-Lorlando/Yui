@@ -12,6 +12,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { SpotifyAuth } from './SpotifyAuth';
 import { SpotifyController } from './SpotifyController';
+import { prepareTvForChromecast, isChromecastSpeaker } from './TvPrep';
 import { SPOTIFY_TOOLS } from './tools';
 import Logger from './logger';
 
@@ -32,6 +33,15 @@ async function playOnSpeaker(
     speakerName: string | undefined,
     playFn: (deviceId?: string) => Promise<string>,
 ): Promise<McpContent> {
+    // Fire TV preparation in background if targeting the Chromecast speaker.
+    // We don't await — TV boot takes up to 25s and Spotify Connect needs a
+    // brief moment anyway to activate the device, so they race in parallel.
+    if (isChromecastSpeaker(speakerName)) {
+        prepareTvForChromecast().catch((err) =>
+            Logger.warn(`TvPrep background error: ${err}`),
+        );
+    }
+
     if (!speakerName) {
         const description = await playFn(undefined);
         return { content: [{ type: 'text', text: description }] };
