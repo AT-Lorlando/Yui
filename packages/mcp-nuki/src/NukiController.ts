@@ -49,6 +49,22 @@ export default class NukiController {
         );
     }
 
+    /** Lock the first (and only) door — no name needed. */
+    public async lockFirst(): Promise<string> {
+        const door = this.doorCache[0];
+        if (!door) throw new Error('Aucune porte configurée.');
+        await this.lock(door.nukiId, door.deviceType);
+        return `${door.name} : verrouillée`;
+    }
+
+    /** Unlock the first (and only) door — no name needed. */
+    public async unlockFirst(): Promise<string> {
+        const door = this.doorCache[0];
+        if (!door) throw new Error('Aucune porte configurée.');
+        await this.unlock(door.nukiId, door.deviceType);
+        return `${door.name} : déverrouillée`;
+    }
+
     public async controlDoor(name: string, action: 'lock' | 'unlock'): Promise<string> {
         const door = this.findDoor(name);
         if (!door) {
