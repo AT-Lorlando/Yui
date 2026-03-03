@@ -18,16 +18,15 @@ const DOMOTICS_TOOLS = new Set([
     'set_brightness',
     'set_color',
     'refresh_lights',
-    'set_room_lights',
+    'set_lights',
+    'set_room_palette',
     'turn_on_all_lights',
     'turn_off_all_lights',
     // Nuki doors
     'list_doors',
     'lock_door',
     'unlock_door',
-    'get_door_state',
     'refresh_doors',
-    'control_door',
     // Spotify
     'list_speakers',
     'play_music',
