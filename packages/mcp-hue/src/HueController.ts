@@ -129,6 +129,50 @@ export default class HueController {
         return msg;
     }
 
+    // ── Palette (per-light color distribution) ────────────────────────────────
+
+    /**
+     * Distribute colors cyclically across all lights in a room.
+     * Each light gets colors[i % colors.length] — wraps around if fewer colors
+     * than lights. All lights are updated in parallel (one API call per light).
+     */
+    public async setRoomPalette(
+        roomName: string,
+        colors: string[],
+        brightness?: number,
+    ): Promise<string> {
+        const group = this.findGroup(roomName);
+        if (!group) {
+            const available = this.getRoomNames().join(', ');
+            throw new Error(
+                `Pièce "${roomName}" introuvable. Pièces disponibles : ${available}`,
+            );
+        }
+        if (colors.length === 0) throw new Error('Au moins une couleur requise.');
+
+        const bri =
+            brightness !== undefined
+                ? Math.max(1, Math.round((brightness / 100) * 254))
+                : undefined;
+
+        await Promise.all(
+            group.lightIds.map((lightId, i) => {
+                const { hue: h, sat: s } = this.hexToHueSat(
+                    colors[i % colors.length],
+                );
+                const state = new v3.lightStates.LightState().on().hue(h).sat(s);
+                if (bri !== undefined) state.brightness(bri);
+                return this.api.lights.setLightState(lightId, state);
+            }),
+        );
+
+        const parts = [`palette [${colors.join(', ')}]`];
+        if (brightness !== undefined) parts.push(`luminosité ${brightness}%`);
+        const msg = `${group.name} : ${parts.join(', ')}`;
+        Logger.info(`Room palette — ${msg}`);
+        return msg;
+    }
+
     // ── Individual light control ───────────────────────────────────────────────
 
     public async getAllGroups(): Promise<{ name: string; lights: string[] }[]> {
