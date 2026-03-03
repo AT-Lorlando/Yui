@@ -17,7 +17,7 @@ import { discoverDoors } from './discovery';
 import Logger from './logger';
 
 const nuki = new NukiController();
-let NUKI_TOOLS = buildNukiTools([]);
+let NUKI_TOOLS = buildNukiTools();
 const store = new EntityStore<DoorEntity>('mcp-nuki');
 
 const server = new Server(
@@ -34,73 +34,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     try {
         switch (name) {
-            case 'control_door': {
-                const doorName = String((args as any).name);
-                const action = String((args as any).action) as 'lock' | 'unlock';
-                const msg = await nuki.controlDoor(doorName, action);
-                return {
-                    content: [{ type: 'text', text: msg }],
-                };
+            case 'lock_door': {
+                const msg = await nuki.lockFirst();
+                const door = store.getAll()[0];
+                if (door) store.updateState(door.id, { stateName: 'locked' });
+                return { content: [{ type: 'text', text: msg }] };
+            }
+
+            case 'unlock_door': {
+                const msg = await nuki.unlockFirst();
+                const door = store.getAll()[0];
+                if (door) store.updateState(door.id, { stateName: 'unlocked' });
+                return { content: [{ type: 'text', text: msg }] };
             }
 
             case 'list_doors': {
                 const doors = store.getAll();
                 return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify(doors, null, 2),
-                        },
-                    ],
-                };
-            }
-
-            case 'lock_door': {
-                const nukiId = Number((args as any).nukiId);
-                const deviceType = Number((args as any).deviceType ?? 0);
-                const result = await nuki.lock(nukiId, deviceType);
-                store.updateState(nukiId, { stateName: 'locked' });
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: `Door ${nukiId} locked. Result: ${JSON.stringify(result)}`,
-                        },
-                    ],
-                };
-            }
-
-            case 'unlock_door': {
-                const nukiId = Number((args as any).nukiId);
-                const deviceType = Number((args as any).deviceType ?? 0);
-                const result = await nuki.unlock(nukiId, deviceType);
-                store.updateState(nukiId, { stateName: 'unlocked' });
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: `Door ${nukiId} unlocked. Result: ${JSON.stringify(result)}`,
-                        },
-                    ],
-                };
-            }
-
-            case 'get_door_state': {
-                const nukiId = Number((args as any).nukiId);
-                const deviceType = Number((args as any).deviceType ?? 0);
-                const state = await nuki.getLockState(nukiId, deviceType);
-                store.updateState(nukiId, {
-                    stateName: state.stateName ?? 'unknown',
-                    batteryCritical: state.batteryCritical ?? false,
-                    doorState: state.doorsensorStateName,
-                });
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify(state, null, 2),
-                        },
-                    ],
+                    content: [{ type: 'text', text: JSON.stringify(doors, null, 2) }],
                 };
             }
 
@@ -139,8 +90,8 @@ async function main() {
     Logger.info('Starting Nuki MCP server...');
 
     await nuki.initCache();
-    NUKI_TOOLS = buildNukiTools(nuki.getDoorNames());
-    Logger.info(`Tools built with doors: ${nuki.getDoorNames().join(', ')}`);
+    NUKI_TOOLS = buildNukiTools(nuki.getDoorNames()[0]);
+    Logger.info(`Tools built with door: ${nuki.getDoorNames()[0] ?? '(none)'}`);
 
     await discoverDoors(nuki, store);
 
