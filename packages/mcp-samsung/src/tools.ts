@@ -51,9 +51,9 @@ export const SAMSUNG_TOOLS = [
     {
         name: 'tv_prepare_chromecast',
         description:
-            'ALWAYS call this before playing anything on the Chromecast. ' +
-            'Powers on the TV via Wake-on-LAN, waits for it to boot, then switches to the Chromecast input (HDMI3). ' +
-            'Takes ~10–15s when TV is off. Instant if TV is already on.',
+            'Allume la TV via Wake-on-LAN et bascule sur HDMI3 (entrée Chromecast). ' +
+            'Appelé automatiquement par mcp-chromecast et mcp-spotify — rarement nécessaire manuellement. ' +
+            'Utilise uniquement si tu dois préparer la TV sans lancer de lecture.',
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {
