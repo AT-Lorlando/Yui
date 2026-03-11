@@ -96,7 +96,7 @@ export default class HueController {
             );
         }
 
-        const state = new v3.lightStates.LightState();
+        const state = new v3.lightStates.GroupLightState();
 
         // Default to on=true unless explicitly turning off
         const turnOn = opts.on !== false;
@@ -104,8 +104,7 @@ export default class HueController {
 
         if (turnOn) {
             if (opts.brightness !== undefined) {
-                const bri = Math.max(1, Math.round((opts.brightness / 100) * 254));
-                state.brightness(bri);
+                state.brightness(opts.brightness);
             }
             if (opts.color !== undefined) {
                 const { hue, sat } = this.hexToHueSat(opts.color);
@@ -150,10 +149,7 @@ export default class HueController {
         }
         if (colors.length === 0) throw new Error('Au moins une couleur requise.');
 
-        const bri =
-            brightness !== undefined
-                ? Math.max(1, Math.round((brightness / 100) * 254))
-                : undefined;
+        const bri = brightness;
 
         await Promise.all(
             group.lightIds.map((lightId, i) => {

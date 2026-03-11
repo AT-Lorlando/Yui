@@ -78,8 +78,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     } else {
                         const ops: Promise<void>[] = [];
                         if (brightness !== undefined) {
-                            const bri = Math.max(1, Math.round((brightness / 100) * 254));
-                            ops.push(hue.setLightBrightness(lightId, bri));
+                            ops.push(hue.setLightBrightness(lightId, brightness));
                         }
                         if (color !== undefined) {
                             ops.push(hue.setLightColor(lightId, color));
