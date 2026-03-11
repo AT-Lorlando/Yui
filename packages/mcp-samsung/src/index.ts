@@ -14,17 +14,15 @@ import { SamsungController } from './SamsungController';
 import { SAMSUNG_TOOLS } from './tools';
 import Logger from './logger';
 
-const token = process.env.SMARTTHINGS_TOKEN;
-const deviceId = process.env.SMARTTHINGS_TV_DEVICE_ID;
-const mac = process.env.SMARTTHINGS_TV_MAC;
 const tvIp = process.env.SMARTTHINGS_TV_IP;
+const mac   = process.env.SMARTTHINGS_TV_MAC;
 
-if (!token || !deviceId) {
-    console.error('Missing SMARTTHINGS_TOKEN or SMARTTHINGS_TV_DEVICE_ID in .env');
+if (!tvIp) {
+    console.error('Missing SMARTTHINGS_TV_IP in .env');
     process.exit(1);
 }
 
-const tv = new SamsungController(token, deviceId, mac, tvIp);
+const tv = new SamsungController(tvIp, mac ?? undefined);
 
 const server = new Server(
     { name: 'mcp-samsung', version: '1.0.0' },
@@ -42,7 +40,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         switch (name) {
             case 'tv_get_status': {
                 const status = await tv.getStatus();
-                const inputs = await tv.getSupportedInputs();
+                const inputs = tv.getSupportedInputs();
                 return {
                     content: [{
                         type: 'text',
