@@ -7,10 +7,13 @@ Main voice pipeline:
 """
 import json
 import logging
+import os
 import queue as _queue
 import socket
+import struct
 import threading
 import time
+import wave
 
 import numpy as np
 import requests
@@ -19,6 +22,7 @@ from scipy import signal as _sig
 
 from .asr import make_vad_iterator, rms, to_whisper, transcribe
 from .config import (
+    AUDIO_DEBUG_DIR,
     BEARER_TOKEN,
     CONVERSATION_WINDOW_S,
     FRAME_BYTES,
@@ -28,6 +32,7 @@ from .config import (
     PRE_BUFFER_BYTES,
     SAMPLE_RATE,
     SAMPLE_WIDTH,
+    SAVE_AUDIO_DEBUG,
     SILERO_CHUNK,
     SILERO_MIN_SILENCE_MS,
     SILERO_THRESHOLD,
@@ -46,6 +51,26 @@ from .text_utils import (
 from .tts import generate_tts, play_audio_blocking, play_chime
 
 log = logging.getLogger("voice")
+
+# ── Audio debug saving ────────────────────────────────────────────────────────
+
+def _save_debug_audio(speech_buf: bytes, label: str) -> None:
+    """Save a raw PCM buffer as a WAV file in AUDIO_DEBUG_DIR for debugging."""
+    if not SAVE_AUDIO_DEBUG:
+        return
+    try:
+        os.makedirs(AUDIO_DEBUG_DIR, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(AUDIO_DEBUG_DIR, f"{ts}_{label}.wav")
+        with wave.open(filename, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(SAMPLE_WIDTH)
+            wf.setframerate(SAMPLE_RATE)
+            wf.writeframes(speech_buf)
+        log.debug(f"Audio saved: {filename} ({len(speech_buf)//1024} KB)")
+    except Exception as e:
+        log.warning(f"Could not save debug audio: {e}")
+
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 
@@ -335,6 +360,7 @@ def _process_utterance(speech_buf: bytes, sock: socket.socket) -> None:
     if in_convo:
         order = strip_trigger(text) if contains_trigger(text) else text
         log.info(f"[Conversation mode] → Order: {order!r}")
+        _save_debug_audio(speech_buf, f"convo_{order[:30].replace(' ', '_')}")
     else:
         if not contains_trigger(text):
             log.info(f"No trigger word '{TRIGGER_WORD}' — ignored")
@@ -344,6 +370,7 @@ def _process_utterance(speech_buf: bytes, sock: socket.socket) -> None:
             log.info(f"Trigger found but nothing left after stripping: {text!r}")
             return
         log.info(f"→ Order: {order!r}")
+        _save_debug_audio(speech_buf, f"trigger_{order[:30].replace(' ', '_')}")
 
     play_chime()  # fires immediately; LLM call starts in parallel
     post_order(order, sock=sock, reset_convo=not in_convo)

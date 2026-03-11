@@ -17,7 +17,7 @@ module.exports = {
     apps: [
         // ── 1. XTTS TTS server ──────────────────────────────────────────────
         {
-            name: 'yui-xtts',
+            name: 'yui-tts-engine',
             script: 'src/tts/xtts_server.py',
             interpreter: '/home/chuya/.venvs/xtts/bin/python',
             cwd: ROOT,
@@ -74,7 +74,9 @@ module.exports = {
             cwd: ROOT,
             env: {
                 TTS_ENGINE: 'xtts',
-                TTS_SPEAKER: 'Google Home',
+                XTTS_SPEAKER: 'Ana Florence',
+                SAVE_AUDIO_DEBUG: 'true',
+                XTTS_SPEAKER_WAV: '',
                 LOCAL_IP: '10.0.0.101',
                 WHISPER_MODEL: 'large-v3-turbo',
                 WHISPER_LANG: 'fr',

@@ -14,6 +14,8 @@ Also starts two HTTP servers at import time:
 import io
 import json
 import logging
+import os
+import random
 import struct
 import threading
 import time
@@ -213,8 +215,27 @@ def speak(text: str) -> None:
 
 # ── Trigger chime ─────────────────────────────────────────────────────────────
 
-def _generate_chime_wav() -> bytes:
-    """Two-tone confirmation chime: 880 Hz → 1760 Hz, 0.15s each, 40ms gap."""
+_CHIMES_DIR = os.path.join(os.path.dirname(__file__), "../../assets/chimes")
+
+
+def _load_chimes() -> list[bytes]:
+    """Load all WAV files from assets/chimes/. Returns empty list if none found."""
+    chimes = []
+    if not os.path.isdir(_CHIMES_DIR):
+        return chimes
+    for fname in sorted(os.listdir(_CHIMES_DIR)):
+        if not fname.endswith(".wav"):
+            continue
+        try:
+            with open(os.path.join(_CHIMES_DIR, fname), "rb") as f:
+                chimes.append(f.read())
+        except Exception as e:
+            log.warning(f"Could not load chime {fname}: {e}")
+    return chimes
+
+
+def _generate_fallback_chime() -> bytes:
+    """Two-tone beep fallback when no TTS chimes are available."""
     sr = 22050
     dur = 0.15
     n = int(sr * dur)
@@ -234,21 +255,25 @@ def _generate_chime_wav() -> bytes:
     return buf.getvalue()
 
 
-try:
-    _CHIME_WAV = _generate_chime_wav()
-    log.info("Trigger chime ready (880→1760 Hz, 0.34s)")
-except Exception as _e:
-    _CHIME_WAV = None
-    log.warning(f"Could not generate chime: {_e}")
+_CHIME_WAVS: list[bytes] = _load_chimes()
+if _CHIME_WAVS:
+    log.info(f"Chimes loaded: {len(_CHIME_WAVS)} phrase(s) from {_CHIMES_DIR}")
+else:
+    try:
+        _CHIME_WAVS = [_generate_fallback_chime()]
+        log.info("No chimes found — using fallback beep (run scripts/generate_chimes.py)")
+    except Exception as _e:
+        log.warning(f"Could not generate fallback chime: {_e}")
 
 
 def play_chime() -> None:
-    """Play the trigger chime on the cast device (non-blocking, non-interruptible)."""
-    if not _CHIME_WAV:
+    """Play a random confirmation phrase (or fallback beep) on the cast device."""
+    if not _CHIME_WAVS:
         return
+    wav = random.choice(_CHIME_WAVS)
     _ev = threading.Event()  # never set → plays to completion
     threading.Thread(
-        target=play_audio_blocking, args=(_CHIME_WAV, "audio/wav", _ev), daemon=True
+        target=play_audio_blocking, args=(wav, "audio/wav", _ev), daemon=True
     ).start()
 
 

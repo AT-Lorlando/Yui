@@ -12,3 +12,6 @@ stories/*
 data/
 assets/my_voice.wav
 **/dist/
+prompts/*
+dashboard
+**/__pycache__/**

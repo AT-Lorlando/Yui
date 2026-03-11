@@ -51,7 +51,10 @@ XTTS_SPEAKER     = os.getenv("XTTS_SPEAKER", "Lilya Stainthorpe")
 XTTS_SPEAKER_WAV = os.getenv("XTTS_SPEAKER_WAV", "")   # path to voice clone WAV
 XTTS_SPEED       = float(os.getenv("XTTS_SPEED", "1.0"))
 
-TTS_SPEAKER = os.getenv("TTS_SPEAKER", "Google Home")
+SAVE_AUDIO_DEBUG = os.getenv("SAVE_AUDIO_DEBUG", "").lower() in ("1", "true", "yes")
+AUDIO_DEBUG_DIR  = os.getenv("AUDIO_DEBUG_DIR", "data/audio-debug")
+
+TTS_SPEAKER = os.getenv("TTS_SPEAKER", "Salon")
 LOCAL_IP    = os.getenv("LOCAL_IP", "10.0.0.101")
 TTS_PORT    = int(os.getenv("TTS_PORT", "18765"))
 SPEAK_PORT  = int(os.getenv("SPEAK_PORT", "3001"))
