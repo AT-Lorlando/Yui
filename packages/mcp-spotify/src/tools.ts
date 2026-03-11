@@ -7,12 +7,11 @@ export const SPOTIFY_TOOLS = [
     {
         name: 'play_music',
         description:
-            'Play or resume music. Can play a track by search query or Spotify URI, optionally on a specific speaker. ' +
+            'Play or resume music on the default speaker. Can play a track by search query or Spotify URI. ' +
             'For albums use play_album, for playlists use play_playlist, for artist radio use play_artist_radio.',
         inputSchema: {
             type: 'object' as const,
             properties: {
-                speakerName: { type: 'string', description: 'Name of the speaker to play on (from list_speakers)' },
                 query: { type: 'string', description: 'Track search query (e.g. "Bohemian Rhapsody Queen")' },
                 uri: { type: 'string', description: 'Spotify URI to play directly (spotify:track:xxx, spotify:album:xxx, spotify:playlist:xxx)' },
             },
@@ -21,36 +20,33 @@ export const SPOTIFY_TOOLS = [
     },
     {
         name: 'play_album',
-        description: 'Search for an album and play it in full.',
+        description: 'Search for an album and play it in full on the default speaker.',
         inputSchema: {
             type: 'object' as const,
             properties: {
                 query: { type: 'string', description: 'Album search query (e.g. "Random Access Memories Daft Punk")' },
-                speakerName: { type: 'string', description: 'Name of the speaker to play on' },
             },
             required: ['query'],
         },
     },
     {
         name: 'play_playlist',
-        description: "Search the user's saved playlists first, then Spotify's catalog, and play the best match.",
+        description: "Search the user's saved playlists first, then Spotify's catalog, and play the best match on the default speaker.",
         inputSchema: {
             type: 'object' as const,
             properties: {
                 query: { type: 'string', description: 'Playlist name or search query (e.g. "chill", "workout", "indie")' },
-                speakerName: { type: 'string', description: 'Name of the speaker to play on' },
             },
             required: ['query'],
         },
     },
     {
         name: 'play_artist_radio',
-        description: 'Play a Spotify radio / recommendations mix seeded by an artist. Great for discovering similar music.',
+        description: 'Play a Spotify radio / recommendations mix seeded by an artist on the default speaker.',
         inputSchema: {
             type: 'object' as const,
             properties: {
                 artist: { type: 'string', description: 'Artist name (e.g. "Daft Punk", "Bonobo")' },
-                speakerName: { type: 'string', description: 'Name of the speaker to play on' },
             },
             required: ['artist'],
         },

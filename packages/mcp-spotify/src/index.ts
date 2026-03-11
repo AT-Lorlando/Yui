@@ -12,9 +12,10 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { SpotifyAuth } from './SpotifyAuth';
 import { SpotifyController } from './SpotifyController';
-import { prepareTvForChromecast, isChromecastSpeaker } from './TvPrep';
 import { SPOTIFY_TOOLS } from './tools';
 import Logger from './logger';
+
+const DEFAULT_SPEAKER = process.env.SPOTIFY_DEFAULT_SPEAKER || 'WiiM Ultra-65B6';
 
 let spotify: SpotifyController;
 
@@ -33,15 +34,6 @@ async function playOnSpeaker(
     speakerName: string | undefined,
     playFn: (deviceId?: string) => Promise<string>,
 ): Promise<McpContent> {
-    // Fire TV preparation in background if targeting the Chromecast speaker.
-    // We don't await — TV boot takes up to 25s and Spotify Connect needs a
-    // brief moment anyway to activate the device, so they race in parallel.
-    if (isChromecastSpeaker(speakerName)) {
-        prepareTvForChromecast().catch((err) =>
-            Logger.warn(`TvPrep background error: ${err}`),
-        );
-    }
-
     if (!speakerName) {
         const description = await playFn(undefined);
         return { content: [{ type: 'text', text: description }] };
@@ -80,45 +72,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'play_music': {
-                const speakerName = (args as any)?.speakerName as string | undefined;
                 const query = (args as any)?.query as string | undefined;
                 const uri = (args as any)?.uri as string | undefined;
 
-                return await playOnSpeaker(speakerName, async (deviceId) => {
+                return await playOnSpeaker(DEFAULT_SPEAKER, async (deviceId) => {
                     if (uri) {
                         await spotify.playUri(uri, deviceId);
-                        return `Playing ${uri}${speakerName ? ` on ${speakerName}` : ''}.`;
+                        return `Playing ${uri}.`;
                     }
                     if (query) {
                         const results = await spotify.search(query, 'track');
                         if (results.length === 0) throw new Error(`No tracks found for "${query}".`);
                         const track = results[0];
                         await spotify.playUri(track.uri, deviceId);
-                        return `Playing "${track.name}" by ${track.artist}${speakerName ? ` on ${speakerName}` : ''}.`;
+                        return `Playing "${track.name}" by ${track.artist}.`;
                     }
                     await spotify.play(deviceId);
-                    return `Playback resumed${speakerName ? ` on ${speakerName}` : ''}.`;
+                    return `Playback resumed.`;
                 });
             }
 
             case 'play_album': {
                 const query = String((args as any).query);
-                const speakerName = (args as any)?.speakerName as string | undefined;
 
-                return await playOnSpeaker(speakerName, async (deviceId) => {
+                return await playOnSpeaker(DEFAULT_SPEAKER, async (deviceId) => {
                     const results = await spotify.search(query, 'album');
                     if (results.length === 0) throw new Error(`No albums found for "${query}".`);
                     const album = results[0];
                     await spotify.playUri(album.uri, deviceId);
-                    return `Playing album "${album.name}" by ${album.artist}${speakerName ? ` on ${speakerName}` : ''}.`;
+                    return `Playing album "${album.name}" by ${album.artist}.`;
                 });
             }
 
             case 'play_playlist': {
                 const query = String((args as any).query);
-                const speakerName = (args as any)?.speakerName as string | undefined;
 
-                return await playOnSpeaker(speakerName, async (deviceId) => {
+                return await playOnSpeaker(DEFAULT_SPEAKER, async (deviceId) => {
                     const myPlaylists = await spotify.getUserPlaylists();
                     const match = myPlaylists.find(
                         (p) => p.name.toLowerCase().includes(query.toLowerCase()),
@@ -126,29 +115,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
                     if (match) {
                         await spotify.playUri(match.uri, deviceId);
-                        return `Playing your playlist "${match.name}"${speakerName ? ` on ${speakerName}` : ''}.`;
+                        return `Playing your playlist "${match.name}".`;
                     }
 
                     const results = await spotify.search(query, 'playlist');
                     if (results.length === 0) throw new Error(`No playlists found for "${query}".`);
                     const playlist = results[0];
                     await spotify.playUri(playlist.uri, deviceId);
-                    return `Playing playlist "${playlist.name}" by ${playlist.owner}${speakerName ? ` on ${speakerName}` : ''}.`;
+                    return `Playing playlist "${playlist.name}" by ${playlist.owner}.`;
                 });
             }
 
             case 'play_artist_radio': {
                 const artist = String((args as any).artist);
-                const speakerName = (args as any)?.speakerName as string | undefined;
 
-                return await playOnSpeaker(speakerName, async (deviceId) => {
+                return await playOnSpeaker(DEFAULT_SPEAKER, async (deviceId) => {
                     const radio = await spotify.getArtistRadio(artist);
                     if (radio.uri) {
                         await spotify.playUri(radio.uri, deviceId);
                     } else {
                         await spotify.playUris(radio.uris!, deviceId);
                     }
-                    return `Playing ${radio.label} for "${radio.artistName}"${speakerName ? ` on ${speakerName}` : ''}.`;
+                    return `Playing ${radio.label} for "${radio.artistName}".`;
                 });
             }
 
