@@ -13,11 +13,17 @@ import {
     deleteSchedule,
     toggleSchedule,
 } from './scheduler';
+import { listScenes } from './scenes';
 
 export interface ToolCallResult {
     id: string;
     content: string;
 }
+
+/** Runs a scene by id. Returns success/error. */
+export type SceneRunner = (
+    id: string,
+) => Promise<{ success: boolean; error?: string }>;
 
 export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
     return [
@@ -177,6 +183,34 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
                 },
             },
         },
+        {
+            type: 'function',
+            function: {
+                name: 'scene_list',
+                description:
+                    'Lister toutes les scènes disponibles (intégrées et personnalisées)',
+                parameters: { type: 'object', properties: {} },
+            },
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'scene_trigger',
+                description:
+                    'Déclencher une scène par son nom ou son id. Recherche partielle insensible à la casse.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        name_or_id: {
+                            type: 'string',
+                            description:
+                                'Nom ou id de la scène (ex: "Forêt", "foret", "aurora")',
+                        },
+                    },
+                    required: ['name_or_id'],
+                },
+            },
+        },
     ];
 }
 
@@ -186,6 +220,7 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
  */
 export async function handleVirtualTool(
     toolCall: OpenAI.Chat.ChatCompletionMessageToolCall,
+    sceneRunner?: SceneRunner,
 ): Promise<ToolCallResult | null> {
     const name = toolCall.function.name;
     const args = JSON.parse(toolCall.function.arguments || '{}');
@@ -242,6 +277,55 @@ export async function handleVirtualTool(
 
         case 'schedule_toggle':
             return { id: toolCall.id, content: toggleSchedule(args.id) };
+
+        case 'scene_list': {
+            const scenes = listScenes();
+            if (scenes.length === 0)
+                return { id: toolCall.id, content: 'Aucune scène disponible.' };
+            const lines = scenes.map(
+                (s) =>
+                    `- ${s.name} (id: ${s.id})${
+                        s.builtIn ? ' [intégrée]' : ''
+                    }: ${s.description}`,
+            );
+            return {
+                id: toolCall.id,
+                content: `${
+                    scenes.length
+                } scène(s) disponible(s) :\n${lines.join('\n')}`,
+            };
+        }
+
+        case 'scene_trigger': {
+            if (!sceneRunner)
+                return {
+                    id: toolCall.id,
+                    content: 'Erreur: scene runner non disponible.',
+                };
+            const query = String(args.name_or_id).toLowerCase();
+            const scenes = listScenes();
+            const scene =
+                scenes.find((s) => s.id === query) ??
+                scenes.find((s) => s.name.toLowerCase().includes(query)) ??
+                scenes.find((s) => s.id.includes(query));
+            if (!scene)
+                return {
+                    id: toolCall.id,
+                    content: `Scène introuvable : "${
+                        args.name_or_id
+                    }". Scènes disponibles : ${scenes
+                        .map((s) => s.name)
+                        .join(', ')}`,
+                };
+            Logger.info(`Triggering scene "${scene.name}" (${scene.id})`);
+            const result = await sceneRunner(scene.id);
+            return {
+                id: toolCall.id,
+                content: result.success
+                    ? `Scène "${scene.name}" déclenchée.`
+                    : `Erreur lors du déclenchement de "${scene.name}": ${result.error}`,
+            };
+        }
 
         default:
             return null;

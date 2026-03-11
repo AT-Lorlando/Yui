@@ -255,9 +255,9 @@ async function searchPage(
 }
 
 /**
- * LLM-powered story search. Takes a natural language query, searches the
- * 10 most recent non-domotics stories first. If nothing matches, searches
- * the next 10 (pagination). Returns summaries + full transcripts of matches.
+ * LLM-powered story search. Takes a natural language query, searches all
+ * stories (domotics included), most recent first, in pages of 10.
+ * Returns summaries + full transcripts of matches.
  *
  * Exposed as the `search_stories(query)` virtual tool.
  */
@@ -265,16 +265,16 @@ export async function searchStoriesWithLLM(query: string): Promise<string> {
     const index = loadIndex();
     if (index.length === 0) return 'Aucune discussion passée trouvée.';
 
-    // Non-domotics stories, most recent first
-    const nonDomotics = index.filter((e) => !e.domotics).reverse();
+    // All stories, most recent first (domotics included)
+    const allStories = [...index].reverse();
 
     // Page 1: indices 0..9
-    const page1 = nonDomotics.slice(0, 10);
+    const page1 = allStories.slice(0, 10);
     const result1 = await searchPage(query, page1, 'page 1/2');
     if (result1 !== null) return result1;
 
     // Page 2: indices 10..19 (only if page 1 found nothing)
-    const page2 = nonDomotics.slice(10, 20);
+    const page2 = allStories.slice(10, 20);
     const result2 = await searchPage(query, page2, 'page 2/2');
     if (result2 !== null) return result2;
 
@@ -326,21 +326,16 @@ export async function indexMissingStories(): Promise<void> {
 // ── System prompt injection ───────────────────────────────────────────────────
 
 /**
- * Returns the 3 most recent non-domotics story summaries for injection into
- * every system prompt. Domotics stories (lights, music, doors, TV) are excluded
- * as they are rarely relevant to recall.
+ * Returns the 3 most recent story summaries for injection into every system
+ * prompt (domotics included — recent home-automation context is often relevant).
  * The LLM can retrieve more via search_stories(query), which paginates 10 by 10.
  */
 export function buildStorySummariesContext(): string {
     const index = loadIndex();
     if (index.length === 0) return '';
 
-    // Non-domotics, 3 most recent, newest first.
-    // The LLM can retrieve more via search_stories(query) which paginates 10 by 10.
-    const recent = index
-        .filter((e) => !e.domotics)
-        .slice(-3)
-        .reverse();
+    // 3 most recent overall, newest first
+    const recent = index.slice(-3).reverse();
     if (recent.length === 0) return '';
 
     return recent

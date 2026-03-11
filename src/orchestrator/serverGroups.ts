@@ -1,0 +1,259 @@
+import Logger from '../logger';
+import type { CollectedTool } from './types';
+
+export interface ServerGroup {
+    name: string;
+    servers: string[];
+    keywords: string[];
+    /** Filename inside prompts/domains/ to inject when this group is active. */
+    promptFile: string;
+}
+
+export const SERVER_GROUPS: ServerGroup[] = [
+    {
+        name: 'domotique',
+        servers: [
+            'mcp-hue',
+            'mcp-nuki',
+            'mcp-somfy',
+            'mcp-spotify',
+            'mcp-chromecast',
+        ],
+        keywords: [
+            // lights
+            'lumière',
+            'lampe',
+            'allume',
+            'allumer',
+            'allumé',
+            'éteins',
+            'éteindre',
+            'éteint',
+            'éclairage',
+            'luminosité',
+            'couleur',
+            'light',
+            'lamp',
+            'chambre',
+            'salon',
+            'cuisine',
+            'bureau',
+            'salle',
+            'ambiance',
+            'bright',
+            'dim',
+            'appartement',
+            // doors
+            'porte',
+            'verrou',
+            'clé',
+            'ferme',
+            'fermer',
+            'ouvre',
+            'ouvrir',
+            'verrouille',
+            'verrouiller',
+            'déverrouille',
+            'déverrouiller',
+            'lock',
+            'door',
+            // shutters / somfy
+            'volet',
+            'store',
+            'pergola',
+            'portail',
+            'rideau',
+            'somfy',
+            'tahoma',
+            'fenêtre',
+            'monte',
+            'descend',
+            'shutter',
+            'blind',
+            // music
+            'musique',
+            'spotify',
+            'joue',
+            'jouer',
+            'chanson',
+            'playlist',
+            'album',
+            'artiste',
+            'écoute',
+            'écouter',
+            'volume',
+            'pause',
+            'music',
+            'son',
+            'radio',
+            'morceau',
+            'track',
+            'shuffle',
+            'repeat',
+            'met',
+            'mettre',
+            // scenes
+            'scène',
+            'scene',
+            'mode',
+            'ambiance',
+            // TV / video / casting
+            'tv',
+            'télé',
+            'télévision',
+            'samsung',
+            'écran',
+            'hdmi',
+            'chromecast',
+            'cast',
+            'netflix',
+            'crunchyroll',
+            'youtube',
+            'disney',
+            'prime',
+            'amazon',
+            'cinéma',
+            'film',
+            'série',
+            'diffuse',
+            'stream',
+            'vidéo',
+            'anime',
+        ],
+        promptFile: 'domotique.md',
+    },
+    {
+        name: 'prevoyance',
+        servers: ['mcp-calendar', 'mcp-weather'],
+        keywords: [
+            // calendar
+            'calendrier',
+            'agenda',
+            'réunion',
+            'rendez-vous',
+            'événement',
+            'planning',
+            'semaine',
+            'demain',
+            'lundi',
+            'mardi',
+            'mercredi',
+            'jeudi',
+            'vendredi',
+            'samedi',
+            'dimanche',
+            'aujourd',
+            'mois',
+            'après-demain',
+            // weather
+            'météo',
+            'température',
+            'pluie',
+            'soleil',
+            'vent',
+            'chaud',
+            'froid',
+            'nuage',
+            'weather',
+            'prévision',
+            'forecast',
+            // scheduling
+            'rappelle',
+            'planifie',
+            'schedule',
+            'programme',
+        ],
+        promptFile: 'prevoyance.md',
+    },
+    {
+        name: 'secretariat',
+        servers: ['mcp-gmail', 'mcp-linear'],
+        keywords: [
+            // email
+            'email',
+            'mail',
+            'gmail',
+            'inbox',
+            'boîte',
+            'envoie',
+            'reçu',
+            'expéditeur',
+            'destinataire',
+            'objet',
+            'pièce jointe',
+            'brouillon',
+            'archive',
+            'corbeille',
+            'non lu',
+            'marque',
+            // linear / dev
+            'linear',
+            'ticket',
+            'issue',
+            'tâche',
+            'projet',
+            'koya',
+            'bug',
+        ],
+        promptFile: 'secretariat.md',
+    },
+    {
+        name: 'connaissance',
+        servers: ['mcp-obsidian', 'mcp-browser'],
+        keywords: [
+            'note',
+            'obsidian',
+            'fichier',
+            'document',
+            'écris',
+            'journal',
+            'vault',
+            'navigue',
+            'browser',
+        ],
+        promptFile: 'connaissance.md',
+    },
+];
+
+/**
+ * Resolves which domain groups match the user's order via keyword scanning.
+ * Returns an empty array when nothing matches (caller falls back to all tools
+ * and core-only prompt).
+ */
+export function resolveGroups(order: string): ServerGroup[] {
+    const lc = order.toLowerCase();
+    return SERVER_GROUPS.filter((g) =>
+        g.keywords.some((kw) => lc.includes(kw)),
+    );
+}
+
+/**
+ * Returns MCP tools relevant to the matched groups.
+ * Falls back to the full tool list if no group matched so the LLM is never
+ * left tool-less on ambiguous or general requests.
+ */
+export function filterToolsForOrder(
+    order: string,
+    collectedTools: CollectedTool[],
+    groups?: ServerGroup[],
+): CollectedTool[] {
+    const matched = groups ?? resolveGroups(order);
+
+    if (matched.length === 0) {
+        Logger.debug(
+            `Tool filter: no group match — virtual tools only (no MCP tools)`,
+        );
+        return [];
+    }
+
+    const relevantServers = new Set(matched.flatMap((g) => g.servers));
+    const filtered = collectedTools.filter((ct) =>
+        relevantServers.has(ct.serverName),
+    );
+
+    Logger.debug(
+        `Tool filter: [${matched.map((g) => g.name).join(', ')}] → ` +
+            `${filtered.length}/${collectedTools.length} tools`,
+    );
+    return filtered;
+}

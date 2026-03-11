@@ -31,7 +31,6 @@ export function buildServerConfigs(): McpServerConfig[] {
         mcp('mcp-nuki'),
         mcp('mcp-spotify'),
         mcp('mcp-linear'),
-        mcp('mcp-samsung'),
         mcp('mcp-chromecast'),
         mcp('mcp-calendar'),
         mcp('mcp-weather'),

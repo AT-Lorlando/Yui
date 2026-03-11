@@ -54,16 +54,13 @@ export const SERVER_KEYWORDS: Record<string, string[]> = {
         'koya',
         'bug',
     ],
-    'mcp-samsung': [
+    'mcp-chromecast': [
         'tv',
         'télé',
         'télévision',
         'samsung',
         'écran',
         'hdmi',
-        'volume',
-    ],
-    'mcp-chromecast': [
         'chromecast',
         'cast',
         'netflix',

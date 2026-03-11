@@ -8,11 +8,12 @@ import Logger from '../logger';
 export interface SceneAction {
     /**
      * MCP tool name (e.g. "turn_on_light") or a virtual action prefixed with _:
-     *   _lights_all_on / _lights_all_off
+     *   _lights_all_on          { brightness?: number }
+     *   _lights_all_off
      *   _lights_all_brightness  { brightness: number }
-     *   _lights_all_color       { color: string (hex) }
-     *   _lights_palette         { colors: string[], brightness: number }
-     *     → distributes colors across lights (light 0 → colors[0], light 1 → colors[1], wraps)
+     *   _lights_all_color       { color: string (hex), brightness?: number }
+     *   _lights_palette         { colors: string[], brightness?: number }
+     *     → applies set_room_palette per room with the given colors
      *   _doors_lock_all
      */
     tool: string;
@@ -46,24 +47,6 @@ export interface Scene {
 
 export type CreateSceneInput = Omit<Scene, 'id' | 'createdAt' | 'builtIn'>;
 
-// ── Built-in scenes (loaded from JSON) ───────────────────────────────────────
-
-const SCENES_BUILTIN_FILE = path.resolve(
-    process.cwd(),
-    'data/scenes-builtin.json',
-);
-
-function loadBuiltinScenes(): Scene[] {
-    try {
-        return JSON.parse(
-            fs.readFileSync(SCENES_BUILTIN_FILE, 'utf-8'),
-        ) as Scene[];
-    } catch (err) {
-        Logger.error(`Failed to load built-in scenes: ${err}`);
-        return [];
-    }
-}
-
 // ── Storage ───────────────────────────────────────────────────────────────────
 
 const SCENES_FILE = path.resolve(process.cwd(), 'data/scenes.json');
@@ -73,24 +56,16 @@ function ensureDataDir(): void {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-function loadUserScenes(): Scene[] {
+function loadScenes(): Scene[] {
     try {
         if (!fs.existsSync(SCENES_FILE)) return [];
-        const raw = JSON.parse(fs.readFileSync(SCENES_FILE, 'utf-8')) as any[];
-        // Migrate old format: actions → state (setup empty)
-        return raw.map((s: any) => {
-            if (s.actions && !s.setup && !s.state) {
-                const { actions, ...rest } = s;
-                return { ...rest, setup: [], state: actions } as Scene;
-            }
-            return s as Scene;
-        });
+        return JSON.parse(fs.readFileSync(SCENES_FILE, 'utf-8')) as Scene[];
     } catch {
         return [];
     }
 }
 
-function saveUserScenes(scenes: Scene[]): void {
+function saveScenes(scenes: Scene[]): void {
     ensureDataDir();
     fs.writeFileSync(SCENES_FILE, JSON.stringify(scenes, null, 2));
 }
@@ -98,7 +73,7 @@ function saveUserScenes(scenes: Scene[]): void {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function listScenes(): Scene[] {
-    return [...loadBuiltinScenes(), ...loadUserScenes()];
+    return loadScenes();
 }
 
 export function getScene(id: string): Scene | null {
@@ -112,9 +87,9 @@ export function createScene(data: CreateSceneInput): Scene {
         createdAt: Date.now(),
         builtIn: false,
     };
-    const userScenes = loadUserScenes();
-    userScenes.push(scene);
-    saveUserScenes(userScenes);
+    const scenes = loadScenes();
+    scenes.push(scene);
+    saveScenes(scenes);
     Logger.info(`Scene created: "${scene.name}" (${scene.id})`);
     return scene;
 }
@@ -126,8 +101,8 @@ export function deleteScene(id: string): boolean {
         Logger.warn(`Cannot delete built-in scene "${id}"`);
         return false;
     }
-    const userScenes = loadUserScenes().filter((s) => s.id !== id);
-    saveUserScenes(userScenes);
+    const scenes = loadScenes().filter((s) => s.id !== id);
+    saveScenes(scenes);
     return true;
 }
 
@@ -146,69 +121,61 @@ async function runVirtualAction(
 ): Promise<void> {
     switch (action.tool) {
         case '_lights_all_on':
-        case '_lights_all_off': {
-            const lights = (await callTool('list_lights', {})) as {
-                id: number;
-            }[];
-            const fn =
-                action.tool === '_lights_all_on'
-                    ? 'turn_on_light'
-                    : 'turn_off_light';
-            await Promise.allSettled(
-                lights.map((l) => callTool(fn, { lightId: l.id })),
-            );
+            await callTool('turn_on_all_lights', {
+                ...(action.args.brightness !== undefined
+                    ? { brightness: action.args.brightness }
+                    : {}),
+            });
             break;
-        }
-        case '_lights_all_brightness': {
-            const lights = (await callTool('list_lights', {})) as {
-                id: number;
-            }[];
-            await Promise.allSettled(
-                lights.map((l) =>
-                    callTool('set_brightness', {
-                        lightId: l.id,
-                        brightness: action.args.brightness,
-                    }),
-                ),
-            );
+
+        case '_lights_all_off':
+            await callTool('turn_off_all_lights', {});
             break;
-        }
+
+        case '_lights_all_brightness':
+            await callTool('turn_on_all_lights', {
+                brightness: action.args.brightness,
+            });
+            break;
+
         case '_lights_all_color': {
-            const lights = (await callTool('list_lights', {})) as {
-                id: number;
-            }[];
-            await Promise.allSettled(
-                lights.map((l) =>
-                    callTool('set_color', {
-                        lightId: l.id,
-                        color: action.args.color,
-                    }),
-                ),
-            );
+            // set_lights accepts a room name — use 'Appartement' to hit all rooms
+            await callTool('set_lights', {
+                target: 'Appartement',
+                on: true,
+                color: action.args.color,
+                ...(action.args.brightness !== undefined
+                    ? { brightness: action.args.brightness }
+                    : {}),
+            });
             break;
         }
+
         case '_lights_palette': {
+            // Group lights by room, apply set_room_palette per room
             const lights = (await callTool('list_lights', {})) as {
                 id: number;
+                name: string;
+                room: string;
             }[];
             const colors = action.args.colors as string[];
+            const rooms = [
+                ...new Set(lights.map((l) => l.room).filter(Boolean)),
+            ];
             await Promise.allSettled(
-                lights.map((l, i) =>
-                    Promise.all([
-                        callTool('turn_on_light', { lightId: l.id }),
-                        callTool('set_brightness', {
-                            lightId: l.id,
-                            brightness: action.args.brightness,
-                        }),
-                        callTool('set_color', {
-                            lightId: l.id,
-                            color: colors[i % colors.length],
-                        }),
-                    ]),
+                rooms.map((room) =>
+                    callTool('set_room_palette', {
+                        room,
+                        colors,
+                        ...(action.args.brightness !== undefined
+                            ? { brightness: action.args.brightness }
+                            : {}),
+                    }),
                 ),
             );
             break;
         }
+
         case '_doors_lock_all': {
             const doors = (await callTool('list_doors', {})) as {
                 nukiId: number;

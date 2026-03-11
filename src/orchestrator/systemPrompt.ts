@@ -8,6 +8,8 @@ export interface SystemPromptContext {
     storySummaries: string;
     /** Compact entity summary fetched at startup (lights, doors, speakers). */
     entities?: string;
+    /** Active domain group names — used to load prompts/domains/<name>.md */
+    activeGroups?: string[];
 }
 
 function formatDatetime(): string {
@@ -45,13 +47,11 @@ function formatDatetime(): string {
 }
 
 /**
- * Reads all .md files from the prompts/ directory in alphabetical order.
- * Re-reads on every call — no caching — so edits take effect immediately
- * without restarting the orchestrator.
+ * Reads all .md files from prompts/ root (alphabetical order).
+ * These are always loaded regardless of domain.
  */
-function loadPromptDocs(): string {
+function loadCoreDocs(): string {
     const promptsDir = path.resolve(process.cwd(), 'prompts');
-
     if (!fs.existsSync(promptsDir)) {
         Logger.warn('prompts/ directory not found — using empty base prompt');
         return '';
@@ -61,11 +61,6 @@ function loadPromptDocs(): string {
         .readdirSync(promptsDir)
         .filter((f) => f.endsWith('.md'))
         .sort();
-
-    if (files.length === 0) {
-        Logger.warn('No .md files found in prompts/');
-        return '';
-    }
 
     const parts: string[] = [];
     for (const file of files) {
@@ -79,17 +74,45 @@ function loadPromptDocs(): string {
         }
     }
 
-    Logger.debug(`Loaded ${files.length} prompt doc(s): ${files.join(', ')}`);
+    if (files.length > 0) Logger.debug(`Core prompts: ${files.join(', ')}`);
+    return parts.join('\n\n---\n\n');
+}
+
+/**
+ * Reads domain-specific .md files from prompts/domains/ for the active groups.
+ */
+function loadDomainDocs(activeGroups: string[]): string {
+    if (activeGroups.length === 0) return '';
+    const domainsDir = path.resolve(process.cwd(), 'prompts', 'domains');
+    if (!fs.existsSync(domainsDir)) return '';
+
+    const parts: string[] = [];
+    for (const group of activeGroups) {
+        const filePath = path.join(domainsDir, `${group}.md`);
+        try {
+            if (fs.existsSync(filePath)) {
+                const content = fs.readFileSync(filePath, 'utf-8').trim();
+                if (content) parts.push(content);
+            }
+        } catch (err) {
+            Logger.warn(`Could not read domain prompt "${group}.md": ${err}`);
+        }
+    }
+
+    if (parts.length > 0)
+        Logger.debug(`Domain prompts: ${activeGroups.join(', ')}`);
     return parts.join('\n\n---\n\n');
 }
 
 export function buildSystemPrompt(ctx: SystemPromptContext): string {
-    const docs = loadPromptDocs();
+    const coreDocs = loadCoreDocs();
+    const domainDocs = loadDomainDocs(ctx.activeGroups ?? []);
     const datetime = formatDatetime();
 
     const sections: string[] = [];
 
-    if (docs) sections.push(docs);
+    if (coreDocs) sections.push(coreDocs);
+    if (domainDocs) sections.push(domainDocs);
 
     sections.push(`## Contexte actuel\n\nNous sommes le ${datetime}.`);
 

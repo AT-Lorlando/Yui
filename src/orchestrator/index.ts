@@ -11,12 +11,13 @@ import {
     buildStorySummariesContext,
     indexMissingStories,
 } from './storyArchive';
-import { filterToolsForOrder } from './serverKeywords';
+import { resolveGroups, filterToolsForOrder } from './serverGroups';
 import {
     getVirtualTools,
     handleVirtualTool,
     ToolCallResult,
 } from './virtualTools';
+import { runScene } from './scenes';
 import type { McpServerConfig, CollectedTool } from './types';
 
 export type { McpServerConfig, CollectedTool };
@@ -24,6 +25,41 @@ export { buildServerConfigs } from './serverConfigs';
 
 /** Max messages kept in the rolling conversation buffer (user + assistant pairs). */
 const HISTORY_MAX = 10;
+
+/**
+ * Strips markdown syntax and emojis from a TTS-bound response.
+ * The LLM is instructed not to use markdown, but this is a safety net
+ * in case it ignores the rule (e.g. after a model update).
+ */
+function stripMarkdownForTts(text: string): string {
+    return (
+        text
+            // Bold / italic: **text**, *text*, __text__, _text_
+            .replace(/\*\*(.+?)\*\*/gs, '$1')
+            .replace(/\*(.+?)\*/gs, '$1')
+            .replace(/__(.+?)__/gs, '$1')
+            .replace(/_(.+?)_/gs, '$1')
+            // Headings: # ## ###
+            .replace(/^#{1,6}\s+/gm, '')
+            // Bullet lists: - item, * item (start of line)
+            .replace(/^[\s]*[-*]\s+/gm, '')
+            // Numbered lists: 1. 2. etc
+            .replace(/^\s*\d+\.\s+/gm, '')
+            // Backticks: `code` and ```blocks```
+            .replace(/```[\s\S]*?```/g, '')
+            .replace(/`(.+?)`/g, '$1')
+            // Hex color codes like #2E8B57 (not useful orally)
+            .replace(/#[0-9A-Fa-f]{6}\b/g, '')
+            // Emojis (broad unicode range)
+            .replace(
+                /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27FF}\u{FE00}-\u{FEFF}]/gu,
+                '',
+            )
+            // Collapse multiple blank lines to one
+            .replace(/\n{3,}/g, '\n\n')
+            .trim()
+    );
+}
 
 export class Orchestrator {
     private openai: OpenAI;
@@ -226,18 +262,29 @@ export class Orchestrator {
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private buildAllTools(order: string): OpenAI.Chat.ChatCompletionTool[] {
-        return [
+    private buildContext(order: string): {
+        tools: OpenAI.Chat.ChatCompletionTool[];
+        activeGroups: string[];
+    } {
+        const groups = resolveGroups(order);
+        const activeGroups = groups.map((g) => g.name);
+        const tools = [
             ...getVirtualTools(),
-            ...filterToolsForOrder(order, this.collectedTools).map((ct) => ({
-                type: 'function' as const,
-                function: {
-                    name: ct.tool.name,
-                    description: ct.tool.description,
-                    parameters: ct.tool.inputSchema as Record<string, unknown>,
-                },
-            })),
+            ...filterToolsForOrder(order, this.collectedTools, groups).map(
+                (ct) => ({
+                    type: 'function' as const,
+                    function: {
+                        name: ct.tool.name,
+                        description: ct.tool.description,
+                        parameters: ct.tool.inputSchema as Record<
+                            string,
+                            unknown
+                        >,
+                    },
+                }),
+            ),
         ];
+        return { tools, activeGroups };
     }
 
     private async runToolCalls(
@@ -245,9 +292,15 @@ export class Orchestrator {
         story: Story | null,
         messages: OpenAI.Chat.ChatCompletionMessageParam[],
     ): Promise<void> {
+        const sceneRunner = (id: string) =>
+            runScene(id, (tool, args) => this.callTool(tool, args));
+
         const toolResults = await Promise.all(
             toolCalls.map(async (toolCall) => {
-                const virtualResult = await handleVirtualTool(toolCall);
+                const virtualResult = await handleVirtualTool(
+                    toolCall,
+                    sceneRunner,
+                );
                 const result =
                     virtualResult ?? (await this.executeToolCall(toolCall));
                 const args = JSON.parse(
@@ -283,13 +336,14 @@ export class Orchestrator {
         }
     }
 
-    private buildSystemPrompt(): string {
+    private buildSystemPrompt(activeGroups: string[] = []): string {
         const memCtx = buildMemoryContext();
         return buildSystemPrompt({
             alwaysMemory: memCtx.alwaysMemory,
             onDemandNamespaces: memCtx.onDemandNamespaces,
             storySummaries: buildStorySummariesContext(),
             entities: this.entitySnapshot || undefined,
+            activeGroups,
         });
     }
 
@@ -304,8 +358,8 @@ export class Orchestrator {
         const story = env.SAVE_STORIES ? new Story() : null;
         Logger.info(`Processing order: "${order}"`);
 
-        const systemPrompt = this.buildSystemPrompt();
-        const allTools = this.buildAllTools(order);
+        const { tools: allTools, activeGroups } = this.buildContext(order);
+        const systemPrompt = this.buildSystemPrompt(activeGroups);
 
         story?.add({
             role: 'system',
@@ -342,7 +396,9 @@ export class Orchestrator {
                 choice.finish_reason === 'stop' ||
                 !assistantMessage.tool_calls
             ) {
-                finalResponse = assistantMessage.content ?? '';
+                finalResponse = stripMarkdownForTts(
+                    assistantMessage.content ?? '',
+                );
                 story?.add({ role: 'assistant', content: finalResponse });
                 break;
             }
@@ -401,8 +457,6 @@ export class Orchestrator {
 
         Logger.info(`Processing order (stream): "${order}"`);
 
-        const systemPrompt = this.buildSystemPrompt();
-
         // Build filter context: current order + all previous user messages in the
         // session so follow-up phrases like "laisse tomber" or "annule" still have
         // access to the same tools as the earlier exchange they refer to.
@@ -414,7 +468,10 @@ export class Orchestrator {
         const filterInput = sessionContext
             ? `${sessionContext} ${order}`
             : order;
-        const allTools = this.buildAllTools(filterInput);
+
+        const { tools: allTools, activeGroups } =
+            this.buildContext(filterInput);
+        const systemPrompt = this.buildSystemPrompt(activeGroups);
 
         story?.add({
             role: 'system',
@@ -505,11 +562,9 @@ export class Orchestrator {
 
                 await this.runToolCalls(toolCalls, story, messages);
             } else {
-                // Final text response — now yield the buffered tokens
-                for (const token of tokenBuffer) {
-                    yield token;
-                }
-                finalResponse = contentAcc;
+                // Final text response — strip markdown then yield
+                finalResponse = stripMarkdownForTts(contentAcc);
+                yield finalResponse;
                 story?.add({ role: 'assistant', content: finalResponse });
                 break;
             }
