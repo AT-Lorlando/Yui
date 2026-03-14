@@ -50,34 +50,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const a = (args ?? {}) as Record<string, unknown>;
 
     try {
-        let text: string;
         const location = a.location ? String(a.location) : undefined;
         const client = await resolveClient(location);
+        let result: object;
 
         switch (name) {
             case 'get_current_weather':
-                text = await client.getCurrentWeather();
+                result = await client.getCurrentWeather();
                 break;
 
             case 'get_today_forecast':
-                text = await client.getTodayForecast();
+                result = await client.getTodayForecast();
                 break;
 
             case 'get_forecast':
-                text = await client.getForecast(
+                result = await client.getForecast(
                     a.days !== undefined ? Number(a.days) : 7,
                 );
                 break;
 
             case 'get_weather_for_date':
-                text = await client.getWeatherForDate(a.date as string);
+                result = await client.getWeatherForDate(a.date as string);
                 break;
 
             default:
                 throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
         }
 
-        return { content: [{ type: 'text', text }] };
+        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         Logger.error(`Tool "${name}" error: ${message}`);

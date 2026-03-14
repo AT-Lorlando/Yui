@@ -31,23 +31,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const a = (args ?? {}) as Record<string, unknown>;
 
     try {
-        let text: string;
+        let result: object;
 
         switch (name) {
             case 'list_calendars':
-                text = await calendar.listCalendars();
+                result = await calendar.listCalendars();
                 break;
 
             case 'get_today':
-                text = await calendar.getToday();
+                result = await calendar.getToday();
                 break;
 
             case 'get_week':
-                text = await calendar.getWeek();
+                result = await calendar.getWeek();
                 break;
 
             case 'get_schedule':
-                text = await calendar.getSchedule({
+                result = await calendar.getSchedule({
                     startDate: a.startDate as string | undefined,
                     endDate: a.endDate as string | undefined,
                     calendarIds: a.calendarIds as string[] | undefined,
@@ -56,14 +56,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
 
             case 'get_event':
-                text = await calendar.getEvent(
+                result = await calendar.getEvent(
                     (a.calendarId as string | undefined) ?? 'primary',
                     a.eventId as string,
                 );
                 break;
 
             case 'create_event':
-                text = await calendar.createEvent({
+                result = await calendar.createEvent({
                     calendarId: a.calendarId as string | undefined,
                     title: a.title as string,
                     startDateTime: a.startDateTime as string | undefined,
@@ -78,7 +78,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
 
             case 'update_event':
-                text = await calendar.updateEvent({
+                result = await calendar.updateEvent({
                     calendarId: a.calendarId as string | undefined,
                     eventId: a.eventId as string,
                     title: a.title as string | undefined,
@@ -93,14 +93,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
 
             case 'delete_event':
-                text = await calendar.deleteEvent(
+                result = await calendar.deleteEvent(
                     (a.calendarId as string | undefined) ?? 'primary',
                     a.eventId as string,
                 );
                 break;
 
             case 'search_events':
-                text = await calendar.searchEvents({
+                result = await calendar.searchEvents({
                     query: a.query as string,
                     calendarId: a.calendarId as string | undefined,
                     maxResults: a.maxResults as number | undefined,
@@ -108,7 +108,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
 
             case 'find_free_slots':
-                text = await calendar.findFreeSlots({
+                result = await calendar.findFreeSlots({
                     date: a.date as string,
                     durationMinutes: a.durationMinutes as number,
                     calendarIds: a.calendarIds as string[] | undefined,
@@ -118,7 +118,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
 
             case 'quick_add_event':
-                text = await calendar.quickAdd(
+                result = await calendar.quickAdd(
                     a.text as string,
                     (a.calendarId as string | undefined) ?? 'primary',
                 );
@@ -128,7 +128,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
         }
 
-        return { content: [{ type: 'text', text }] };
+        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         Logger.error(`Tool "${name}" error: ${message}`);

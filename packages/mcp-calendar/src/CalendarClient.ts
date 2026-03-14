@@ -69,108 +69,66 @@ const RESPONSE_LABEL: Record<string, string> = {
 function formatEvent(
     event: calendar_v3.Schema$Event,
     calendarName?: string,
-): string {
-    const lines: string[] = [];
+): object {
+    const base: Record<string, unknown> = {
+        id:       event.id,
+        title:    event.summary ?? '(Sans titre)',
+        status:   event.status ?? 'confirmed',
+        calendar: calendarName ?? null,
+    };
 
-    const title = event.summary ?? '(Sans titre)';
-    lines.push(`${title} [id: ${event.id}]`);
-
-    if (event.status === 'cancelled') {
-        lines.push('  [Annulé]');
-        return lines.join('\n');
-    }
-    if (event.status === 'tentative') {
-        lines.push('  [Non confirmé]');
-    }
+    if (event.status === 'cancelled') return { ...base, cancelled: true };
 
     // Time
     if (event.start?.date) {
-        // All-day event — Google end date is exclusive, subtract 1 day
+        base.all_day   = true;
+        base.date      = event.start.date;
         const endDateRaw = event.end?.date;
-        let endLabel = '';
         if (endDateRaw && endDateRaw !== event.start.date) {
             const endExclusive = new Date(endDateRaw);
             endExclusive.setDate(endExclusive.getDate() - 1);
-            // Only show end if it differs from start after adjustment
             const endStr = endExclusive.toISOString().split('T')[0];
-            if (endStr !== event.start.date) {
-                endLabel = ` → ${formatDate(endExclusive.toISOString())}`;
-            }
+            if (endStr !== event.start.date) base.end_date = endStr;
         }
-        lines.push(
-            `  Toute la journée — ${formatDate(
-                event.start.date,
-            )}${endLabel}`,
-        );
     } else if (event.start?.dateTime) {
         const start = event.start.dateTime;
-        const end = event.end?.dateTime;
-        const rel = relativeTime(start);
-        const relStr = rel ? ` — ${rel}` : '';
-
-        if (end) {
-            lines.push(
-                `  Horaire : ${formatTime(start)} → ${formatTime(
-                    end,
-                )} (${formatDuration(start, end)})${relStr}`,
-            );
-        } else {
-            lines.push(`  Horaire : ${formatTime(start)}${relStr}`);
-        }
-        lines.push(`  Date : ${formatDate(start)}`);
+        const end   = event.end?.dateTime;
+        base.all_day  = false;
+        base.date     = start.slice(0, 10);
+        base.start    = formatTime(start);
+        base.end      = end ? formatTime(end) : null;
+        base.duration_min = end ? Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000) : null;
+        base.relative = relativeTime(start) || null;
     }
 
-    if (calendarName) lines.push(`  Calendrier : ${calendarName}`);
-    if (event.location) lines.push(`  Lieu : ${event.location}`);
+    if (event.location)   base.location = event.location;
 
     // Attendees
     if (event.attendees && event.attendees.length > 0) {
-        const self = event.attendees.find((a) => a.self);
+        const self   = event.attendees.find((a) => a.self);
         const others = event.attendees.filter((a) => !a.self);
-
-        if (self) {
-            lines.push(
-                `  Vous : ${
-                    RESPONSE_LABEL[self.responseStatus ?? 'needsAction'] ?? '[En attente]'
-                }`,
-            );
-        }
+        if (self) base.my_response = self.responseStatus ?? 'needsAction';
         if (others.length > 0) {
-            const names = others.slice(0, 5).map((a) => {
-                const label =
-                    RESPONSE_LABEL[a.responseStatus ?? 'needsAction'] ?? '[En attente]';
-                return `${a.displayName ?? a.email} ${label}`;
-            });
-            if (others.length > 5) names.push(`+${others.length - 5} autres`);
-            lines.push(`  Participants : ${names.join(', ')}`);
+            base.attendees = others.slice(0, 8).map((a) => ({
+                name:     a.displayName ?? a.email,
+                response: a.responseStatus ?? 'needsAction',
+            }));
         }
     }
 
-    // Google Meet / video conference
-    const meetLink =
-        event.hangoutLink ??
-        event.conferenceData?.entryPoints?.find(
-            (e) => e.entryPointType === 'video',
-        )?.uri;
-    if (meetLink) lines.push(`  Google Meet : ${meetLink}`);
+    // Google Meet
+    const meetLink = event.hangoutLink ?? event.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri;
+    if (meetLink) base.meet_link = meetLink;
 
-    // Description (HTML stripped + truncated)
+    // Description
     if (event.description) {
-        const plain = event.description
-            .replace(/<[^>]*>/g, '')
-            .replace(/\n+/g, ' ')
-            .trim();
-        const truncated =
-            plain.length > 200 ? plain.slice(0, 197) + '...' : plain;
-        if (truncated) lines.push(`  Note : ${truncated}`);
+        const plain = event.description.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
+        if (plain) base.note = plain.length > 200 ? plain.slice(0, 197) + '...' : plain;
     }
 
-    // Recurrence
-    if (event.recurrence?.length) lines.push('  [Récurrent]');
-    else if (event.recurringEventId)
-        lines.push("  [Occurrence d'un événement récurrent]");
+    base.recurring = Boolean(event.recurrence?.length || event.recurringEventId);
 
-    return lines.join('\n');
+    return base;
 }
 
 // ── Date utilities ────────────────────────────────────────────────────────────
@@ -228,20 +186,16 @@ export class CalendarClient {
 
     // ── Calendar list ──────────────────────────────────────────────────────────
 
-    async listCalendars(): Promise<string> {
+    async listCalendars(): Promise<object> {
         const res = await this.cal.calendarList.list({ showHidden: false });
-        const cals = res.data.items ?? [];
-        if (cals.length === 0) return 'Aucun calendrier trouvé.';
-
-        const lines = ['Vos calendriers :\n'];
-        for (const c of cals) {
-            const primary = c.primary ? ' (principal)' : '';
-            lines.push(`• ${c.summary}${primary}`);
-            lines.push(`  ID : ${c.id}`);
-            lines.push(`  Rôle : ${c.accessRole ?? 'unknown'}`);
-            if (c.description) lines.push(`  ${c.description}`);
-        }
-        return lines.join('\n');
+        const cals = (res.data.items ?? []).map((c) => ({
+            id:          c.id,
+            name:        c.summary,
+            primary:     c.primary ?? false,
+            access_role: c.accessRole,
+            description: c.description ?? null,
+        }));
+        return { calendars: cals };
     }
 
     // ── Schedule ───────────────────────────────────────────────────────────────
@@ -255,7 +209,7 @@ export class CalendarClient {
         endDate?: string; // YYYY-MM-DD, defaults to startDate
         calendarIds?: string[];
         maxResults?: number;
-    }): Promise<string> {
+    }): Promise<object> {
         const start = options.startDate ?? todayParis();
         const end = options.endDate ?? start;
         const timeMin = parisToUtcIso(start, '00:00:00');
@@ -325,39 +279,26 @@ export class CalendarClient {
         });
 
         if (allEvents.length === 0) {
-            const label =
-                start === end
-                    ? `le ${formatDate(start)}`
-                    : `du ${formatDate(start)} au ${formatDate(end)}`;
-            return `Aucun événement ${label}.`;
+            return { events: [], start, end };
         }
 
         // Group by day
-        const grouped = new Map<string, EventWithCalendar[]>();
+        const grouped = new Map<string, object[]>();
         for (const ev of allEvents) {
-            const day =
-                ev.start?.date ?? ev.start?.dateTime?.slice(0, 10) ?? 'unknown';
+            const day = ev.start?.date ?? ev.start?.dateTime?.slice(0, 10) ?? 'unknown';
             if (!grouped.has(day)) grouped.set(day, []);
-            grouped.get(day)!.push(ev);
+            grouped.get(day)!.push(formatEvent(ev, ev._calendarName));
         }
 
-        const lines: string[] = [];
-        for (const [day, events] of grouped) {
-            lines.push(`\n--- ${formatDate(day)} ---`);
-            for (const ev of events) {
-                lines.push('');
-                lines.push(formatEvent(ev, ev._calendarName));
-            }
-        }
-
-        return lines.join('\n').trim();
+        const days = Array.from(grouped.entries()).map(([date, events]) => ({ date, events }));
+        return { start, end, days };
     }
 
-    async getToday(): Promise<string> {
+    async getToday(): Promise<object> {
         return this.getSchedule({});
     }
 
-    async getWeek(): Promise<string> {
+    async getWeek(): Promise<object> {
         return this.getSchedule({
             startDate: weekStartParis(),
             endDate: weekEndParis(),
@@ -366,7 +307,7 @@ export class CalendarClient {
 
     // ── Single event ───────────────────────────────────────────────────────────
 
-    async getEvent(calendarId: string, eventId: string): Promise<string> {
+    async getEvent(calendarId: string, eventId: string): Promise<object> {
         const res = await this.cal.events.get({ calendarId, eventId });
         return formatEvent(res.data);
     }
@@ -384,7 +325,7 @@ export class CalendarClient {
         description?: string;
         attendeeEmails?: string[];
         recurrence?: string;
-    }): Promise<string> {
+    }): Promise<object> {
         const calId = options.calendarId ?? 'primary';
 
         const body: calendar_v3.Schema$Event = {
@@ -421,11 +362,7 @@ export class CalendarClient {
             sendUpdates: options.attendeeEmails?.length ? 'all' : 'none',
         });
 
-        return (
-            `Événement créé : ${res.data.summary}\n` +
-            `  ID : ${res.data.id}\n` +
-            `  Lien : ${res.data.htmlLink}`
-        );
+        return { ok: true, id: res.data.id, title: res.data.summary, link: res.data.htmlLink };
     }
 
     // ── Update event ───────────────────────────────────────────────────────────
@@ -441,7 +378,7 @@ export class CalendarClient {
         location?: string;
         description?: string;
         attendeeEmails?: string[];
-    }): Promise<string> {
+    }): Promise<object> {
         const calId = options.calendarId ?? 'primary';
 
         // Fetch current state so we only change what was provided
@@ -483,30 +420,20 @@ export class CalendarClient {
             requestBody: body,
         });
 
-        return (
-            `Événement mis à jour : ${res.data.summary}\n` +
-            `  Lien : ${res.data.htmlLink}`
-        );
+        return { ok: true, id: res.data.id, title: res.data.summary, link: res.data.htmlLink };
     }
 
     // ── Delete event ───────────────────────────────────────────────────────────
 
-    async deleteEvent(calendarId: string, eventId: string): Promise<string> {
-        // Fetch title first for a meaningful confirmation message
+    async deleteEvent(calendarId: string, eventId: string): Promise<object> {
         let title = eventId;
         try {
             const ev = await this.cal.events.get({ calendarId, eventId });
             title = ev.data.summary ?? eventId;
-        } catch {
-            // ignore — we'll still attempt the delete
-        }
+        } catch { /* ignore */ }
 
-        await this.cal.events.delete({
-            calendarId,
-            eventId,
-            sendUpdates: 'all',
-        });
-        return `Événement "${title}" supprimé.`;
+        await this.cal.events.delete({ calendarId, eventId, sendUpdates: 'all' });
+        return { ok: true, deleted: title };
     }
 
     // ── Search ─────────────────────────────────────────────────────────────────
@@ -519,7 +446,7 @@ export class CalendarClient {
         query: string;
         calendarId?: string;
         maxResults?: number;
-    }): Promise<string> {
+    }): Promise<object> {
         const calIds: string[] = [];
         const calNames = new Map<string, string>();
 
@@ -569,18 +496,8 @@ export class CalendarClient {
             return aKey.localeCompare(bKey);
         });
 
-        if (allEvents.length === 0) {
-            return `Aucun événement trouvé pour "${options.query}".`;
-        }
-
-        const lines = [
-            `${allEvents.length} résultat(s) pour "${options.query}" :\n`,
-        ];
-        for (const ev of allEvents) {
-            lines.push(formatEvent(ev, ev._calendarName));
-            lines.push('');
-        }
-        return lines.join('\n').trim();
+        const events = allEvents.map((ev) => formatEvent(ev, ev._calendarName));
+        return { query: options.query, count: events.length, events };
     }
 
     // ── Free / busy ────────────────────────────────────────────────────────────
@@ -595,7 +512,7 @@ export class CalendarClient {
         calendarIds?: string[];
         workdayStart?: number; // hour 0-23, default 9
         workdayEnd?: number; // hour 0-23, default 19
-    }): Promise<string> {
+    }): Promise<object> {
         const { date, durationMinutes } = options;
         const wStart = options.workdayStart ?? 9;
         const wEnd = options.workdayEnd ?? 19;
@@ -674,40 +591,18 @@ export class CalendarClient {
                 free.push({ start: cursor, end: dayEnd });
         }
 
-        if (free.length === 0) {
-            return `Aucun créneau libre d'au moins ${durationMinutes} min le ${formatDate(
-                date,
-            )}.`;
-        }
-
-        const lines = [
-            `Créneaux libres d'au moins ${durationMinutes} min le ${formatDate(
-                date,
-            )} :\n`,
-        ];
-        for (const slot of free) {
-            const dur = formatDuration(
-                slot.start.toISOString(),
-                slot.end.toISOString(),
-            );
-            lines.push(
-                `  • ${formatTime(slot.start.toISOString())} → ${formatTime(
-                    slot.end.toISOString(),
-                )} (${dur})`,
-            );
-        }
-        return lines.join('\n');
+        const slots = free.map((slot) => ({
+            start:        formatTime(slot.start.toISOString()),
+            end:          formatTime(slot.end.toISOString()),
+            duration_min: Math.round((slot.end.getTime() - slot.start.getTime()) / 60000),
+        }));
+        return { date, duration_min: durationMinutes, free_slots: slots };
     }
 
     // ── Quick add ──────────────────────────────────────────────────────────────
 
-    async quickAdd(text: string, calendarId = 'primary'): Promise<string> {
+    async quickAdd(text: string, calendarId = 'primary'): Promise<object> {
         const res = await this.cal.events.quickAdd({ calendarId, text });
-        const ev = res.data;
-        return (
-            `Événement ajouté : ${ev.summary}\n` +
-            `  ID : ${ev.id}\n` +
-            `  Lien : ${ev.htmlLink}`
-        );
+        return { ok: true, id: res.data.id, title: res.data.summary, link: res.data.htmlLink };
     }
 }

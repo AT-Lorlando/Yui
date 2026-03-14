@@ -203,231 +203,148 @@ export class WeatherClient {
 
     // ── Current weather ────────────────────────────────────────────────────────
 
-    async getCurrentWeather(): Promise<string> {
+    async getCurrentWeather(): Promise<object> {
         const data = await this.fetchAll(1);
         const c = data.current;
         const w = wmo(c.weather_code);
+        const sunrise = data.daily.sunrise[0] ? formatTime(data.daily.sunrise[0]) : null;
+        const sunset  = data.daily.sunset[0]  ? formatTime(data.daily.sunset[0])  : null;
 
-        const now = new Intl.DateTimeFormat('fr-FR', {
-            timeZone: TIMEZONE,
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-        }).format(new Date(c.time));
-
-        // Also grab today's sunrise/sunset
-        const sunrise = data.daily.sunrise[0] ? formatTime(data.daily.sunrise[0]) : '—';
-        const sunset = data.daily.sunset[0] ? formatTime(data.daily.sunset[0]) : '—';
-
-        const lines = [
-            `${this.city} — ${now}`,
-            `${w.label}`,
-            `Température : ${Math.round(c.temperature_2m)}°C (ressenti ${Math.round(c.apparent_temperature)}°C)`,
-            `Humidité : ${c.relative_humidity_2m}%`,
-            `Vent : ${Math.round(c.wind_speed_10m)} km/h ${windDir(c.wind_direction_10m)} (rafales ${Math.round(c.wind_gusts_10m)} km/h)`,
-        ];
-
-        if (c.precipitation > 0) {
-            lines.push(`Précipitations en cours : ${c.precipitation} mm`);
-        }
-
-        lines.push(
-            `Nébulosité : ${c.cloud_cover}%`,
-            `Indice UV : ${Math.round(c.uv_index)} (${uvLabel(c.uv_index)})`,
-            `Lever ${sunrise} — Coucher ${sunset}`,
-        );
-
-        return lines.join('\n');
+        return {
+            city:              this.city,
+            time:              formatTime(c.time),
+            condition:         w.label,
+            temperature_c:     Math.round(c.temperature_2m),
+            feels_like_c:      Math.round(c.apparent_temperature),
+            humidity_pct:      c.relative_humidity_2m,
+            precipitation_mm:  c.precipitation,
+            cloud_cover_pct:   c.cloud_cover,
+            wind_kmh:          Math.round(c.wind_speed_10m),
+            wind_direction:    windDir(c.wind_direction_10m),
+            wind_gusts_kmh:    Math.round(c.wind_gusts_10m),
+            uv_index:          Math.round(c.uv_index),
+            uv_label:          uvLabel(c.uv_index),
+            sunrise,
+            sunset,
+        };
     }
 
     // ── Today's hourly forecast ────────────────────────────────────────────────
 
-    async getTodayForecast(): Promise<string> {
+    async getTodayForecast(): Promise<object> {
         const data = await this.fetchAll(2);
         const todayStr = new Date().toLocaleDateString('fr-CA', { timeZone: TIMEZONE });
 
-        // Filter today's hourly data
         const indices: number[] = [];
         for (let i = 0; i < data.hourly.time.length; i++) {
             if (data.hourly.time[i].startsWith(todayStr)) indices.push(i);
         }
 
-        if (indices.length === 0) return 'Données horaires indisponibles pour aujourd\'hui.';
-
-        const lines = [`Prévisions heure par heure — ${formatDate(todayStr)}\n`];
-
-        // Group into 4 time blocks
-        const blocks: Array<{ label: string; hours: number[] }> = [
-            { label: 'Nuit (0h–5h)', hours: [0, 1, 2, 3, 4, 5] },
-            { label: 'Matin (6h–11h)', hours: [6, 7, 8, 9, 10, 11] },
-            { label: 'Après-midi (12h–17h)', hours: [12, 13, 14, 15, 16, 17] },
-            { label: 'Soir (18h–23h)', hours: [18, 19, 20, 21, 22, 23] },
+        const blockDefs = [
+            { id: 'night',     label: 'Nuit',       hours: [0,1,2,3,4,5] },
+            { id: 'morning',   label: 'Matin',      hours: [6,7,8,9,10,11] },
+            { id: 'afternoon', label: 'Après-midi', hours: [12,13,14,15,16,17] },
+            { id: 'evening',   label: 'Soir',       hours: [18,19,20,21,22,23] },
         ];
 
-        for (const block of blocks) {
-            const blockIndices = indices.filter((i) => {
-                const h = new Date(data.hourly.time[i]).getHours();
-                return block.hours.includes(h);
-            });
-            if (blockIndices.length === 0) continue;
+        const periods = blockDefs.map((block) => {
+            const bi = indices.filter((i) => block.hours.includes(new Date(data.hourly.time[i]).getHours()));
+            if (bi.length === 0) return null;
+            const peakIdx   = bi[Math.floor(bi.length / 2)];
+            const temps     = bi.map((i) => data.hourly.temperature_2m[i]);
+            const precipSum = bi.map((i) => data.hourly.precipitation[i]).reduce((a, b) => a + b, 0);
+            return {
+                period:               block.id,
+                label:                block.label,
+                condition:            wmo(data.hourly.weather_code[peakIdx]).label,
+                temp_min_c:           Math.round(Math.min(...temps)),
+                temp_max_c:           Math.round(Math.max(...temps)),
+                precipitation_prob:   Math.max(...bi.map((i) => data.hourly.precipitation_probability[i])),
+                precipitation_mm:     Math.round(precipSum * 10) / 10,
+                wind_kmh:             Math.round(data.hourly.wind_speed_10m[peakIdx]),
+            };
+        }).filter(Boolean);
 
-            // Pick representative hour (middle of block or first available)
-            const peakIdx = blockIndices[Math.floor(blockIndices.length / 2)];
-
-            const temps = blockIndices.map((i) => data.hourly.temperature_2m[i]);
-            const minT = Math.round(Math.min(...temps));
-            const maxT = Math.round(Math.max(...temps));
-            const maxPrecipProb = Math.max(
-                ...blockIndices.map((i) => data.hourly.precipitation_probability[i]),
-            );
-            const totalPrecip = blockIndices
-                .map((i) => data.hourly.precipitation[i])
-                .reduce((a, b) => a + b, 0);
-            const w = wmo(data.hourly.weather_code[peakIdx]);
-            const wind = Math.round(data.hourly.wind_speed_10m[peakIdx]);
-
-            const precipStr =
-                maxPrecipProb > 15
-                    ? ` pluie ${maxPrecipProb}%${totalPrecip > 0.1 ? ` (${totalPrecip.toFixed(1)}mm)` : ''}`
-                    : '';
-            const windStr = wind > 20 ? ` vent ${wind}km/h` : '';
-
-            lines.push(
-                `${block.label}\n  ${w.label} · ${minT === maxT ? `${minT}°C` : `${minT}–${maxT}°C`}${precipStr}${windStr}`,
-            );
-        }
-
-        return lines.join('\n');
+        return { city: this.city, date: todayStr, periods };
     }
 
     // ── Daily forecast ────────────────────────────────────────────────────────
 
-    async getForecast(days = 7): Promise<string> {
+    async getForecast(days = 7): Promise<object> {
         const cappedDays = Math.min(days, 14);
         const data = await this.fetchAll(cappedDays);
         const d = data.daily;
 
-        const lines = [`Prévisions ${cappedDays} jours — ${this.city}\n`];
+        const forecast = d.time.map((date, i) => ({
+            date,
+            condition:          wmo(d.weather_code[i]).label,
+            temp_min_c:         Math.round(d.temperature_2m_min[i]),
+            temp_max_c:         Math.round(d.temperature_2m_max[i]),
+            precipitation_prob: d.precipitation_probability_max[i],
+            precipitation_mm:   Math.round(d.precipitation_sum[i] * 10) / 10,
+            wind_max_kmh:       Math.round(d.wind_speed_10m_max[i]),
+            sunrise:            d.sunrise[i] ? formatTime(d.sunrise[i]) : null,
+            sunset:             d.sunset[i]  ? formatTime(d.sunset[i])  : null,
+        }));
 
-        for (let i = 0; i < d.time.length; i++) {
-            const w = wmo(d.weather_code[i]);
-            const max = Math.round(d.temperature_2m_max[i]);
-            const min = Math.round(d.temperature_2m_min[i]);
-            const precipProb = d.precipitation_probability_max[i];
-            const precipSum = d.precipitation_sum[i];
-            const wind = Math.round(d.wind_speed_10m_max[i]);
-            const dateLabel = formatShortDate(d.time[i]);
-
-            const precipStr =
-                precipProb > 15
-                    ? ` pluie ${precipProb}%${precipSum > 0.1 ? ` (${precipSum.toFixed(1)}mm)` : ''}`
-                    : '';
-            const windStr = wind > 25 ? ` vent ${wind}km/h` : '';
-
-            lines.push(
-                `• ${dateLabel} ${w.label} · ${min}°/${max}°${precipStr}${windStr}`,
-            );
-        }
-
-        return lines.join('\n');
+        return { city: this.city, days: cappedDays, forecast };
     }
 
     // ── Weather for a specific date ────────────────────────────────────────────
 
-    async getWeatherForDate(dateStr: string): Promise<string> {
-        // Validate: only future dates up to 14 days are supported
+    async getWeatherForDate(dateStr: string): Promise<object> {
         const today = new Date().toLocaleDateString('fr-CA', { timeZone: TIMEZONE });
         if (dateStr < today) {
-            return `Les données météo historiques ne sont pas disponibles. Seules les prévisions futures (jusqu'à 14 jours) sont supportées.`;
+            return { error: 'Données historiques non disponibles. Prévisions jusqu\'à 14 jours.' };
         }
 
-        const daysFromNow =
-            Math.ceil(
-                (new Date(`${dateStr}T12:00:00`).getTime() - Date.now()) / 86400000,
-            ) + 1;
-
+        const daysFromNow = Math.ceil((new Date(`${dateStr}T12:00:00`).getTime() - Date.now()) / 86400000) + 1;
         if (daysFromNow > 14) {
-            return `Les prévisions sont disponibles jusqu'à 14 jours. La date ${formatDate(dateStr)} est hors de portée.`;
+            return { error: `Date hors de portée (max 14 jours).` };
         }
 
         const data = await this.fetchAll(Math.min(daysFromNow + 1, 14));
-        const d = data.daily;
+        const d    = data.daily;
         const dayIdx = d.time.indexOf(dateStr);
+        if (dayIdx === -1) return { error: `Pas de données pour ${dateStr}.` };
 
-        if (dayIdx === -1) {
-            return `Aucune donnée météo trouvée pour le ${formatDate(dateStr)}.`;
-        }
-
-        const w = wmo(d.weather_code[dayIdx]);
-        const max = Math.round(d.temperature_2m_max[dayIdx]);
-        const min = Math.round(d.temperature_2m_min[dayIdx]);
-        const precipProb = d.precipitation_probability_max[dayIdx];
-        const precipSum = d.precipitation_sum[dayIdx];
-        const wind = Math.round(d.wind_speed_10m_max[dayIdx]);
-        const uv = Math.round(d.uv_index_max[dayIdx]);
-        const sunrise = d.sunrise[dayIdx] ? formatTime(d.sunrise[dayIdx]) : '—';
-        const sunset = d.sunset[dayIdx] ? formatTime(d.sunset[dayIdx]) : '—';
-
-        const lines = [
-            `Météo du ${formatDate(dateStr)} — ${this.city}`,
-            `${w.label}`,
-            `Température : ${min}°C / ${max}°C`,
-        ];
-
-        if (precipProb > 15) {
-            lines.push(
-                `Précipitations : ${precipProb}% de chances${precipSum > 0.1 ? ` (${precipSum.toFixed(1)} mm)` : ''}`,
-            );
-        } else {
-            lines.push('Pas de précipitations significatives prévues');
-        }
-
-        lines.push(
-            `Vent max : ${wind} km/h`,
-            `UV max : ${uv} (${uvLabel(uv)})`,
-            `Lever ${sunrise} — Coucher ${sunset}`,
-        );
-
-        // Add hourly blocks for that day
         const dayIndices: number[] = [];
         for (let i = 0; i < data.hourly.time.length; i++) {
             if (data.hourly.time[i].startsWith(dateStr)) dayIndices.push(i);
         }
 
-        if (dayIndices.length > 0) {
-            lines.push('\nDétail par période :');
-            const periods = [
-                { label: 'Matin (8h–12h)', hours: [8, 9, 10, 11] },
-                { label: 'Après-midi (13h–18h)', hours: [13, 14, 15, 16, 17, 18] },
-                { label: 'Soirée (19h–22h)', hours: [19, 20, 21, 22] },
-            ];
+        const periodDefs = [
+            { id: 'morning',   hours: [8,9,10,11] },
+            { id: 'afternoon', hours: [13,14,15,16,17,18] },
+            { id: 'evening',   hours: [19,20,21,22] },
+        ];
+        const periods = periodDefs.map(({ id, hours }) => {
+            const pi = dayIndices.filter((i) => hours.includes(new Date(data.hourly.time[i]).getHours()));
+            if (pi.length === 0) return null;
+            const pk = pi[Math.floor(pi.length / 2)];
+            return {
+                period:             id,
+                condition:          wmo(data.hourly.weather_code[pk]).label,
+                temp_c:             Math.round(pi.map((i) => data.hourly.temperature_2m[i]).reduce((a,b)=>a+b,0)/pi.length),
+                precipitation_prob: Math.max(...pi.map((i) => data.hourly.precipitation_probability[i])),
+                wind_kmh:           Math.round(data.hourly.wind_speed_10m[pk]),
+            };
+        }).filter(Boolean);
 
-            for (const period of periods) {
-                const pIdx = dayIndices.filter((i) => {
-                    const h = new Date(data.hourly.time[i]).getHours();
-                    return period.hours.includes(h);
-                });
-                if (pIdx.length === 0) continue;
-
-                const peakIdx = pIdx[Math.floor(pIdx.length / 2)];
-                const avgTemp = Math.round(
-                    pIdx.map((i) => data.hourly.temperature_2m[i]).reduce((a, b) => a + b, 0) /
-                        pIdx.length,
-                );
-                const maxProb = Math.max(...pIdx.map((i) => data.hourly.precipitation_probability[i]));
-                const pw = wmo(data.hourly.weather_code[peakIdx]);
-                const pWind = Math.round(data.hourly.wind_speed_10m[peakIdx]);
-
-                const precipStr = maxProb > 15 ? ` · pluie ${maxProb}%` : '';
-                const windStr = pWind > 25 ? ` · vent ${pWind}km/h` : '';
-
-                lines.push(`  • ${period.label} : ${pw.label} ${avgTemp}°C${precipStr}${windStr}`);
-            }
-        }
-
-        return lines.join('\n');
+        return {
+            city:               this.city,
+            date:               dateStr,
+            condition:          wmo(d.weather_code[dayIdx]).label,
+            temp_min_c:         Math.round(d.temperature_2m_min[dayIdx]),
+            temp_max_c:         Math.round(d.temperature_2m_max[dayIdx]),
+            precipitation_prob: d.precipitation_probability_max[dayIdx],
+            precipitation_mm:   Math.round(d.precipitation_sum[dayIdx] * 10) / 10,
+            wind_max_kmh:       Math.round(d.wind_speed_10m_max[dayIdx]),
+            uv_index:           Math.round(d.uv_index_max[dayIdx]),
+            uv_label:           uvLabel(d.uv_index_max[dayIdx]),
+            sunrise:            d.sunrise[dayIdx] ? formatTime(d.sunrise[dayIdx]) : null,
+            sunset:             d.sunset[dayIdx]  ? formatTime(d.sunset[dayIdx])  : null,
+            periods,
+        };
     }
 }

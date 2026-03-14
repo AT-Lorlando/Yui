@@ -106,6 +106,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 }
             }
 
+            case 'turn_on_light': {
+                const lightId = Number((args as any).lightId);
+                await hue.setLightState(lightId, true);
+                store.updateState(lightId, { on: true });
+                return { content: [{ type: 'text', text: `Light ${lightId} turned on.` }] };
+            }
+
+            case 'turn_off_light': {
+                const lightId = Number((args as any).lightId);
+                await hue.setLightState(lightId, false);
+                store.updateState(lightId, { on: false });
+                return { content: [{ type: 'text', text: `Light ${lightId} turned off.` }] };
+            }
+
+            case 'set_brightness': {
+                const lightId = Number((args as any).lightId);
+                const brightness = Number((args as any).brightness);
+                await hue.setLightBrightness(lightId, brightness);
+                store.updateState(lightId, { brightness });
+                return { content: [{ type: 'text', text: `Light ${lightId} brightness set to ${brightness}%.` }] };
+            }
+
+            case 'set_color': {
+                const lightId = Number((args as any).lightId);
+                const color = String((args as any).color);
+                await hue.setLightColor(lightId, color);
+                return { content: [{ type: 'text', text: `Light ${lightId} color set to ${color}.` }] };
+            }
+
             case 'set_room_palette': {
                 const room = String((args as any).room);
                 const colors = (args as any).colors as string[];

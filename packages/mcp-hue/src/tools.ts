@@ -101,6 +101,54 @@ export function buildHueTools(roomNames: string[], lightNames: string[] = []) {
             },
         },
 
+        // ── Individual light by ID (used by the HTTP /devices API) ───────────
+        {
+            name: 'turn_on_light',
+            description: 'Allume une lampe individuelle par son ID numérique.',
+            inputSchema: {
+                type: 'object' as const,
+                properties: {
+                    lightId: { type: 'number', description: 'ID numérique de la lampe' },
+                },
+                required: ['lightId'],
+            },
+        },
+        {
+            name: 'turn_off_light',
+            description: 'Éteint une lampe individuelle par son ID numérique.',
+            inputSchema: {
+                type: 'object' as const,
+                properties: {
+                    lightId: { type: 'number', description: 'ID numérique de la lampe' },
+                },
+                required: ['lightId'],
+            },
+        },
+        {
+            name: 'set_brightness',
+            description: 'Règle la luminosité d\'une lampe individuelle par son ID (0-100 %).',
+            inputSchema: {
+                type: 'object' as const,
+                properties: {
+                    lightId: { type: 'number', description: 'ID numérique de la lampe' },
+                    brightness: { type: 'number', minimum: 0, maximum: 100, description: 'Luminosité 0-100 %' },
+                },
+                required: ['lightId', 'brightness'],
+            },
+        },
+        {
+            name: 'set_color',
+            description: 'Change la couleur d\'une lampe individuelle par son ID.',
+            inputSchema: {
+                type: 'object' as const,
+                properties: {
+                    lightId: { type: 'number', description: 'ID numérique de la lampe' },
+                    color: { type: 'string', description: 'Couleur hex, ex : "#FF5500"' },
+                },
+                required: ['lightId', 'color'],
+            },
+        },
+
         // ── Diagnostics ───────────────────────────────────────────────────────
         {
             name: 'list_lights',
