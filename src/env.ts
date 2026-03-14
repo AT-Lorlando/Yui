@@ -14,6 +14,13 @@ export interface Env {
     NUKI_HOST: string;
     NUKI_PORT: string;
     SAVE_STORIES: boolean;
+    // Presence detection
+    HOME_LAT: string | undefined;
+    HOME_LNG: string | undefined;
+    PHONE_MAC: string | undefined;
+    PRESENCE_AWAY_TIMEOUT_MIN: string;
+    PRESENCE_ARRIVAL_RADIUS_M: string;
+    PRESENCE_DEPARTURE_RADIUS_M: string;
 }
 
 export const env: Env = {
@@ -30,6 +37,13 @@ export const env: Env = {
     NUKI_HOST: process.env.NUKI_HOST as string,
     NUKI_PORT: process.env.NUKI_PORT ?? '8080',
     SAVE_STORIES: process.env.SAVE_STORIES === 'true',
+    HOME_LAT: process.env.HOME_LAT,
+    HOME_LNG: process.env.HOME_LNG,
+    PHONE_MAC: process.env.PHONE_MAC,
+    PRESENCE_AWAY_TIMEOUT_MIN: process.env.PRESENCE_AWAY_TIMEOUT_MIN ?? '15',
+    PRESENCE_ARRIVAL_RADIUS_M: process.env.PRESENCE_ARRIVAL_RADIUS_M ?? '200',
+    PRESENCE_DEPARTURE_RADIUS_M:
+        process.env.PRESENCE_DEPARTURE_RADIUS_M ?? '500',
 };
 
 export default env;

@@ -81,7 +81,10 @@ module.exports = {
                 WHISPER_MODEL: 'large-v3-turbo',
                 WHISPER_LANG: 'fr',
                 SPEAK_PORT: '3001',
-                TRIGGER_WORD: 'Lunix',
+                WAKEWORD_NAME: 'yui',
+                TRIGGER_WORD: 'Yui',
+                PORCUPINE_ACCESS_KEY: '',
+                PORCUPINE_MODEL_PATH: 'assets/wakeword/yui.ppn',
                 // VAD thresholds — calibrated from observed noise floor (avg≈238, peak≈357)
                 // Set SPEECH_THRESHOLD >> noise peak to avoid false triggers
                 SPEECH_THRESHOLD: '1000',

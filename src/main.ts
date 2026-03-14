@@ -2,7 +2,9 @@ import './env'; // load env first
 import http from 'http';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
 import { InputSource, StdinSource, HttpSource } from './input';
-import { initScheduler } from './orchestrator/scheduler';
+import { initScheduler, type OutputChannel } from './orchestrator/scheduler';
+import { sendNotification } from './orchestrator/notify';
+import { PresenceManager } from './orchestrator/presence';
 import {
     listScenes,
     createScene,
@@ -56,13 +58,22 @@ async function main() {
     const orchestrator = new Orchestrator(servers);
     await orchestrator.init();
 
-    const handler = (order: string, reset?: boolean) =>
-        orchestrator.processOrder(order, reset);
+    const handler = (
+        order: string,
+        reset?: boolean,
+        outputChannel?: import('./orchestrator/scheduler').OutputChannel,
+    ) => orchestrator.processOrder(order, reset, outputChannel);
     const streamHandler: import('./input/InputSource').StreamHandler = (
         order,
         options,
         reset,
-    ) => orchestrator.processOrderStream(order, options, reset);
+    ) =>
+        orchestrator.processOrderStream(
+            order,
+            options,
+            reset,
+            options?.outputChannel,
+        );
     const statusHandler = () => orchestrator.getStatus();
     const deviceHandler = (toolName: string, args: Record<string, unknown>) =>
         orchestrator.callTool(toolName, args);
@@ -80,8 +91,24 @@ async function main() {
             orchestrator.callTool(name, args),
     };
 
-    // Scheduler: fires cron jobs, speaks responses via voice pipeline
-    initScheduler(handler, speakViaPipeline);
+    // Scheduler: fires cron jobs, dispatches response to the configured channel
+    async function dispatchOutput(
+        text: string,
+        channel: OutputChannel,
+    ): Promise<void> {
+        if (channel === 'cast') return speakViaPipeline(text);
+        if (channel === 'notify') return sendNotification(text);
+        // 'none' → silent automation, no output
+    }
+    initScheduler(handler, dispatchOutput);
+
+    // Presence manager — detects departure (MAC) and arrival (GPS)
+    // Triggers scenes directly — no LLM involved
+    const presence = new PresenceManager((id) => runScene(id, deviceHandler));
+    presence.start();
+
+    const locationHandler = (lat: number, lng: number, accuracy: number) =>
+        presence.handleLocation(lat, lng, accuracy);
 
     const sources: InputSource[] = [new StdinSource(), new HttpSource()];
     for (const source of sources) {
@@ -92,11 +119,13 @@ async function main() {
             deviceHandler,
             scenesHandler,
             toolsHandler,
+            locationHandler,
         );
     }
 
     const shutdown = async (signal: string) => {
         Logger.info(`Received ${signal}, shutting down…`);
+        presence.stop();
         for (const source of sources) {
             await source.stop();
         }
