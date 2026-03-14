@@ -27,10 +27,13 @@ _REST_URL = f'http://{_TV_IP}:8001/api/v2/'
 
 
 def _is_on() -> bool:
-    """Returns True if the TV REST API responds (TV is on)."""
+    """Returns True if the TV PowerState is 'on' (not standby)."""
     try:
         r = requests.get(_REST_URL, timeout=2.5)
-        return r.status_code == 200
+        if r.status_code != 200:
+            return False
+        state = r.json().get('device', {}).get('PowerState', 'on')
+        return state == 'on'
     except Exception:
         return False
 

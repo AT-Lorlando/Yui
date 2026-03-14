@@ -104,6 +104,41 @@ export const CHROMECAST_TOOLS = [
             required: ['level'],
         },
     },
+    // ── Media library (hidden from LLM — orchestrator/scenes only) ───────────
+    {
+        name: 'list_media',
+        description: 'Lister les médias locaux disponibles (wallpapers, vidéos).',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {
+                type: { type: 'string', enum: ['wallpaper', 'video', 'all'] },
+            },
+            required: [],
+        },
+    },
+    {
+        name: 'cast_wallpaper',
+        description: 'Caster un fond d\'écran local sur le Chromecast. Sans argument = aléatoire.',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {
+                file: { type: 'string', description: 'Nom du fichier (ex: "photo.jpg"). Optionnel.' },
+            },
+            required: [],
+        },
+    },
+    {
+        name: 'cast_video',
+        description: 'Caster une vidéo locale sur le Chromecast. Sans argument = aléatoire.',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {
+                file: { type: 'string', description: 'Nom du fichier (ex: "film.mp4"). Optionnel.' },
+            },
+            required: [],
+        },
+    },
+
     {
         name: 'tv_mute',
         description: 'Mute or unmute the TV.',

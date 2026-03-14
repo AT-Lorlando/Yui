@@ -35,9 +35,16 @@ PORT = int(sys.argv[2])
 CMD  = sys.argv[3]
 
 _MEDIA_TYPES = {
+    # Video
     'mp4': 'video/mp4', 'webm': 'video/webm', 'mkv': 'video/x-matroska',
-    'mp3': 'audio/mpeg', 'aac': 'audio/aac',
+    'mov': 'video/quicktime', 'avi': 'video/x-msvideo', 'm4v': 'video/mp4',
+    # Audio
+    'mp3': 'audio/mpeg', 'aac': 'audio/aac', 'flac': 'audio/flac', 'wav': 'audio/wav',
+    # Stream
     'm3u8': 'application/x-mpegURL', 'ts': 'video/mp2t',
+    # Images
+    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+    'gif': 'image/gif', 'webp': 'image/webp', 'avif': 'image/avif',
 }
 
 _NAMED_SERVICES = {'netflix', 'crunchyroll', 'disney', 'prime'}
@@ -92,13 +99,24 @@ def cmd_service(service: str, title: str | None) -> str:
     return dial.launch(HOST, service)
 
 
+_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'}
+
 def cmd_media(url: str) -> str:
     ext = url.split('?')[0].rsplit('.', 1)[-1].lower()
     content_type = _MEDIA_TYPES.get(ext, 'video/mp4')
+    is_image = content_type in _IMAGE_TYPES
+
     cast = _connect_cast()
     mc = cast.media_controller
-    mc.play_media(url, content_type)
+    mc.play_media(
+        url,
+        content_type,
+        stream_type='BUFFERED' if is_image else 'BUFFERED',
+    )
     mc.block_until_active(timeout=10)
+    if is_image:
+        mc.play()
+        time.sleep(1)
     return f'Casting media: {url}'
 
 

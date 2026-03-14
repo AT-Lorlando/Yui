@@ -2,6 +2,7 @@ import http from 'http';
 import dgram from 'dgram';
 import * as fs from 'fs';
 import * as path from 'path';
+import WebSocket from 'ws';
 import Logger from './logger';
 
 const TOKEN_FILE = path.resolve(process.cwd(), 'data/samsung-tv-token.json');
@@ -56,57 +57,72 @@ export class TvController {
         this.mac = mac;
     }
 
-    /** Returns true if the TV WebSocket API responds (= TV is on). */
+    /** Returns true if the TV PowerState is 'on' (not standby). */
     async isOn(): Promise<boolean> {
         return new Promise((resolve) => {
             const req = http.get(
                 `http://${this.tvIp}:8001/api/v2/`,
                 { timeout: 2500 },
-                (res) => { resolve(res.statusCode === 200); res.resume(); },
+                (res) => {
+                    if (res.statusCode !== 200) { res.resume(); resolve(false); return; }
+                    let body = '';
+                    res.on('data', (chunk) => { body += chunk; });
+                    res.on('end', () => {
+                        try {
+                            const state = JSON.parse(body)?.device?.PowerState ?? 'on';
+                            resolve(state === 'on');
+                        } catch {
+                            resolve(false);
+                        }
+                    });
+                },
             );
             req.on('error', () => resolve(false));
             req.on('timeout', () => { req.destroy(); resolve(false); });
         });
     }
 
-    private sendKeys(keys: string[]): Promise<void> {
+    private sendKeys(keys: string[], msPerKey = 150): Promise<void> {
         if (keys.length === 0) return Promise.resolve();
         return new Promise((resolve, reject) => {
             const appName = Buffer.from('Yui').toString('base64');
             const token   = loadToken();
-            const url     = `ws://${this.tvIp}:8001/api/v2/channels/samsung.remote.control`
+            const url     = `wss://${this.tvIp}:8002/api/v2/channels/samsung.remote.control`
                           + `?name=${appName}${token ? `&token=${token}` : ''}`;
 
-            const ws = new WebSocket(url);
+            const ws = new WebSocket(url, { rejectUnauthorized: false });
             let done = false;
 
-            ws.addEventListener('open', async () => {
+            ws.on('open', async () => {
                 for (const key of keys) {
                     ws.send(JSON.stringify({
                         method: 'ms.remote.control',
                         params: { Cmd: 'Click', DataOfCmd: key, TypeOfRemote: 'SendRemoteKey' },
                     }));
-                    await new Promise(r => setTimeout(r, 150));
+                    await new Promise(r => setTimeout(r, msPerKey));
                 }
-                ws.close();
+                // Wait for TV to process the last key before closing
+                await new Promise(r => setTimeout(r, 300));
                 if (!done) { done = true; resolve(); }
+                try { ws.close(); } catch { /* ignore */ }
             });
 
-            ws.addEventListener('message', (e: MessageEvent) => {
+            ws.on('message', (data: Buffer) => {
                 try {
-                    const data = JSON.parse(e.data as string);
-                    const t = data?.data?.token;
+                    const d = JSON.parse(data.toString());
+                    const t = d?.data?.token;
                     if (t) saveToken(String(t));
                 } catch { /* ignore */ }
             });
 
-            ws.addEventListener('error', (e: Event) => {
-                if (!done) { done = true; reject(new Error(`TV WebSocket error: ${String(e)}`)); }
+            ws.on('error', () => {
+                // If we already resolved (keys were sent), ignore connection drops
+                if (!done) { done = true; reject(new Error('TV WebSocket connection failed')); }
             });
 
             // Safety timeout
             setTimeout(() => {
-                if (!done) { done = true; ws.close(); resolve(); }
+                if (!done) { done = true; resolve(); try { ws.close(); } catch { /* ignore */ } }
             }, 8000);
         });
     }
@@ -133,19 +149,12 @@ export class TvController {
     }
 
     /**
-     * Power off the TV. Tries KEY_POWEROFF first, falls back to KEY_POWER toggle.
+     * Power off the TV via KEY_POWER toggle.
      * No-op if TV is already off.
      */
     async powerOff(): Promise<string> {
         if (!(await this.isOn())) return 'TV already off.';
-        await this.sendKeys(['KEY_POWEROFF']);
-        // Give TV 2s to react
-        await new Promise(r => setTimeout(r, 2000));
-        if (await this.isOn()) {
-            // KEY_POWEROFF didn't work — try toggle
-            Logger.warn('KEY_POWEROFF had no effect, trying KEY_POWER toggle');
-            await this.sendKeys(['KEY_POWER']);
-        }
+        await this.sendKeys(['KEY_POWER']);
         return 'TV turned off.';
     }
 

@@ -10,7 +10,7 @@ import {
     ErrorCode,
     McpError,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ChromecastController } from './ChromecastController';
+import { ChromecastController, listMediaFiles } from './ChromecastController';
 import { TvController } from './TvController';
 import { CHROMECAST_TOOLS } from './tools';
 import Logger from './logger';
@@ -67,6 +67,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
             case 'cast_stop': {
                 return { content: [{ type: 'text', text: await chromecast.castStop() }] };
+            }
+
+            case 'list_media': {
+                const type = (args as any)?.type as 'wallpaper' | 'video' | 'all' | undefined;
+                return { content: [{ type: 'text', text: JSON.stringify(listMediaFiles(type ?? 'all')) }] };
+            }
+
+            case 'cast_wallpaper': {
+                const file = (args as any)?.file as string | undefined;
+                return { content: [{ type: 'text', text: await chromecast.castWallpaper(file) }] };
+            }
+
+            case 'cast_video': {
+                const file = (args as any)?.file as string | undefined;
+                return { content: [{ type: 'text', text: await chromecast.castVideo(file) }] };
             }
 
             case 'tv_on': {
