@@ -6,20 +6,24 @@ import Logger from '../logger';
 
 const SCHEDULES_FILE = path.resolve(process.cwd(), 'data/schedules.json');
 
+export type OutputChannel = 'cast' | 'notify' | 'none';
+
 export interface Schedule {
     id: string;
     name: string;
     cron: string;
     prompt: string;
     enabled: boolean;
+    output?: OutputChannel;
+    oneshot?: boolean;
 }
 
 type OrderFn = (prompt: string) => Promise<string>;
-type SpeakFn = (text: string) => Promise<void>;
+export type OutputFn = (text: string, channel: OutputChannel) => Promise<void>;
 
 const _tasks = new Map<string, ReturnType<typeof cron.schedule>>();
 let _onOrder: OrderFn | null = null;
-let _onSpeak: SpeakFn | null = null;
+let _onOutput: OutputFn | null = null;
 
 function ensureDataDir(): void {
     const dir = path.dirname(SCHEDULES_FILE);
@@ -59,9 +63,16 @@ function startTask(schedule: Schedule): void {
             if (!_onOrder) return;
             try {
                 const response = await _onOrder(schedule.prompt);
-                if (_onSpeak && response) await _onSpeak(response);
+                if (_onOutput && response)
+                    await _onOutput(response, schedule.output ?? 'cast');
             } catch (err) {
                 Logger.error(`Cron task "${schedule.name}" failed: ${err}`);
+            }
+            if (schedule.oneshot) {
+                deleteSchedule(schedule.id);
+                Logger.info(
+                    `One-shot schedule "${schedule.name}" completed and removed.`,
+                );
             }
         },
         { timezone: 'Europe/Paris' },
@@ -72,12 +83,12 @@ function startTask(schedule: Schedule): void {
 
 /**
  * Initialize the scheduler. Must be called once on startup.
- * @param onOrder  Called with the schedule's prompt — returns Yui's response text
- * @param onSpeak  Called with the response text to speak it (e.g. POST to voice pipeline)
+ * @param onOrder   Called with the schedule's prompt — returns Yui's response text
+ * @param onOutput  Called with the response text and output channel
  */
-export function initScheduler(onOrder: OrderFn, onSpeak: SpeakFn): void {
+export function initScheduler(onOrder: OrderFn, onOutput: OutputFn): void {
     _onOrder = onOrder;
-    _onSpeak = onSpeak;
+    _onOutput = onOutput;
 
     const schedules = loadSchedules();
     for (const s of schedules) {
@@ -92,6 +103,8 @@ export function addSchedule(
     name: string,
     cronExpr: string,
     prompt: string,
+    output?: OutputChannel,
+    oneshot?: boolean,
 ): Schedule | string {
     if (!cron.validate(cronExpr)) {
         return `Expression cron invalide : "${cronExpr}"`;
@@ -103,6 +116,8 @@ export function addSchedule(
         cron: cronExpr,
         prompt,
         enabled: true,
+        ...(output ? { output } : {}),
+        ...(oneshot ? { oneshot } : {}),
     };
 
     const schedules = loadSchedules();
@@ -163,7 +178,9 @@ export function listSchedules(): string {
             (s) =>
                 `[${s.id}] "${s.name}" — ${s.cron} — ${
                     s.enabled ? '✓ actif' : '✗ désactivé'
-                }\n  → "${s.prompt}"`,
+                } — ${s.oneshot ? '[oneshot]' : '[récurrent]'}\n  → "${
+                    s.prompt
+                }"`,
         )
         .join('\n');
 }

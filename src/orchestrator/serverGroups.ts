@@ -18,6 +18,7 @@ export const SERVER_GROUPS: ServerGroup[] = [
             'mcp-somfy',
             'mcp-spotify',
             'mcp-chromecast',
+            'mcp-timer',
         ],
         keywords: [
             // lights
@@ -92,6 +93,17 @@ export const SERVER_GROUPS: ServerGroup[] = [
             'repeat',
             'met',
             'mettre',
+            // timers
+            'minuteur',
+            'timer',
+            'chrono',
+            'compte à rebours',
+            'sonne',
+            'sonner',
+            'dans',
+            'minutes',
+            'heures',
+            'secondes',
             // scenes
             'scène',
             'scene',

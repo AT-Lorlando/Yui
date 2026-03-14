@@ -123,7 +123,7 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
             function: {
                 name: 'schedule_add',
                 description:
-                    'Créer une tâche planifiée (cron job) — ex: rappels, automatisations récurrentes',
+                    'Créer une tâche planifiée (cron job) — ex: rappels, automatisations récurrentes ou actions différées uniques',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -134,15 +134,25 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
                         cron: {
                             type: 'string',
                             description:
-                                'Expression cron (ex: "30 8 * * 1-5" = lun-ven 8h30)',
+                                'Expression cron (ex: "30 8 * * 1-5" = lun-ven 8h30). Optionnel si in_minutes est fourni.',
                         },
                         prompt: {
                             type: 'string',
                             description:
                                 'Ordre à envoyer à Yui quand le cron se déclenche',
                         },
+                        oneshot: {
+                            type: 'boolean',
+                            description:
+                                'true pour un rappel/action unique (auto-supprimé après déclenchement). false ou absent = récurrent.',
+                        },
+                        in_minutes: {
+                            type: 'number',
+                            description:
+                                'Déclencher dans X minutes (calculé automatiquement, implique oneshot=true). Alternative à une expression cron fixe.',
+                        },
                     },
-                    required: ['name', 'cron', 'prompt'],
+                    required: ['name', 'prompt'],
                 },
             },
         },
@@ -221,6 +231,7 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
 export async function handleVirtualTool(
     toolCall: OpenAI.Chat.ChatCompletionMessageToolCall,
     sceneRunner?: SceneRunner,
+    outputChannel: import('./scheduler').OutputChannel = 'cast',
 ): Promise<ToolCallResult | null> {
     const name = toolCall.function.name;
     const args = JSON.parse(toolCall.function.arguments || '{}');
@@ -255,12 +266,39 @@ export async function handleVirtualTool(
             };
 
         case 'schedule_add': {
-            const result = addSchedule(args.name, args.cron, args.prompt);
+            let cron = args.cron as string | undefined;
+            let oneshot = args.oneshot as boolean | undefined;
+
+            // in_minutes: compute cron from now + X minutes, auto oneshot
+            if (args.in_minutes) {
+                const minutes = Number(args.in_minutes);
+                const firesAt = new Date(Date.now() + minutes * 60_000);
+                cron = `${firesAt.getMinutes()} ${firesAt.getHours()} ${firesAt.getDate()} ${
+                    firesAt.getMonth() + 1
+                } *`;
+                oneshot = true;
+            }
+
+            if (!cron)
+                return {
+                    id: toolCall.id,
+                    content: 'Paramètre cron ou in_minutes requis.',
+                };
+
+            const result = addSchedule(
+                args.name as string,
+                cron,
+                args.prompt as string,
+                outputChannel,
+                oneshot,
+            );
             if (typeof result === 'string')
                 return { id: toolCall.id, content: result };
             return {
                 id: toolCall.id,
-                content: `Schedule "${args.name}" créé (id: ${result.id}, cron: ${result.cron})`,
+                content: `Schedule "${args.name}" créé (id: ${
+                    result.id
+                }, cron: ${result.cron})${result.oneshot ? ' [oneshot]' : ''}`,
             };
         }
 

@@ -21,7 +21,8 @@ import { runScene } from './scenes';
 import type { McpServerConfig, CollectedTool } from './types';
 
 export type { McpServerConfig, CollectedTool };
-export { buildServerConfigs } from './serverConfigs';
+export { buildServerConfigs, LLM_HIDDEN_TOOLS } from './serverConfigs';
+import { LLM_HIDDEN_TOOLS } from './serverConfigs';
 
 /** Max messages kept in the rolling conversation buffer (user + assistant pairs). */
 const HISTORY_MAX = 10;
@@ -270,8 +271,9 @@ export class Orchestrator {
         const activeGroups = groups.map((g) => g.name);
         const tools = [
             ...getVirtualTools(),
-            ...filterToolsForOrder(order, this.collectedTools, groups).map(
-                (ct) => ({
+            ...filterToolsForOrder(order, this.collectedTools, groups)
+                .filter((ct) => !LLM_HIDDEN_TOOLS.has(ct.tool.name))
+                .map((ct) => ({
                     type: 'function' as const,
                     function: {
                         name: ct.tool.name,
@@ -281,8 +283,7 @@ export class Orchestrator {
                             unknown
                         >,
                     },
-                }),
-            ),
+                })),
         ];
         return { tools, activeGroups };
     }
@@ -291,6 +292,7 @@ export class Orchestrator {
         toolCalls: OpenAI.Chat.ChatCompletionMessageToolCall[],
         story: Story | null,
         messages: OpenAI.Chat.ChatCompletionMessageParam[],
+        outputChannel: import('./scheduler').OutputChannel = 'cast',
     ): Promise<void> {
         const sceneRunner = (id: string) =>
             runScene(id, (tool, args) => this.callTool(tool, args));
@@ -300,6 +302,7 @@ export class Orchestrator {
                 const virtualResult = await handleVirtualTool(
                     toolCall,
                     sceneRunner,
+                    outputChannel,
                 );
                 const result =
                     virtualResult ?? (await this.executeToolCall(toolCall));
@@ -349,7 +352,11 @@ export class Orchestrator {
 
     // ── Main entry point ─────────────────────────────────────────────────────
 
-    async processOrder(order: string, reset?: boolean): Promise<string> {
+    async processOrder(
+        order: string,
+        reset?: boolean,
+        outputChannel: import('./scheduler').OutputChannel = 'cast',
+    ): Promise<string> {
         if (reset) {
             this.conversationHistory = [];
             Logger.info('Conversation history reset (new conversation)');
@@ -407,6 +414,7 @@ export class Orchestrator {
                 assistantMessage.tool_calls,
                 story,
                 messages,
+                outputChannel,
             );
         }
 
@@ -434,6 +442,7 @@ export class Orchestrator {
         order: string,
         options?: StreamOptions,
         reset?: boolean,
+        outputChannel: import('./scheduler').OutputChannel = 'cast',
     ): AsyncGenerator<string, void, unknown> {
         if (reset) {
             // Finalize the previous session story (triggers summarization)
@@ -560,7 +569,12 @@ export class Orchestrator {
                     tool_calls: toolCalls,
                 });
 
-                await this.runToolCalls(toolCalls, story, messages);
+                await this.runToolCalls(
+                    toolCalls,
+                    story,
+                    messages,
+                    outputChannel,
+                );
             } else {
                 // Final text response — strip markdown then yield
                 finalResponse = stripMarkdownForTts(contentAcc);
