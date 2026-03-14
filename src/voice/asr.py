@@ -9,7 +9,6 @@ import logging
 import numpy as np
 import torch
 from faster_whisper import WhisperModel
-from scipy import signal as scipy_signal
 from silero_vad import VADIterator, load_silero_vad
 
 from .config import (
@@ -20,6 +19,7 @@ from .config import (
     SAMPLE_WIDTH,
     WHISPER_CONVO_PROMPT,
     WHISPER_LANG,
+    WHISPER_MIN_RMS,
     WHISPER_MODEL,
     WHISPER_PROMPT,
     WHISPER_RATE,
@@ -60,15 +60,28 @@ def rms(pcm_bytes: bytes) -> float:
 
 
 def to_whisper(pcm_bytes: bytes) -> np.ndarray:
-    """Resample 48kHz s16le PCM → 16kHz float32 array for Whisper."""
-    samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-    return scipy_signal.resample_poly(samples, 1, 3).astype(np.float32)
+    """Convert 16kHz s16le PCM → float32 array for Whisper. No resampling needed."""
+    return np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
 
 # ── Transcription ─────────────────────────────────────────────────────────────
 
 def transcribe(audio_16k: np.ndarray, conversation_mode: bool = False) -> str:
-    """Transcribe a 16kHz float32 audio segment. Returns the full text."""
+    """
+    Transcribe a 16kHz float32 audio segment. Returns the full text, or ""
+    if the audio is likely silence/noise.
+
+    Anti-hallucination measures:
+      1. RMS gate — skip Whisper entirely if audio is too quiet.
+      2. Per-segment no_speech_prob filter — discard segments Whisper itself
+         considers silence (common cause of hallucinated trigger words).
+    """
+    # 1. RMS gate on the 16kHz float32 audio (values in [-1, 1])
+    rms_val = float(np.sqrt(np.mean(audio_16k ** 2))) * 32768.0
+    if rms_val < WHISPER_MIN_RMS:
+        log.info(f"Transcription skipped: RMS {rms_val:.0f} < {WHISPER_MIN_RMS} (noise gate)")
+        return ""
+
     prompt = WHISPER_CONVO_PROMPT if conversation_mode else WHISPER_PROMPT
     segments, _ = _whisper.transcribe(
         audio_16k,
@@ -77,5 +90,17 @@ def transcribe(audio_16k: np.ndarray, conversation_mode: bool = False) -> str:
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 300},
         initial_prompt=prompt,
+        no_speech_threshold=0.5,
+        log_prob_threshold=-1.0,
+        compression_ratio_threshold=2.4,
     )
-    return " ".join(s.text for s in segments).strip()
+
+    # 2. Per-segment no_speech_prob filter
+    parts = []
+    for s in segments:
+        if s.no_speech_prob > 0.5:
+            log.debug(f"Segment discarded (no_speech_prob={s.no_speech_prob:.2f}): {s.text!r}")
+            continue
+        parts.append(s.text)
+
+    return " ".join(parts).strip()

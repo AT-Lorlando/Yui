@@ -18,9 +18,8 @@ import wave
 import numpy as np
 import requests
 import torch
-from scipy import signal as _sig
-
 from .asr import make_vad_iterator, rms, to_whisper, transcribe
+from .wakeword import load_wakeword_model, detect as wakeword_detect, get_frame_length, is_available as oww_available, cleanup as wakeword_cleanup
 from .config import (
     AUDIO_DEBUG_DIR,
     BEARER_TOKEN,
@@ -37,6 +36,7 @@ from .config import (
     SILERO_MIN_SILENCE_MS,
     SILERO_THRESHOLD,
     TRIGGER_WORD,
+
     YUI_STREAM_URL,
     YUI_URL,
 )
@@ -147,8 +147,7 @@ def _listen_for_stop(sock: socket.socket, done: threading.Event) -> None:
                     silero_buf = np.array([], dtype=np.float32)
                     continue
 
-            samples_48k = np.frombuffer(frame, dtype=np.int16).astype(np.float32) / 32768.0
-            samples_16k = _sig.resample_poly(samples_48k, 1, 3).astype(np.float32)
+            samples_16k = np.frombuffer(frame, dtype=np.int16).astype(np.float32) / 32768.0
             silero_buf = np.concatenate([silero_buf, samples_16k])
 
             while len(silero_buf) >= SILERO_CHUNK:
@@ -337,10 +336,11 @@ def _drain_udp(sock: socket.socket) -> None:
         sock.settimeout(0.5)
 
 
-def _process_utterance(speech_buf: bytes, sock: socket.socket) -> None:
+def _process_utterance(speech_buf: bytes, sock: socket.socket, wakeword_confirmed: bool = False) -> None:
     """
     Transcribe a captured utterance and forward it to the orchestrator.
     Trigger word required in normal mode; optional in conversation mode.
+    wakeword_confirmed=True means OWW already detected the wake word.
     """
     global _conversation_mode_until
 
@@ -361,7 +361,17 @@ def _process_utterance(speech_buf: bytes, sock: socket.socket) -> None:
         order = strip_trigger(text) if contains_trigger(text) else text
         log.info(f"[Conversation mode] → Order: {order!r}")
         _save_debug_audio(speech_buf, f"convo_{order[:30].replace(' ', '_')}")
+    elif wakeword_confirmed:
+        # OWW already detected the wake word — no need to check again
+        # Strip trigger from transcription if Whisper caught it
+        order = strip_trigger(text) if contains_trigger(text) else text
+        if not order:
+            log.info(f"Wake word only, no command: {text!r}")
+            return
+        log.info(f"→ Order: {order!r}")
+        _save_debug_audio(speech_buf, f"trigger_{order[:30].replace(' ', '_')}")
     else:
+        # Fallback: OWW not available — check trigger word in transcription
         if not contains_trigger(text):
             log.info(f"No trigger word '{TRIGGER_WORD}' — ignored")
             return
@@ -404,8 +414,17 @@ def main() -> None:
     sock.bind(("0.0.0.0", LISTEN_PORT))
     sock.settimeout(0.5)
 
+    try:
+        _run(sock)
+    finally:
+        sock.close()
+        wakeword_cleanup()
+
+
+def _run(sock: socket.socket) -> None:
+
     log.info(f"Listening for audio on UDP :{LISTEN_PORT}…")
-    log.info(f"Trigger word: '{TRIGGER_WORD}' — say it anywhere in the sentence")
+    log.info(f"Trigger word: '{TRIGGER_WORD}'")
     log.info(
         f"Silero VAD: threshold={SILERO_THRESHOLD} "
         f"min_silence={SILERO_MIN_SILENCE_MS}ms"
@@ -415,8 +434,22 @@ def main() -> None:
     speech_buf = b""
     pre_buf = bytearray()
     recording = False
+    # After OWW fires, wait for Silero to confirm actual speech before committing
+    # to a recording. This avoids false triggers accumulating minutes of silence.
+    wakeword_pending = False
+    WAKEWORD_PENDING_TIMEOUT = 2.0  # seconds
+    wakeword_pending_since: float = 0.0
     silero_buf = np.array([], dtype=np.float32)
     vad_iter = make_vad_iterator()
+    oww_active = load_wakeword_model()
+    ww_chunk = get_frame_length()  # 512 for Porcupine; read after load
+    if oww_active:
+        log.info(f"Wake word detection: Porcupine (frame_length={ww_chunk})")
+    else:
+        log.info(f"Wake word detection: fallback Silero+regex ('{TRIGGER_WORD}')")
+
+    oww_buf = np.array([], dtype=np.int16)
+    oww_triggered = False  # tracks whether current recording was started by wakeword engine
 
     # RMS monitoring stats — logged every 5s
     stat_frames = 0
@@ -431,11 +464,13 @@ def main() -> None:
             if recording and speech_buf:
                 dur = len(speech_buf) / (SAMPLE_RATE * SAMPLE_WIDTH)
                 if dur >= MIN_UTTERANCE_S:
-                    _process_utterance(speech_buf, sock)
+                    _process_utterance(speech_buf, sock, wakeword_confirmed=oww_triggered)
                 speech_buf = b""
                 recording = False
+                oww_triggered = False
                 vad_iter = make_vad_iterator()
                 silero_buf = np.array([], dtype=np.float32)
+                oww_buf = np.array([], dtype=np.int16)
             continue
 
         recv_buf += data
@@ -468,38 +503,95 @@ def main() -> None:
                 dur = len(speech_buf) / (SAMPLE_RATE * SAMPLE_WIDTH)
                 if dur >= MAX_UTTERANCE_S:
                     log.info(f"MAX_UTTERANCE reached ({dur:.1f}s) — forcing transcription")
-                    _process_utterance(speech_buf, sock)
+                    _process_utterance(speech_buf, sock, wakeword_confirmed=oww_triggered)
                     speech_buf = b""
                     recording = False
+                    oww_triggered = False
                     vad_iter = make_vad_iterator()
                     silero_buf = np.array([], dtype=np.float32)
+                    oww_buf = np.array([], dtype=np.int16)
                     pre_buf = bytearray()
                     continue
 
-            # Resample 48kHz → 16kHz for Silero
-            samples_48k = np.frombuffer(frame, dtype=np.int16).astype(np.float32) / 32768.0
-            samples_16k = _sig.resample_poly(samples_48k, 1, 3).astype(np.float32)
-            silero_buf = np.concatenate([silero_buf, samples_16k])
+            # OWW expects int16; Silero expects float32 — keep both
+            samples_int16 = np.frombuffer(frame, dtype=np.int16)
+            samples_16k = samples_int16.astype(np.float32) / 32768.0
 
-            # Feed 512-sample chunks to Silero
-            while len(silero_buf) >= SILERO_CHUNK:
-                chunk = torch.from_numpy(silero_buf[:SILERO_CHUNK])
-                silero_buf = silero_buf[SILERO_CHUNK:]
-                result = vad_iter(chunk)
+            if not recording:
+                in_convo = time.time() < _conversation_mode_until
 
-                if result is not None:
-                    if "start" in result and not recording:
-                        log.info("Recording started (Silero)")
-                        speech_buf = bytes(pre_buf)
-                        pre_buf = bytearray()
-                        recording = True
-                    elif "end" in result and recording:
+                if in_convo or not oww_active:
+                    # Conversation mode OR no OWW model: use Silero for start detection
+                    silero_buf = np.concatenate([silero_buf, samples_16k])
+                    while len(silero_buf) >= SILERO_CHUNK:
+                        chunk = torch.from_numpy(silero_buf[:SILERO_CHUNK])
+                        silero_buf = silero_buf[SILERO_CHUNK:]
+                        result = vad_iter(chunk)
+                        if result is not None and "start" in result:
+                            log.info("Recording started (Silero%s)" % (" — convo mode" if in_convo else " — fallback"))
+                            speech_buf = bytes(pre_buf)
+                            pre_buf = bytearray()
+                            silero_buf = np.array([], dtype=np.float32)
+                            oww_triggered = False
+                            wakeword_pending = False
+                            recording = True
+                            break
+                elif wakeword_pending:
+                    # OWW already fired — wait for Silero to confirm actual speech
+                    if time.time() - wakeword_pending_since > WAKEWORD_PENDING_TIMEOUT:
+                        log.info("OWW trigger timed out (no speech) — back to idle")
+                        wakeword_pending = False
+                        silero_buf = np.array([], dtype=np.float32)
+                        oww_buf = np.array([], dtype=np.int16)
+                        vad_iter = make_vad_iterator()
+                    else:
+                        silero_buf = np.concatenate([silero_buf, samples_16k])
+                        while len(silero_buf) >= SILERO_CHUNK:
+                            chunk = torch.from_numpy(silero_buf[:SILERO_CHUNK])
+                            silero_buf = silero_buf[SILERO_CHUNK:]
+                            result = vad_iter(chunk)
+                            if result is not None and "start" in result:
+                                # pre_buf now contains silence just before the command
+                                log.info("Recording started (OWW + Silero confirm)")
+                                speech_buf = bytes(pre_buf)
+                                pre_buf = bytearray()
+                                silero_buf = np.array([], dtype=np.float32)
+                                oww_triggered = True
+                                wakeword_pending = False
+                                recording = True
+                                break
+                else:
+                    # Normal mode with Porcupine: feed int16 frames
+                    oww_buf = np.concatenate([oww_buf, samples_int16])
+                    while len(oww_buf) >= ww_chunk:
+                        chunk_ww = oww_buf[:ww_chunk]
+                        oww_buf = oww_buf[ww_chunk:]
+                        if wakeword_detect(chunk_ww):
+                            log.info("Wake word detected! (Porcupine) — waiting for speech")
+                            silero_buf = np.array([], dtype=np.float32)
+                            oww_buf = np.array([], dtype=np.int16)
+                            vad_iter = make_vad_iterator()
+                            wakeword_pending = True
+                            wakeword_pending_since = time.time()
+                            break
+
+            else:
+                # Recording: use Silero for end-of-speech detection only
+                silero_buf = np.concatenate([silero_buf, samples_16k])
+                while len(silero_buf) >= SILERO_CHUNK:
+                    chunk = torch.from_numpy(silero_buf[:SILERO_CHUNK])
+                    silero_buf = silero_buf[SILERO_CHUNK:]
+                    result = vad_iter(chunk)
+                    if result is not None and "end" in result:
                         dur = len(speech_buf) / (SAMPLE_RATE * SAMPLE_WIDTH)
                         log.info(f"Recording ended (Silero, {dur:.1f}s)")
                         if dur >= MIN_UTTERANCE_S:
-                            _process_utterance(speech_buf, sock)
+                            _process_utterance(speech_buf, sock, wakeword_confirmed=oww_triggered)
                         speech_buf = b""
                         recording = False
+                        oww_triggered = False
                         vad_iter = make_vad_iterator()
                         silero_buf = np.array([], dtype=np.float32)
+                        oww_buf = np.array([], dtype=np.int16)
                         pre_buf = bytearray()
+                        break

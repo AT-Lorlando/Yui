@@ -11,16 +11,16 @@ BEARER_TOKEN   = os.getenv("BEARER_TOKEN", "yui")
 
 # ── Audio input ───────────────────────────────────────────────────────────────
 LISTEN_PORT  = int(os.getenv("VOICE_UDP_PORT", "5002"))
-SAMPLE_RATE  = 48_000   # Pi streams s16le 48kHz mono
+SAMPLE_RATE  = 16_000   # ReSpeaker XVF3800 native rate — stream directly, no resampling
 SAMPLE_WIDTH = 2        # bytes per sample (int16)
-WHISPER_RATE = 16_000   # faster-whisper expects 16kHz
+WHISPER_RATE = 16_000   # faster-whisper expects 16kHz (same as SAMPLE_RATE)
 
 FRAME_MS      = 20
-FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS // 1000   # 960 samples at 48kHz
-FRAME_BYTES   = FRAME_SAMPLES * SAMPLE_WIDTH      # 1920 bytes
+FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS // 1000   # 320 samples at 16kHz
+FRAME_BYTES   = FRAME_SAMPLES * SAMPLE_WIDTH      # 640 bytes
 
 # Pre-buffer: keep last 300ms before speech start so we don't clip first syllable
-PRE_BUFFER_BYTES = int(SAMPLE_RATE * SAMPLE_WIDTH * 0.3)  # ~28800 bytes
+PRE_BUFFER_BYTES = int(SAMPLE_RATE * SAMPLE_WIDTH * 0.3)  # ~9600 bytes
 MIN_UTTERANCE_S  = 0.5
 MAX_UTTERANCE_S  = 20.0
 
@@ -29,21 +29,33 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_LANG  = os.getenv("WHISPER_LANG", "fr")
 LOG_LEVEL     = os.getenv("LOG_LEVEL", "INFO").upper()
 
-TRIGGER_WORD = os.getenv("TRIGGER_WORD", "Lunix").strip()
+WAKEWORD_NAME = os.getenv("WAKEWORD_NAME", "yui")
 
+TRIGGER_WORD = os.getenv("TRIGGER_WORD", WAKEWORD_NAME).strip()
+
+# Do NOT include the trigger word or example commands — Whisper auto-completes
+# prompts on silence/noise, which causes hallucinated trigger detections.
 WHISPER_PROMPT = os.getenv(
     "WHISPER_PROMPT",
-    f"Transcription en français. Assistant vocal : {TRIGGER_WORD}. "
-    f"Exemple : « {TRIGGER_WORD}, allume les lumières. »",
+    "Transcription en français. Parole spontanée.",
 )
-WHISPER_CONVO_PROMPT = (
-    "Transcription en français. Conversation naturelle avec l'assistant vocal."
+WHISPER_CONVO_PROMPT = os.getenv(
+    "WHISPER_CONVO_PROMPT",
+    "Transcription en français. Conversation naturelle.",
 )
+
+# Minimum RMS energy to send audio to Whisper. Below this = noise, skip entirely.
+WHISPER_MIN_RMS = float(os.getenv("WHISPER_MIN_RMS", "400"))
 
 # ── Silero VAD ────────────────────────────────────────────────────────────────
 SILERO_THRESHOLD      = float(os.getenv("SILERO_THRESHOLD", "0.5"))
 SILERO_MIN_SILENCE_MS = int(os.getenv("SILERO_MIN_SILENCE_MS", "1200"))
 SILERO_CHUNK          = 512   # samples at 16kHz (Silero requirement)
+
+# ── Picovoice Porcupine ────────────────────────────────────────────────────────
+PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY", "")
+PORCUPINE_MODEL_PATH = os.getenv("PORCUPINE_MODEL_PATH", f"assets/wakeword/{WAKEWORD_NAME}.ppn")
+WAKEWORD_CHUNK       = 512    # Porcupine frame_length (samples at 16kHz); actual value read dynamically after load
 
 # ── TTS / Cast — XTTS v2 via xtts_server.py ──────────────────────────────────
 XTTS_SERVER_URL  = os.getenv("XTTS_SERVER_URL", "http://localhost:18770/tts")
