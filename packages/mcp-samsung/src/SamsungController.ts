@@ -89,7 +89,9 @@ export class SamsungController {
 
     /**
      * Sends a batch of remote key presses over a single WebSocket connection.
-     * Keys are sent 120 ms apart (TV processes ~8 keys/s reliably).
+     * Keys are sent 80 ms apart. Resolves as soon as all keys are dispatched —
+     * does not wait for the WS to close cleanly (TV may drop the connection
+     * immediately after power-off commands).
      */
     private sendKeys(keys: string[]): Promise<void> {
         if (keys.length === 0) return Promise.resolve();
@@ -101,17 +103,25 @@ export class SamsungController {
 
             const ws = new WebSocket(url);
             let done = false;
+            let keySent = false;
+
+            // Abort if TV doesn't respond within 8 s
+            const timeout = setTimeout(() => {
+                if (!done) { done = true; ws.close(); reject(new Error('Samsung WS connect timeout')); }
+            }, 8_000);
 
             ws.addEventListener('open', async () => {
+                clearTimeout(timeout);
                 for (const key of keys) {
                     ws.send(JSON.stringify({
                         method: 'ms.remote.control',
                         params: { Cmd: 'Click', DataOfCmd: key, TypeOfRemote: 'SendRemoteKey' },
                     }));
-                    await new Promise(r => setTimeout(r, 120));
+                    await new Promise(r => setTimeout(r, 80));
                 }
-                ws.close();
+                keySent = true;
                 if (!done) { done = true; resolve(); }
+                try { ws.close(); } catch { /* ignore */ }
             });
 
             ws.addEventListener('message', (e: MessageEvent) => {
@@ -122,8 +132,12 @@ export class SamsungController {
                 } catch { /* ignore */ }
             });
 
-            ws.addEventListener('error', (e: Event) => {
-                if (!done) { done = true; reject(new Error(`WebSocket error: ${e}`)); }
+            ws.addEventListener('error', () => {
+                clearTimeout(timeout);
+                // If keys were already sent, the TV likely dropped the connection
+                // after processing (e.g. power-off) — treat as success
+                if (keySent) { if (!done) { done = true; resolve(); } return; }
+                if (!done) { done = true; reject(new Error('Samsung WebSocket error')); }
             });
         });
     }
@@ -140,7 +154,9 @@ export class SamsungController {
     }
 
     async powerOff(): Promise<void> {
-        await this.sendKeys(['KEY_POWEROFF']);
+        // KEY_POWER is a toggle supported by all recent Samsung TVs.
+        // KEY_POWEROFF exists on some models but not all.
+        await this.sendKeys(['KEY_POWER']);
     }
 
     /**
@@ -168,13 +184,13 @@ export class SamsungController {
     }
 
     /**
-     * Absolute volume: reset to 0 with 50 KEY_VOLDOWN, then go up to target.
-     * One WS connection, keys sent 120 ms apart — max ~18 s for level=100.
+     * Absolute volume: bottom out with 30 KEY_VOLDOWN, then go up to target.
+     * Keys at 80 ms apart — max ~7 s for level=100.
      */
     async setVolume(level: number): Promise<void> {
         const target = Math.max(0, Math.min(100, Math.round(level)));
         const keys = [
-            ...Array(50).fill('KEY_VOLDOWN'),
+            ...Array(30).fill('KEY_VOLDOWN'),
             ...Array(target).fill('KEY_VOLUP'),
         ];
         await this.sendKeys(keys);
