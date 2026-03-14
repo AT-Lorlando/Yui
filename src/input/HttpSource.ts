@@ -1,6 +1,7 @@
 import express from 'express';
 import * as bodyParser from 'body-parser';
 import * as fs from 'fs';
+import * as path from 'path';
 import cors from 'cors';
 import * as http from 'http';
 import Logger from '../logger';
@@ -12,6 +13,7 @@ import {
     DeviceHandler,
     ScenesHandler,
     ToolsHandler,
+    LocationHandler,
 } from './InputSource';
 
 // ── TTS helper ────────────────────────────────────────────────────────────────
@@ -60,12 +62,17 @@ export class HttpSource implements InputSource {
     }
 
     async start(
-        handler: (order: string, reset?: boolean) => Promise<string>,
+        handler: (
+            order: string,
+            reset?: boolean,
+            outputChannel?: import('../orchestrator/scheduler').OutputChannel,
+        ) => Promise<string>,
         streamHandler?: StreamHandler,
         statusHandler?: StatusHandler,
         deviceHandler?: DeviceHandler,
         scenesHandler?: ScenesHandler,
         toolsHandler?: ToolsHandler,
+        locationHandler?: LocationHandler,
     ): Promise<void> {
         const port = 3000;
         const app = express();
@@ -75,6 +82,72 @@ export class HttpSource implements InputSource {
 
         app.get('/health', (_req: any, res: any) => {
             res.status(200).json({ status: 'ok' });
+        });
+
+        // ── Static ringtones ───────────────────────────────────────────────────
+        // Served at /ringtones/<filename> — used by mcp-timer for alarm sounds.
+        const ringtonesDir = path.join(process.cwd(), 'assets', 'ringtones');
+        app.use('/ringtones', express.static(ringtonesDir));
+
+        // ── Static chimes ─────────────────────────────────────────────────────
+        // Served at /chimes/<filename> — used for Yui's acknowledgment sounds.
+        const chimesDir = path.join(process.cwd(), 'assets', 'chimes');
+        app.use('/chimes', express.static(chimesDir));
+
+        // ── Static media ───────────────────────────────────────────────────────
+        // Served at /media/<wallpapers|videos>/<filename> — used by mcp-media.
+        const mediaDir = path.join(process.cwd(), 'assets', 'media');
+        app.use('/media', express.static(mediaDir));
+
+        // ── Image → infinite MP4 loop ─────────────────────────────────────────
+        // GET /media/loop/<subdir>/<file> streams an image as an infinite MP4.
+        // Used by cast_wallpaper so the Chromecast keeps displaying it.
+        app.get('/media/loop/:subdir/:file', (req: any, res: any) => {
+            const { subdir } = req.params;
+            // URL uses .mp4 extension — find the actual source image by stem
+            const stem = path.basename(req.params.file, '.mp4');
+            const dir = path.join(mediaDir, subdir);
+            let filePath: string | undefined;
+            try {
+                const match = fs
+                    .readdirSync(dir)
+                    .find((f) => f.replace(/\.[^.]+$/, '') === stem);
+                if (match) filePath = path.join(dir, match);
+            } catch {
+                /* ignore */
+            }
+            if (!filePath || !fs.existsSync(filePath))
+                return res.status(404).end();
+            const { spawn } = require('child_process');
+            const ffmpeg = spawn(
+                'ffmpeg',
+                [
+                    '-loop',
+                    '1',
+                    '-i',
+                    filePath,
+                    '-c:v',
+                    'libx264',
+                    '-preset',
+                    'ultrafast',
+                    '-tune',
+                    'stillimage',
+                    '-pix_fmt',
+                    'yuv420p',
+                    '-vf',
+                    'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1',
+                    '-movflags',
+                    'frag_keyframe+empty_moov+default_base_moof',
+                    '-f',
+                    'mp4',
+                    'pipe:1',
+                ],
+                { stdio: ['ignore', 'pipe', 'ignore'] },
+            );
+            res.setHeader('Content-Type', 'video/mp4');
+            res.setHeader('Cache-Control', 'no-cache');
+            ffmpeg.stdout.pipe(res);
+            req.on('close', () => ffmpeg.kill());
         });
 
         // ── MCP status (used by dashboard, no auth — internal only) ───────────
@@ -126,9 +199,10 @@ export class HttpSource implements InputSource {
 
             const wantsAudio = req.body?.audio === true;
             const reset = req.body?.reset === true;
+            const outputChannel = req.body?.voice === true ? 'cast' : 'none';
 
             try {
-                const result = await handler(order, reset);
+                const result = await handler(order, reset, outputChannel);
                 const response: Record<string, unknown> = { response: result };
 
                 if (wantsAudio) {
@@ -173,10 +247,11 @@ export class HttpSource implements InputSource {
                 res.setHeader('Connection', 'keep-alive');
                 res.flushHeaders();
 
+                const streamOutputChannel = isVoice ? 'cast' : 'none';
                 try {
                     for await (const token of streamHandler(
                         order,
-                        undefined,
+                        { outputChannel: streamOutputChannel },
                         reset,
                     )) {
                         res.write(`data: ${JSON.stringify({ token })}\n\n`);
@@ -402,6 +477,59 @@ export class HttpSource implements InputSource {
 
             app.use('/scenes', sc);
         }
+
+        // ── Chime cast (called internally by mcp-timer, no auth) ─────────────
+        // Receives { url } and casts the audio file to the default speaker.
+        app.post('/chime', async (req: any, res: any) => {
+            const { url } = req.body ?? {};
+            if (!url || !deviceHandler) return res.json({ ok: false });
+            try {
+                await deviceHandler('cast_media', {
+                    content_id: url,
+                    content_type: 'audio/mpeg',
+                    title: 'Minuteur',
+                });
+                Logger.info(`Chime cast: ${url}`);
+                return res.json({ ok: true });
+            } catch (e: any) {
+                Logger.error(`Chime cast failed: ${e.message}`);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
+        // ── Location & presence ───────────────────────────────────────────────
+        // POST /location  — called by the mobile app with GPS coordinates.
+        // Returns next_ping_ms so the app knows when to send the next update.
+        app.post('/location', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
+            const { lat, lng, accuracy } = req.body ?? {};
+            if (typeof lat !== 'number' || typeof lng !== 'number') {
+                return res
+                    .status(400)
+                    .json({ error: 'lat and lng are required numbers' });
+            }
+
+            if (!locationHandler) {
+                // Presence system not configured — accept the ping, tell app to retry in 5 min
+                Logger.info(
+                    `Location received: ${lat.toFixed(5)},${lng.toFixed(
+                        5,
+                    )} (no presence handler)`,
+                );
+                return res.json({
+                    state: 'unknown',
+                    distance_m: -1,
+                    next_ping_ms: 5 * 60_000,
+                });
+            }
+
+            const result = locationHandler(lat, lng, accuracy ?? 0);
+            return res.json(result);
+        });
 
         return new Promise((resolve, reject) => {
             this.server = app

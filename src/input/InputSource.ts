@@ -1,6 +1,8 @@
 export type StreamOptions = {
     /** Cap the LLM response length. Use ~80 for voice, undefined for text. */
     maxTokens?: number;
+    /** Output channel for schedules created during this request. */
+    outputChannel?: import('../orchestrator/scheduler').OutputChannel;
 };
 
 export type StreamHandler = (
@@ -35,14 +37,25 @@ export interface ToolsHandler {
     call: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
+export type LocationHandler = (
+    lat: number,
+    lng: number,
+    accuracy: number,
+) => import('../orchestrator/presence').LocationResponse;
+
 export interface InputSource {
     start(
-        handler: (order: string, reset?: boolean) => Promise<string>,
+        handler: (
+            order: string,
+            reset?: boolean,
+            outputChannel?: import('../orchestrator/scheduler').OutputChannel,
+        ) => Promise<string>,
         streamHandler?: StreamHandler,
         statusHandler?: StatusHandler,
         deviceHandler?: DeviceHandler,
         scenesHandler?: ScenesHandler,
         toolsHandler?: ToolsHandler,
+        locationHandler?: LocationHandler,
     ): Promise<void>;
     stop(): Promise<void>;
 }
