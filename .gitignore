@@ -5,7 +5,6 @@ node_modules/*
 commands/*.txt
 banned_ips.txt
 refresh-token.json
-docs
 stories/*
 .entities/
 # Runtime data (user-specific, not committed)
