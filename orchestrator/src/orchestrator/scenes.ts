@@ -162,7 +162,7 @@ export function toggleFavorite(id: string): Scene | null {
     if (!scene) return null;
     scene.favorite = !scene.favorite;
     saveScenes(scenes);
-    Logger.info(`Scene "${id}" favorite: ${scene.favorite}`);
+    Logger.info(`Scene "${scene.name}" (${id}) favorite: ${scene.favorite}`);
     return scene;
 }
 
