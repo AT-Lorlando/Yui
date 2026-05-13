@@ -33,7 +33,7 @@ const MEDIA_DIR = path.resolve(
     process.env.MEDIA_DIR ?? 'assets/media',
 );
 const MEDIA_BASE_URL = (
-    process.env.MEDIA_BASE_URL ?? 'http://localhost:3000/media'
+    `http://${process.env.HOST}:${process.env.PORT}/media`
 ).replace(/\/$/, '');
 
 const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|bmp|avif)$/i;
@@ -75,9 +75,9 @@ export function listMediaFiles(type: 'wallpaper' | 'video' | 'all' = 'all'): obj
 // ── ChromecastController ───────────────────────────────────────────────────────
 
 export class ChromecastController {
-    castYoutube(source: string): Promise<string> {
-        Logger.info(`Chromecast: youtube "${source}"`);
-        return run(['youtube', source]);
+    castYoutube(source?: string): Promise<string> {
+        Logger.info(`Chromecast: youtube${source ? ` "${source}"` : ' (browse)'}`);
+        return source ? run(['youtube', source]) : run(['youtube']);
     }
 
     castNetflix(title?: string): Promise<string> {

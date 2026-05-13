@@ -36,7 +36,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
         switch (name) {
             case 'cast_youtube': {
-                const source = String((args as any).source);
+                const source = (args as any)?.source as string | undefined;
                 return { content: [{ type: 'text', text: await chromecast.castYoutube(source) }] };
             }
 

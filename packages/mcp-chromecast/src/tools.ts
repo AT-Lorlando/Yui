@@ -3,14 +3,16 @@ export const CHROMECAST_TOOLS = [
     {
         name: 'cast_youtube',
         description:
-            'Cast a YouTube video to the Chromecast. TV turns on and switches to HDMI3 automatically. ' +
-            'Accepts a YouTube URL, video ID, or natural-language search query.',
+            'Cast a YouTube video to the Chromecast, or open YouTube in browse mode. ' +
+            'TV turns on and switches to HDMI3 automatically. ' +
+            'Accepts a YouTube URL, video ID, or natural-language search query. ' +
+            'Omit source to open YouTube in browse mode (no specific video).',
         inputSchema: {
             type: 'object' as const,
             properties: {
-                source: { type: 'string', description: 'YouTube URL, video ID, or search query' },
+                source: { type: 'string', description: 'YouTube URL, video ID, or search query. Omit for browse mode.' },
             },
-            required: ['source'],
+            required: [],
         },
     },
     {

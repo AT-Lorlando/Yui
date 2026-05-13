@@ -6,7 +6,7 @@ Named services use DIAL (HTTP :8008) with optional content deep-link via JustWat
 Direct media uses pychromecast media_controller (Cast SDK).
 
 Usage:
-  python3 cast.py <host> <port> youtube    <source>        # URL / ID / search query
+  python3 cast.py <host> <port> youtube    [source]        # URL / ID / search query / vide = browse
   python3 cast.py <host> <port> netflix    [title]         # optional deep-link
   python3 cast.py <host> <port> crunchyroll [title]
   python3 cast.py <host> <port> disney     [title]
@@ -63,7 +63,10 @@ def _connect_cast():
 
 # ── Command handlers ──────────────────────────────────────────────────────────
 
-def cmd_youtube(source: str) -> str:
+def cmd_youtube(source: str | None) -> str:
+    if not source:
+        # Browse mode: open YouTube app via DIAL without a specific video
+        return dial.launch(HOST, 'youtube')
     vid_id, title = content_cache.resolve_youtube(source)
     if not vid_id:
         # If it looks like a direct URL, try casting as media
@@ -145,7 +148,7 @@ def main() -> None:
     print(f'[tv] {prep_msg}')
 
     if CMD == 'youtube':
-        source = sys.argv[4] if len(sys.argv) > 4 else ''
+        source = sys.argv[4] if len(sys.argv) > 4 else None
         print(cmd_youtube(source))
 
     elif CMD in _NAMED_SERVICES:
