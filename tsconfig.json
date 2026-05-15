@@ -2,8 +2,8 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": "./orchestrator/src"
   },
-  "include": ["src/**/*"],
+  "include": ["orchestrator/src/**/*"],
   "exclude": ["packages", "node_modules", "dist"]
 }

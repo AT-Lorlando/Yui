@@ -24,8 +24,7 @@ const SCOPES = [
 
 const REDIRECT_PORT = 6146;
 
-// Path to root .env — works from both src/ (ts-node) and dist/ (compiled)
-const ROOT_ENV_PATH = resolve(__dirname, '../../../.env');
+const ROOT_ENV_PATH = resolve(process.cwd(), '.env');
 
 export class GoogleAuth {
     static createOAuth2Client(
