@@ -8,11 +8,12 @@ import {
 } from './memory';
 import { searchStoriesWithLLM } from './storyArchive';
 import {
-    addSchedule,
-    listSchedules,
-    deleteSchedule,
-    toggleSchedule,
-} from './scheduler';
+    addAutomation,
+    loadAutomations,
+    deleteAutomation,
+    toggleAutomation,
+    type OutputChannel,
+} from './automations';
 import { listScenes } from './scenes';
 
 export interface ToolCallResult {
@@ -121,59 +122,77 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
         {
             type: 'function',
             function: {
-                name: 'schedule_add',
+                name: 'automation_add',
                 description:
-                    'Créer une tâche planifiée (cron job) — ex: rappels, automatisations récurrentes ou actions différées uniques',
+                    'Créer une automation — scène directe ou prompt LLM, déclenchée par cron (récurrent) ou délai (one-shot)',
                 parameters: {
                     type: 'object',
                     properties: {
                         name: {
                             type: 'string',
-                            description: 'Nom lisible de la tâche',
+                            description: 'Nom lisible',
                         },
-                        cron: {
+                        trigger_type: {
+                            type: 'string',
+                            enum: ['cron', 'delay'],
+                            description:
+                                'cron = récurrent (ex: "0 8 * * 1-5"), delay = one-shot dans X minutes',
+                        },
+                        cron_expr: {
                             type: 'string',
                             description:
-                                'Expression cron (ex: "30 8 * * 1-5" = lun-ven 8h30). Optionnel si in_minutes est fourni.',
+                                'Expression cron (requis si trigger_type = cron). Ex: "30 8 * * 1-5" = lun-ven 8h30',
                         },
-                        prompt: {
-                            type: 'string',
-                            description:
-                                'Ordre à envoyer à Yui quand le cron se déclenche',
-                        },
-                        oneshot: {
-                            type: 'boolean',
-                            description:
-                                'true pour un rappel/action unique (auto-supprimé après déclenchement). false ou absent = récurrent.',
-                        },
-                        in_minutes: {
+                        delay_minutes: {
                             type: 'number',
                             description:
-                                'Déclencher dans X minutes (calculé automatiquement, implique oneshot=true). Alternative à une expression cron fixe.',
+                                'Délai en minutes (requis si trigger_type = delay). Ex: 20 = dans 20 minutes',
+                        },
+                        action_type: {
+                            type: 'string',
+                            enum: ['scene', 'prompt'],
+                            description:
+                                'scene = déclenche une scène directement (sans LLM), prompt = envoie un ordre au LLM',
+                        },
+                        scene_id: {
+                            type: 'string',
+                            description: 'Id de la scène (requis si action_type = scene)',
+                        },
+                        prompt_text: {
+                            type: 'string',
+                            description: 'Ordre à envoyer à Yui (requis si action_type = prompt)',
+                        },
+                        prompt_output: {
+                            type: 'string',
+                            enum: ['cast', 'notify', 'none'],
+                            description: 'Canal de sortie pour la réponse LLM (défaut: cast)',
+                        },
+                        notify: {
+                            type: 'string',
+                            description:
+                                'Message TTS dit par Yui après exécution (uniquement pour action_type = scene). Absent = silence.',
                         },
                     },
-                    required: ['name', 'prompt'],
+                    required: ['name', 'trigger_type', 'action_type'],
                 },
             },
         },
         {
             type: 'function',
             function: {
-                name: 'schedule_list',
-                description: 'Lister toutes les tâches planifiées',
+                name: 'automation_list',
+                description: 'Lister toutes les automations',
                 parameters: { type: 'object', properties: {} },
             },
         },
         {
             type: 'function',
             function: {
-                name: 'schedule_delete',
-                description: 'Supprimer une tâche planifiée par son id',
+                name: 'automation_delete',
+                description: 'Supprimer une automation par son id',
                 parameters: {
                     type: 'object',
-                    properties: {
-                        id: { type: 'string' },
-                    },
+                    properties: { id: { type: 'string' } },
                     required: ['id'],
                 },
             },
@@ -181,14 +200,11 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
         {
             type: 'function',
             function: {
-                name: 'schedule_toggle',
-                description:
-                    'Activer ou désactiver une tâche planifiée sans la supprimer',
+                name: 'automation_toggle',
+                description: 'Activer ou désactiver une automation sans la supprimer',
                 parameters: {
                     type: 'object',
-                    properties: {
-                        id: { type: 'string' },
-                    },
+                    properties: { id: { type: 'string' } },
                     required: ['id'],
                 },
             },
@@ -231,7 +247,7 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
 export async function handleVirtualTool(
     toolCall: OpenAI.Chat.ChatCompletionMessageToolCall,
     sceneRunner?: SceneRunner,
-    outputChannel: import('./scheduler').OutputChannel = 'cast',
+    outputChannel: OutputChannel = 'cast',
 ): Promise<ToolCallResult | null> {
     const name = toolCall.function.name;
     const args = JSON.parse(toolCall.function.arguments || '{}');
@@ -265,56 +281,80 @@ export async function handleVirtualTool(
                 content: await searchStoriesWithLLM(args.query as string),
             };
 
-        case 'schedule_add': {
-            let cron = args.cron as string | undefined;
-            let oneshot = args.oneshot as boolean | undefined;
+        case 'automation_add': {
+            const triggerType = args.trigger_type as 'cron' | 'delay';
+            const actionType  = args.action_type  as 'scene' | 'prompt';
 
-            // in_minutes: compute cron from now + X minutes, auto oneshot
-            if (args.in_minutes) {
-                const minutes = Number(args.in_minutes);
-                const firesAt = new Date(Date.now() + minutes * 60_000);
-                cron = `${firesAt.getMinutes()} ${firesAt.getHours()} ${firesAt.getDate()} ${
-                    firesAt.getMonth() + 1
-                } *`;
-                oneshot = true;
+            let trigger: import('./automations').AutomationTrigger;
+            if (triggerType === 'cron') {
+                if (!args.cron_expr)
+                    return { id: toolCall.id, content: 'cron_expr requis pour trigger_type=cron.' };
+                trigger = { type: 'cron', expr: args.cron_expr as string };
+            } else {
+                const minutes = Number(args.delay_minutes);
+                if (!minutes || minutes <= 0)
+                    return { id: toolCall.id, content: 'delay_minutes requis pour trigger_type=delay.' };
+                trigger = { type: 'delay', ms: minutes * 60_000, fireAt: Date.now() + minutes * 60_000 };
             }
 
-            if (!cron)
-                return {
-                    id: toolCall.id,
-                    content: 'Paramètre cron ou in_minutes requis.',
+            let action: import('./automations').AutomationAction;
+            if (actionType === 'scene') {
+                if (!args.scene_id)
+                    return { id: toolCall.id, content: 'scene_id requis pour action_type=scene.' };
+                action = { type: 'scene', sceneId: args.scene_id as string };
+            } else {
+                if (!args.prompt_text)
+                    return { id: toolCall.id, content: 'prompt_text requis pour action_type=prompt.' };
+                action = {
+                    type: 'prompt',
+                    text: args.prompt_text as string,
+                    ...(args.prompt_output ? { output: args.prompt_output as OutputChannel } : {}),
                 };
+            }
 
-            const result = addSchedule(
-                args.name as string,
-                cron,
-                args.prompt as string,
-                outputChannel,
-                oneshot,
-            );
-            if (typeof result === 'string')
-                return { id: toolCall.id, content: result };
+            const automation = addAutomation({
+                name:    args.name as string,
+                trigger,
+                action,
+                notify:  (args.notify as string | undefined) ?? null,
+                enabled: true,
+            });
             return {
-                id: toolCall.id,
-                content: `Schedule "${args.name}" créé (id: ${
-                    result.id
-                }, cron: ${result.cron})${result.oneshot ? ' [oneshot]' : ''}`,
+                id:      toolCall.id,
+                content: `Automation "${automation.name}" créée (id: ${automation.id}, trigger: ${
+                    automation.trigger.type === 'cron'
+                        ? `cron ${automation.trigger.expr}`
+                        : `dans ${Math.round(automation.trigger.ms / 60_000)} min`
+                })`,
             };
         }
 
-        case 'schedule_list':
-            return { id: toolCall.id, content: listSchedules() };
+        case 'automation_list': {
+            const automations = loadAutomations();
+            if (automations.length === 0)
+                return { id: toolCall.id, content: '(aucune automation enregistrée)' };
+            const lines = automations.map((a) => {
+                const trig = a.trigger.type === 'cron'
+                    ? `cron: ${a.trigger.expr}`
+                    : `dans ${Math.round((a.trigger.fireAt - Date.now()) / 60_000)} min`;
+                const act = a.action.type === 'scene'
+                    ? `scène: ${a.action.sceneId}`
+                    : `prompt: "${a.action.text.slice(0, 40)}..."`;
+                return `[${a.id}] "${a.name}" — ${trig} — ${act} — ${a.enabled ? '✓' : '✗'}`;
+            });
+            return { id: toolCall.id, content: lines.join('\n') };
+        }
 
-        case 'schedule_delete':
+        case 'automation_delete':
             return {
-                id: toolCall.id,
-                content: deleteSchedule(args.id)
-                    ? `Schedule "${args.id}" supprimé.`
-                    : `Schedule "${args.id}" introuvable.`,
+                id:      toolCall.id,
+                content: deleteAutomation(args.id as string)
+                    ? `Automation "${args.id}" supprimée.`
+                    : `Automation "${args.id}" introuvable.`,
             };
 
-        case 'schedule_toggle':
-            return { id: toolCall.id, content: toggleSchedule(args.id) };
+        case 'automation_toggle':
+            return { id: toolCall.id, content: toggleAutomation(args.id as string) };
 
         case 'scene_list': {
             const scenes = listScenes();
