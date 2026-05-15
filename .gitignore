@@ -1,5 +1,4 @@
-node_modules
-node_modules/*
+node_modules/
 *.log
 .env
 commands/*.txt
@@ -12,5 +11,7 @@ data/
 assets/my_voice.wav
 **/dist/
 prompts/*
-dashboard
-**/__pycache__/**
+**/__pycache__/
+# Nuxt build artifacts
+**/.nuxt/
+**/.output/
