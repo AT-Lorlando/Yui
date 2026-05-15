@@ -23,24 +23,15 @@ export const LLM_HIDDEN_TOOLS = new Set([
  * In dev (ts-node) runs source directly so changes are picked up immediately.
  */
 export function buildServerConfigs(): McpServerConfig[] {
-    const root = path.resolve(__dirname, '../..');
-    const compiled = __filename.endsWith('.js');
-
-    const mcp = (pkg: string): McpServerConfig =>
-        compiled
-            ? {
-                  name: pkg,
-                  command: 'node',
-                  args: [path.join(root, `packages/${pkg}/dist/index.js`)],
-              }
-            : {
-                  name: pkg,
-                  command: 'npx',
-                  args: [
-                      'ts-node',
-                      path.join(root, `packages/${pkg}/src/index.ts`),
-                  ],
-              };
+    const cwd = process.cwd();
+    const root = path.basename(cwd) === 'dashboard' ? path.resolve(cwd, '..') : cwd;
+    // MCP servers always run compiled JS — ts-node overhead (~1.5 Go/process) is not acceptable
+    // Run `npm run build:packages` once before starting the orchestrator in dev mode
+    const mcp = (pkg: string): McpServerConfig => ({
+        name: pkg,
+        command: 'node',
+        args: [path.join(root, `packages/${pkg}/dist/index.js`)],
+    });
 
     return [
         mcp('mcp-hue'),
@@ -54,5 +45,11 @@ export function buildServerConfigs(): McpServerConfig[] {
         mcp('mcp-obsidian'),
         mcp('mcp-gmail'),
         // mcp('mcp-browser'), // Phase 2
+        {
+            name: 'mcp-search',
+            command: 'npx',
+            args: ['-y', 'tavily-mcp@latest'],
+        },
+        mcp('mcp-irrigation'),
     ];
 }

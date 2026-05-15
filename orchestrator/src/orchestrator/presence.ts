@@ -20,6 +20,7 @@ import Logger from '../logger';
 const HOME_LAT = parseFloat(process.env.HOME_LAT ?? '0');
 const HOME_LNG = parseFloat(process.env.HOME_LNG ?? '0');
 const PHONE_MAC = (process.env.PHONE_MAC ?? '').toLowerCase().trim();
+const PHONE_IP = (process.env.PHONE_IP ?? '').trim(); // optional fixed IP for precise ARP check
 const MIKROTIK_IP = process.env.MIKROTIK_IP ?? '10.0.0.1';
 const MIKROTIK_USER = process.env.MIKROTIK_USER ?? 'api-ro';
 const MIKROTIK_PASS = process.env.MIKROTIK_PASS ?? '';
@@ -75,27 +76,111 @@ function nextPingMs(distanceM: number): number {
 
 // ── Mikrotik REST API ─────────────────────────────────────────────────────────
 
-async function getMikrotikMacs(): Promise<string[]> {
-    const url = `http://${MIKROTIK_IP}/rest/ip/arp`;
-    const auth = Buffer.from(`${MIKROTIK_USER}:${MIKROTIK_PASS}`).toString(
-        'base64',
-    );
+/**
+ * Check if the phone is on the network via Mikrotik ARP.
+ *
+ * If PHONE_IP is set (fixed IP): query that specific entry and check
+ * mac-address matches + status is "reachable". This avoids false positives
+ * from stale ARP entries that can linger with the same MAC on old IPs.
+ *
+ * If PHONE_IP is not set: scan the full ARP table for the MAC (legacy).
+ *
+ * Returns true/false on success, null if the router is unreachable.
+ */
+/**
+ * Parses Mikrotik duration strings like "23m1s", "1h2m3s", "45s" → milliseconds.
+ */
+function parseMikrotikDuration(s: string): number {
+    let ms = 0;
+    const d = s.match(/(\d+)d/); if (d) ms += parseInt(d[1]) * 86_400_000;
+    const h = s.match(/(\d+)h/); if (h) ms += parseInt(h[1]) * 3_600_000;
+    const m = s.match(/(\d+)m/); if (m) ms += parseInt(m[1]) * 60_000;
+    const sec = s.match(/(\d+)s/); if (sec) ms += parseInt(sec[1]) * 1_000;
+    return ms;
+}
+
+interface NetworkCheckResult {
+    /** true = phone seen, false = phone absent, null = router unreachable */
+    present: boolean | null;
+}
+
+/**
+ * Check if the phone is on the network via Mikrotik DHCP + ARP.
+ *
+ * When PHONE_IP is set (fixed IP):
+ *   - Queries DHCP lease for stable `last-seen` timestamp (survives WiFi sleep)
+ *   - Queries ARP for real-time `reachable` status
+ *   - present = true if DHCP lease is bound OR ARP is reachable
+ *   - lastSeenAt = computed from DHCP last-seen (authoritative) or Date.now() if ARP reachable
+ *
+ * Using DHCP last-seen prevents the noisy "absent 2min / found / absent 2min" log
+ * pattern caused by Android WiFi power-saving waking the radio briefly.
+ */
+async function checkPhoneOnNetwork(): Promise<NetworkCheckResult> {
+    const auth = Buffer.from(`${MIKROTIK_USER}:${MIKROTIK_PASS}`).toString('base64');
+    const headers = { Authorization: `Basic ${auth}` };
+    const fail: NetworkCheckResult = { present: null };
+
     try {
-        const res = await fetch(url, {
-            headers: { Authorization: `Basic ${auth}` },
-            signal: AbortSignal.timeout(5_000),
-        });
-        if (!res.ok) {
-            Logger.warn(`Presence: Mikrotik API returned ${res.status}`);
-            return [];
+        if (PHONE_IP) {
+            const [dhcpRes, arpRes] = await Promise.all([
+                fetch(`http://${MIKROTIK_IP}/rest/ip/dhcp-server/lease?address=${PHONE_IP}`, {
+                    headers, signal: AbortSignal.timeout(5_000),
+                }),
+                fetch(`http://${MIKROTIK_IP}/rest/ip/arp?address=${PHONE_IP}`, {
+                    headers, signal: AbortSignal.timeout(5_000),
+                }),
+            ]);
+
+            if (!dhcpRes.ok && !arpRes.ok) {
+                Logger.warn(`[presence] Mikrotik error: DHCP=${dhcpRes.status} ARP=${arpRes.status}`);
+                return fail;
+            }
+
+            // DHCP: phone is associated to the network (survives WiFi power-save sleep)
+            let dhcpBound = false;
+            if (dhcpRes.ok) {
+                const leases: { 'mac-address'?: string; status?: string }[] = await dhcpRes.json();
+                const lease = leases[0];
+                dhcpBound = lease?.['mac-address']?.toLowerCase() === PHONE_MAC &&
+                            lease?.status === 'bound';
+            }
+
+            // ARP: real-time reachability (true only when phone is awake/responding)
+            let arpReachable = false;
+            if (arpRes.ok) {
+                const entries: { 'mac-address'?: string; status?: string }[] = await arpRes.json();
+                const entry = entries[0];
+                arpReachable = entry?.['mac-address']?.toLowerCase() === PHONE_MAC &&
+                               entry?.status === 'reachable';
+            }
+
+            // present = DHCP bound OR ARP reachable
+            // DHCP handles sleep mode (phone stops responding to ARP but lease stays bound)
+            // ARP handles the case where DHCP hasn't expired yet after true departure
+            //   → departure is caught by the 15min absence timeout, not by DHCP expiry
+            const present = dhcpBound || arpReachable;
+
+            Logger.debug(`[presence] DHCP=${dhcpBound ? 'bound' : 'absent'} ARP=${arpReachable ? 'reachable' : 'stale'}`);
+            return { present };
+        } else {
+            // Fallback: full ARP table scan
+            const res = await fetch(`http://${MIKROTIK_IP}/rest/ip/arp`, {
+                headers, signal: AbortSignal.timeout(5_000),
+            });
+            if (!res.ok) {
+                Logger.warn(`[presence] Mikrotik ARP API returned ${res.status}`);
+                return fail;
+            }
+            const entries: { 'mac-address'?: string; status?: string }[] = await res.json();
+            const found = entries.some(
+                (e) => e['mac-address']?.toLowerCase() === PHONE_MAC && e.status === 'reachable',
+            );
+            return { present: found };
         }
-        const entries: { 'mac-address'?: string }[] = await res.json();
-        return entries
-            .map((e) => e['mac-address']?.toLowerCase())
-            .filter((m): m is string => Boolean(m));
     } catch (e) {
-        Logger.warn(`Presence: Mikrotik unreachable — ${e}`);
-        return [];
+        Logger.warn(`[presence] Mikrotik unreachable — ${e}`);
+        return fail;
     }
 }
 
@@ -131,10 +216,16 @@ export class PresenceManager {
         }
 
         const distanceM = Math.round(haversine(lat, lng, HOME_LAT, HOME_LNG));
-        Logger.info(`Presence: ${distanceM}m from home (state=${this.state})`);
+        Logger.info(
+            `[presence] GPS update: ${distanceM}m from home` +
+            ` (radius=${ARRIVAL_RADIUS_M}m, state=${this.state})`,
+        );
 
         if (distanceM <= ARRIVAL_RADIUS_M && this.state === 'away') {
+            Logger.info(`[presence] Within arrival radius → triggering arrival scene`);
             this.triggerArrival();
+        } else if (distanceM <= ARRIVAL_RADIUS_M) {
+            Logger.info(`[presence] Within radius but state=${this.state} — no scene triggered`);
         }
 
         return {
@@ -176,26 +267,41 @@ export class PresenceManager {
     // ── Private ───────────────────────────────────────────────────────────────
 
     private async checkMac(): Promise<void> {
-        const macs = await getMikrotikMacs();
-        const found = macs.includes(PHONE_MAC);
+        const { present } = await checkPhoneOnNetwork();
 
-        if (found) {
+        if (present === null) {
+            Logger.warn('[presence] MAC check skipped (router unreachable)');
+            return;
+        }
+
+        if (present) {
+            // ARP confirmed the phone is actively reachable right now
             this.lastSeenOnNetwork = Date.now();
-            if (this.state === 'unknown') {
-                Logger.info('Presence: phone on network → state=home');
+            if (this.state !== 'home') {
+                Logger.info(`[presence] Phone on network → state=home (was ${this.state})`);
                 this.state = 'home';
             }
             return;
         }
 
-        if (this.lastSeenOnNetwork === null) return; // never seen, stay unknown
+        // Phone not found and router responded
+        if (this.lastSeenOnNetwork === null) {
+            Logger.info(`[presence] Phone not found on first check → state=away`);
+            this.state = 'away';
+            return;
+        }
 
         const absentMs = Date.now() - this.lastSeenOnNetwork;
-        Logger.debug(
-            `Presence: MAC absent for ${Math.round(absentMs / 60_000)} min`,
-        );
+        const absentMin = Math.round(absentMs / 60_000);
+        // Only log at INFO when absence is long enough to be meaningful
+        if (absentMs > 5 * 60_000) {
+            Logger.info(`[presence] Phone absent for ${absentMin}min (timeout=${AWAY_TIMEOUT_MS / 60_000}min, state=${this.state})`);
+        } else {
+            Logger.debug(`[presence] Phone absent for ${absentMin}min (WiFi sleep likely)`);
+        }
 
         if (absentMs > AWAY_TIMEOUT_MS && this.state !== 'away') {
+            Logger.info(`[presence] Timeout reached → triggering departure scene`);
             this.triggerDeparture();
         }
     }
