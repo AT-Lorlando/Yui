@@ -1,7 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist",
+    "outDir": "./orchestrator/dist",
     "rootDir": "./orchestrator/src"
   },
   "include": ["orchestrator/src/**/*"],

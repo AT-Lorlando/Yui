@@ -21,7 +21,7 @@ module.exports = {
     // ── Orchestrateur (LLM + MCP servers) ──────────────────────────────────
     {
       name: 'yui-orchestrator',
-      script: 'dist/main.js',
+      script: 'orchestrator/dist/main.js',
       cwd: ROOT,
       env: {
         ...env,
