@@ -1,6 +1,5 @@
 // ecosystem.config.js
 const { parsed: env } = require('dotenv').config({ path: __dirname + '/.env' })
-const ROOT = __dirname
 
 module.exports = {
   apps: [
@@ -9,7 +8,6 @@ module.exports = {
       name: 'yui-tts',
       script: 'voice/tts_engine.py',
       interpreter: '/home/chuya/.venvs/xtts/bin/python',
-      cwd: ROOT,
       env: { ...env, COQUI_TOS_AGREED: '1', XTTS_PORT: env.XTTS_PORT ?? '18770' },
       listen_timeout: 60000,
       autorestart: true,
@@ -22,7 +20,6 @@ module.exports = {
     {
       name: 'yui-orchestrator',
       script: 'orchestrator/dist/main.js',
-      cwd: ROOT,
       env: {
         ...env,
         NODE_ENV: 'production',
@@ -40,7 +37,6 @@ module.exports = {
       name: 'yui-voice',
       script: 'scripts/start-voice.sh',
       interpreter: 'bash',
-      cwd: ROOT,
       env: {
         ...env,
         SATELLITE_WS_PORT: env.SATELLITE_WS_PORT ?? '5050',
@@ -60,7 +56,6 @@ module.exports = {
     {
       name: 'yui-dashboard',
       script: 'dashboard/.output/server/index.mjs',
-      cwd: ROOT,
       env: {
         ...env,
         NODE_ENV: 'production',
