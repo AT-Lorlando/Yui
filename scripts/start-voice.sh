@@ -15,8 +15,8 @@ wait_for() {
     echo "[voice] $name is ready."
 }
 
-wait_for "XTTS server"    "http://localhost:18770/health"
-wait_for "Orchestrator"   "http://localhost:3000/health"
+wait_for "XTTS server"    "http://localhost:${XTTS_PORT:-18770}/health"
+wait_for "Orchestrator"   "http://localhost:${ORCHESTRATOR_PORT:-4000}/health"
 
-echo "[voice] Starting voice pipeline..."
-exec python3 src/voice_pipeline.py
+echo "[voice] Starting voice server (satellite mode)..."
+exec python3 voice/server.py
