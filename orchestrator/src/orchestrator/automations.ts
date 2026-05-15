@@ -141,6 +141,14 @@ export function updateAutomation(
     return automation;
 }
 
+/** Trigger an automation manually, regardless of its enabled state. */
+export async function runAutomation(id: string): Promise<{ success: boolean; error?: string }> {
+    const automation = loadAutomations().find((a) => a.id === id);
+    if (!automation) return { success: false, error: `Automation "${id}" not found` };
+    await execute(automation);
+    return { success: true };
+}
+
 // ── Runtime ────────────────────────────────────────────────────────────────────
 
 type OrderFn    = (prompt: string) => Promise<string>;

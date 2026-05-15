@@ -292,7 +292,7 @@ export class Orchestrator {
         toolCalls: OpenAI.Chat.ChatCompletionMessageToolCall[],
         story: Story | null,
         messages: OpenAI.Chat.ChatCompletionMessageParam[],
-        outputChannel: import('./scheduler').OutputChannel = 'cast',
+        outputChannel: import('./automations').OutputChannel = 'cast',
     ): Promise<void> {
         const sceneRunner = (id: string) =>
             runScene(id, (tool, args) => this.callTool(tool, args));
@@ -355,7 +355,7 @@ export class Orchestrator {
     async processOrder(
         order: string,
         reset?: boolean,
-        outputChannel: import('./scheduler').OutputChannel = 'cast',
+        outputChannel: import('./automations').OutputChannel = 'cast',
     ): Promise<string> {
         if (reset) {
             this.conversationHistory = [];
@@ -442,7 +442,7 @@ export class Orchestrator {
         order: string,
         options?: StreamOptions,
         reset?: boolean,
-        outputChannel: import('./scheduler').OutputChannel = 'cast',
+        outputChannel: import('./automations').OutputChannel = 'cast',
     ): AsyncGenerator<string, void, unknown> {
         if (reset) {
             // Finalize the previous session story (triggers summarization)

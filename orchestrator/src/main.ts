@@ -2,7 +2,16 @@ import './env'; // load env first
 import http from 'http';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
 import { InputSource, StdinSource, HttpSource } from './input';
-import { initScheduler, loadSchedules, toggleSchedule, deleteSchedule, type OutputChannel } from './orchestrator/scheduler';
+import {
+    initAutomations,
+    loadAutomations,
+    addAutomation,
+    deleteAutomation,
+    toggleAutomation,
+    updateAutomation,
+    runAutomation,
+    type OutputChannel,
+} from './orchestrator/automations';
 import { sendNotification } from './orchestrator/notify';
 import { PresenceManager, type PresenceState } from './orchestrator/presence';
 import {
@@ -62,7 +71,7 @@ async function main() {
     const handler = (
         order: string,
         reset?: boolean,
-        outputChannel?: import('./orchestrator/scheduler').OutputChannel,
+        outputChannel?: import('./orchestrator/automations').OutputChannel,
     ) => orchestrator.processOrder(order, reset, outputChannel);
     const streamHandler: import('./input/InputSource').StreamHandler = (
         order,
@@ -97,23 +106,6 @@ async function main() {
             orchestrator.callTool(name, args),
     };
 
-    const schedulesHandler = {
-        list: loadSchedules,
-        toggle: toggleSchedule,
-        remove: deleteSchedule,
-    };
-
-    // Scheduler: fires cron jobs, dispatches response to the configured channel
-    async function dispatchOutput(
-        text: string,
-        channel: OutputChannel,
-    ): Promise<void> {
-        if (channel === 'cast') return speakViaPipeline(text);
-        if (channel === 'notify') return sendNotification(text);
-        // 'none' → silent automation, no output
-    }
-    initScheduler(handler, dispatchOutput);
-
     // Presence manager — detects departure (MAC) and arrival (GPS)
     // Triggers scenes directly — no LLM involved
     let presence: PresenceManager;
@@ -124,6 +116,32 @@ async function main() {
         }),
     );
     presence.start();
+
+    const makeSceneRunner = (id: string) =>
+        runScene(id, deviceHandler, {
+            presenceState: presence.getState(),
+            notify: (msg) => sendNotification(msg),
+        });
+
+    const automationsHandler = {
+        list:   loadAutomations,
+        add:    addAutomation,
+        update: updateAutomation,
+        toggle: toggleAutomation,
+        remove: deleteAutomation,
+        run:    (id: string) => runAutomation(id),
+    };
+
+    // Automations: fires cron/delay jobs, dispatches response to the configured channel
+    async function dispatchOutput(
+        text: string,
+        channel: OutputChannel,
+    ): Promise<void> {
+        if (channel === 'cast') return speakViaPipeline(text);
+        if (channel === 'notify') return sendNotification(text);
+        // 'none' → silent automation, no output
+    }
+    initAutomations(handler, dispatchOutput, makeSceneRunner, speakViaPipeline);
 
     const locationHandler = (lat: number, lng: number, accuracy: number) =>
         presence.handleLocation(lat, lng, accuracy);
@@ -140,7 +158,7 @@ async function main() {
             scenesHandler,
             toolsHandler,
             locationHandler,
-            schedulesHandler,
+            automationsHandler,
             presenceHandler,
         );
     }
