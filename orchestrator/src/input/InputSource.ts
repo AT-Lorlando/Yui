@@ -1,8 +1,8 @@
 export type StreamOptions = {
     /** Cap the LLM response length. Use ~80 for voice, undefined for text. */
     maxTokens?: number;
-    /** Output channel for schedules created during this request. */
-    outputChannel?: import('../orchestrator/scheduler').OutputChannel;
+    /** Output channel for automations created during this request. */
+    outputChannel?: import('../orchestrator/automations').OutputChannel;
 };
 
 export type StreamHandler = (
@@ -38,10 +38,13 @@ export interface ToolsHandler {
     call: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
-export interface SchedulesHandler {
-    list: () => import('../orchestrator/scheduler').Schedule[];
+export interface AutomationsHandler {
+    list:   () => import('../orchestrator/automations').Automation[];
+    add:    (input: import('../orchestrator/automations').CreateAutomationInput) => import('../orchestrator/automations').Automation;
+    update: (id: string, patch: Partial<Omit<import('../orchestrator/automations').Automation, 'id' | 'createdAt'>>) => import('../orchestrator/automations').Automation | null;
     toggle: (id: string) => string;
     remove: (id: string) => boolean;
+    run:    (id: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export type PresenceHandler = () => import('../orchestrator/presence').PresenceState;
@@ -57,7 +60,7 @@ export interface InputSource {
         handler: (
             order: string,
             reset?: boolean,
-            outputChannel?: import('../orchestrator/scheduler').OutputChannel,
+            outputChannel?: import('../orchestrator/automations').OutputChannel,
         ) => Promise<string>,
         streamHandler?: StreamHandler,
         statusHandler?: StatusHandler,
@@ -65,7 +68,7 @@ export interface InputSource {
         scenesHandler?: ScenesHandler,
         toolsHandler?: ToolsHandler,
         locationHandler?: LocationHandler,
-        schedulesHandler?: SchedulesHandler,
+        automationsHandler?: AutomationsHandler,
         presenceHandler?: PresenceHandler,
     ): Promise<void>;
     stop(): Promise<void>;

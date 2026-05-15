@@ -14,7 +14,7 @@ import {
     ScenesHandler,
     ToolsHandler,
     LocationHandler,
-    SchedulesHandler,
+    AutomationsHandler,
     PresenceHandler,
 } from './InputSource';
 import { loadStore } from '../orchestrator/memory';
@@ -68,7 +68,7 @@ export class HttpSource implements InputSource {
         handler: (
             order: string,
             reset?: boolean,
-            outputChannel?: import('../orchestrator/scheduler').OutputChannel,
+            outputChannel?: import('../orchestrator/automations').OutputChannel,
         ) => Promise<string>,
         streamHandler?: StreamHandler,
         statusHandler?: StatusHandler,
@@ -76,7 +76,7 @@ export class HttpSource implements InputSource {
         scenesHandler?: ScenesHandler,
         toolsHandler?: ToolsHandler,
         locationHandler?: LocationHandler,
-        schedulesHandler?: SchedulesHandler,
+        automationsHandler?: AutomationsHandler,
         presenceHandler?: PresenceHandler,
     ): Promise<void> {
         const port = Number(process.env.PORT ?? 3000);
@@ -490,11 +490,11 @@ export class HttpSource implements InputSource {
             app.use('/scenes', sc);
         }
 
-        // ── Schedules (cron jobs) ─────────────────────────────────────────────
-        if (schedulesHandler) {
-            const sch = express.Router();
+        // ── Automations ───────────────────────────────────────────────────────
+        if (automationsHandler) {
+            const auto = express.Router();
 
-            sch.use((req: any, res: any, next: any) => {
+            auto.use((req: any, res: any, next: any) => {
                 const bearer = req.headers['authorization']?.split(' ')[1];
                 if (!this.checkPassword(bearer, req.ip)) {
                     return res.status(401).json({ error: 'Unauthorized' });
@@ -502,22 +502,47 @@ export class HttpSource implements InputSource {
                 next();
             });
 
-            sch.get('/', (_req: any, res: any) => {
-                res.json(schedulesHandler.list());
+            auto.get('/', (_req: any, res: any) => {
+                res.json(automationsHandler.list());
             });
 
-            sch.patch('/:id/toggle', (req: any, res: any) => {
-                const msg = schedulesHandler.toggle(req.params.id);
+            auto.post('/', (req: any, res: any) => {
+                try {
+                    const automation = automationsHandler.add(req.body);
+                    res.status(201).json(automation);
+                } catch (e: any) {
+                    res.status(400).json({ error: e.message });
+                }
+            });
+
+            auto.patch('/:id', (req: any, res: any) => {
+                const result = automationsHandler.update(req.params.id, req.body);
+                if (!result) return res.status(404).json({ error: 'Automation not found' });
+                res.json(result);
+            });
+
+            auto.patch('/:id/toggle', (req: any, res: any) => {
+                const msg = automationsHandler.toggle(req.params.id);
                 res.json({ message: msg });
             });
 
-            sch.delete('/:id', (req: any, res: any) => {
-                const ok = schedulesHandler.remove(req.params.id);
-                if (!ok) return res.status(404).json({ error: 'Schedule not found' });
+            auto.delete('/:id', (req: any, res: any) => {
+                const ok = automationsHandler.remove(req.params.id);
+                if (!ok) return res.status(404).json({ error: 'Automation not found' });
                 res.json({ success: true });
             });
 
-            app.use('/schedules', sch);
+            auto.post('/:id/run', async (req: any, res: any) => {
+                try {
+                    const result = await automationsHandler.run(req.params.id);
+                    if (!result.success) return res.status(404).json({ error: result.error });
+                    res.json({ success: true });
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+
+            app.use('/automations', auto);
         }
 
         // ── Memory (read-only) ────────────────────────────────────────────────
