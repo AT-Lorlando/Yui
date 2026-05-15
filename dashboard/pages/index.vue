@@ -51,14 +51,8 @@
       <template #header>
         <div class="flex items-center justify-between">
           <h2 class="text-base font-semibold">PM2 Processes</h2>
-          <UButton
-            icon="i-heroicons-arrow-path"
-            variant="ghost"
-            color="gray"
-            size="xs"
-            :loading="pm2Pending"
-            @click="refreshPm2"
-          />
+          <UButton icon="i-heroicons-arrow-path" variant="ghost" color="gray" size="xs"
+            :loading="pm2Pending" @click="refreshPm2" />
         </div>
       </template>
 
@@ -70,27 +64,56 @@
         PM2 not running or no processes found
       </div>
 
-      <UTable
-        v-else
-        :columns="pm2Columns"
-        :rows="pm2Rows"
-        :ui="{ td: { base: 'text-sm' } }"
-      >
-        <template #status-data="{ row }">
-          <UBadge
-            :color="statusColor(row.status)"
-            variant="subtle"
-            size="xs"
-            :label="row.status"
-          />
+      <div v-else class="space-y-2">
+        <div v-for="proc in pm2Rows" :key="proc.name"
+          class="flex items-center gap-3 rounded-lg bg-gray-50 dark:bg-gray-800 px-4 py-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="font-medium text-sm truncate">{{ proc.name }}</span>
+              <UBadge :color="statusColor(proc.status)" variant="subtle" size="xs" :label="proc.status" />
+            </div>
+            <div class="text-xs text-gray-400 mt-0.5">
+              PID {{ proc.pid }} · {{ proc.memory }} · {{ proc.cpu }}% CPU · {{ proc.restarts }} restarts
+            </div>
+          </div>
+
+          <div class="flex gap-1 shrink-0">
+            <UButton size="xs" variant="ghost" icon="i-heroicons-play"
+              :loading="actionLoading[proc.name] === 'start'"
+              @click="pm2Act(proc.name, 'start')" />
+            <UButton size="xs" variant="ghost" icon="i-heroicons-stop"
+              :loading="actionLoading[proc.name] === 'stop'"
+              @click="pm2Act(proc.name, 'stop')" />
+            <UButton size="xs" variant="ghost" icon="i-heroicons-arrow-path"
+              :loading="actionLoading[proc.name] === 'restart'"
+              @click="pm2Act(proc.name, 'restart')" />
+            <UButton size="xs" variant="ghost"
+              :icon="logsOpen[proc.name] ? 'i-heroicons-chevron-up' : 'i-heroicons-command-line'"
+              @click="toggleLogs(proc.name)" />
+          </div>
+        </div>
+
+        <!-- Logs panels -->
+        <template v-for="proc in pm2Rows" :key="proc.name + '-logs'">
+          <div v-if="logsOpen[proc.name]"
+            class="rounded-lg bg-black text-green-400 font-mono text-xs p-3 max-h-64 overflow-y-auto"
+            :ref="(el) => { if (el) logPanels[proc.name] = el as HTMLElement }">
+            <div v-for="(line, i) in logs[proc.name]" :key="i"
+              :class="line.type === 'err' ? 'text-red-400' : 'text-green-400'">
+              <span class="text-gray-500 mr-1">{{ formatTs(line.ts) }}</span>{{ line.data }}
+            </div>
+            <div v-if="!logs[proc.name]?.length" class="text-gray-500">En attente de logs…</div>
+          </div>
         </template>
-        <template #memory-data="{ row }">
-          {{ formatMemory(row.memoryRaw) }}
-        </template>
-        <template #cpu-data="{ row }">
-          {{ row.cpu }}%
-        </template>
-      </UTable>
+      </div>
+    </UCard>
+
+    <!-- Architecture -->
+    <UCard>
+      <template #header>
+        <h2 class="text-base font-semibold">Architecture</h2>
+      </template>
+      <ArchitectureDiagram :servers="status?.servers" />
     </UCard>
 
     <!-- Order Tester -->
@@ -163,10 +186,12 @@ interface Pm2Process {
   }
 }
 
+const { $api } = useNuxtApp()
+
 // ── Status ────────────────────────────────────────────────────────────────────
 const { data: status, pending: statusPending, refresh: refreshStatus } = await useAsyncData<ServerStatus>(
   'status',
-  () => $fetch('/api/status'),
+  () => $fetch('/api/orch/status'),
 )
 
 // ── PM2 ───────────────────────────────────────────────────────────────────────
@@ -176,25 +201,70 @@ const { data: pm2Data, pending: pm2Pending, refresh: refreshPm2 } = await useAsy
   { default: () => [] },
 )
 
-const pm2Columns = [
-  { key: 'name', label: 'Name' },
-  { key: 'status', label: 'Status' },
-  { key: 'pid', label: 'PID' },
-  { key: 'memory', label: 'Memory' },
-  { key: 'cpu', label: 'CPU' },
-  { key: 'restarts', label: 'Restarts' },
-]
-
 const pm2Rows = computed(() =>
   (pm2Data.value ?? []).map((p) => ({
     name: p.name,
     status: p.pm2_env?.status ?? 'unknown',
     pid: p.pid ?? '-',
-    memoryRaw: p.monit?.memory ?? 0,
+    memory: formatMemory(p.monit?.memory ?? 0),
     cpu: p.monit?.cpu ?? 0,
     restarts: p.pm2_env?.restart_time ?? 0,
   })),
 )
+
+// ── PM2 actions ────────────────────────────────────────────────────────────────
+const actionLoading = ref<Record<string, string>>({})
+
+async function pm2Act(name: string, action: 'start' | 'stop' | 'restart') {
+  actionLoading.value[name] = action
+  try {
+    await $api(`/api/pm2/${name}/${action}`, { method: 'POST' })
+    await refreshPm2()
+  } finally {
+    delete actionLoading.value[name]
+  }
+}
+
+// ── PM2 logs SSE ───────────────────────────────────────────────────────────────
+const logsOpen = ref<Record<string, boolean>>({})
+const logs = ref<Record<string, { type: 'out' | 'err'; data: string; ts: number }[]>>({})
+const logPanels = ref<Record<string, HTMLElement>>({})
+const evtSources: Record<string, EventSource> = {}
+
+function toggleLogs(name: string) {
+  if (logsOpen.value[name]) {
+    logsOpen.value[name] = false
+    evtSources[name]?.close()
+    delete evtSources[name]
+  } else {
+    logsOpen.value[name] = true
+    logs.value[name] = []
+    const es = new EventSource(`/api/pm2/${name}/logs`)
+    evtSources[name] = es
+    es.onerror = () => {
+      logsOpen.value[name] = false
+      es.close()
+      delete evtSources[name]
+    }
+    es.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data)
+        if (msg.type && msg.data !== undefined) {
+          logs.value[name].push(msg)
+          if (logs.value[name].length > 500) logs.value[name].shift()
+          nextTick(() => {
+            const el = logPanels.value[name]
+            if (el) el.scrollTop = el.scrollHeight
+          })
+        }
+      } catch { /* ignore */ }
+    }
+  }
+}
+
+function formatTs(ts: number): string {
+  return new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
 
 function statusColor(s: string): 'green' | 'red' | 'yellow' | 'gray' {
   if (s === 'online') return 'green'
@@ -218,6 +288,8 @@ onMounted(() => {
   onUnmounted(() => clearInterval(interval))
 })
 
+onUnmounted(() => Object.values(evtSources).forEach((es) => es.close()))
+
 // ── Order tester ──────────────────────────────────────────────────────────────
 const orderText = ref('')
 const orderResult = ref<string | null>(null)
@@ -231,7 +303,7 @@ async function sendOrder() {
   orderError.value = null
 
   try {
-    const data = await $fetch<{ response: string }>('/api/order', {
+    const data = await $api<{ response: string }>('/api/orch/order', {
       method: 'POST',
       body: { order: orderText.value },
     })

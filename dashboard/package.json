@@ -3,13 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nuxt dev --port 3002",
+    "dev": "nuxt dev --host 0.0.0.0",
     "build": "nuxt build",
     "start": "node .output/server/index.mjs",
     "preview": "nuxt preview"
   },
   "dependencies": {
     "@nuxt/ui": "^2.21.0",
-    "nuxt": "^3.15.4"
+    "mermaid": "^11.15.0",
+    "nuxt": "^3.15.4",
+    "pm2": "^7.0.1"
   }
 }

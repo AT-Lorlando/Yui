@@ -18,6 +18,49 @@
         >
           MCP Tools
         </NuxtLink>
+        <span class="text-gray-200 dark:text-gray-700 select-none">|</span>
+        <NuxtLink
+          to="/scenes"
+          class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-500 transition"
+          active-class="text-primary-500 font-medium"
+        >
+          Scènes
+        </NuxtLink>
+        <NuxtLink
+          to="/schedules"
+          class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-500 transition"
+          active-class="text-primary-500 font-medium"
+        >
+          Routines
+        </NuxtLink>
+        <NuxtLink
+          to="/timers"
+          class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-500 transition"
+          active-class="text-primary-500 font-medium"
+        >
+          Timers
+        </NuxtLink>
+        <NuxtLink
+          to="/memory"
+          class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-500 transition"
+          active-class="text-primary-500 font-medium"
+        >
+          Mémoire
+        </NuxtLink>
+        <NuxtLink
+          to="/presence"
+          class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-500 transition"
+          active-class="text-primary-500 font-medium"
+        >
+          Présence
+        </NuxtLink>
+        <NuxtLink
+          to="/prompts"
+          class="text-sm text-gray-600 dark:text-gray-400 hover:text-primary-500 transition"
+          active-class="text-primary-500 font-medium"
+        >
+          Prompts
+        </NuxtLink>
         <div class="ml-auto">
           <UButton
             icon="i-heroicons-moon"

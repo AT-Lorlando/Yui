@@ -146,6 +146,8 @@
 </template>
 
 <script setup lang="ts">
+const { $api } = useNuxtApp()
+
 interface ToolDef {
   serverName: string
   name: string
@@ -166,7 +168,7 @@ interface FieldSchema {
 // ── Tools list ────────────────────────────────────────────────────────────────
 const { data: toolsList, pending: toolsPending } = await useAsyncData<ToolDef[]>(
   'tools',
-  () => $fetch('/api/tools'),
+  () => $fetch('/api/orch/tools'),
   { default: () => [] },
 )
 
@@ -244,7 +246,7 @@ async function callTool() {
       }
     }
 
-    const data = await $fetch<{ result: unknown }>(`/api/tools/${selectedTool.value.name}`, {
+    const data = await $api<{ result: unknown }>(`/api/orch/tools/${selectedTool.value.name}`, {
       method: 'POST',
       body: args,
     })
