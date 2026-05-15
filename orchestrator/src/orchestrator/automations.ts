@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import cron from 'node-cron';
 import Logger from '../logger';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -93,11 +94,7 @@ function saveAutomations(automations: Automation[]): void {
     fs.writeFileSync(AUTOMATIONS_FILE, JSON.stringify(automations, null, 2));
 }
 
-// ── CRUD (runtime calls are wired in Task 2) ───────────────────────────────────
-
-/** scheduleAutomation / cancelAutomation are defined in the runtime section below */
-declare function scheduleAutomation(a: Automation): void;
-declare function cancelAutomation(id: string): void;
+// ── CRUD ───────────────────────────────────────────────────────────────────────
 
 export function addAutomation(input: CreateAutomationInput): Automation {
     const automation: Automation = { ...input, id: crypto.randomUUID().slice(0, 8), createdAt: Date.now() };
@@ -142,4 +139,97 @@ export function updateAutomation(
     saveAutomations(automations);
     if (automation.enabled) scheduleAutomation(automation);
     return automation;
+}
+
+// ── Runtime ────────────────────────────────────────────────────────────────────
+
+type OrderFn    = (prompt: string) => Promise<string>;
+type OutputFn   = (text: string, channel: OutputChannel) => Promise<void>;
+type RunSceneFn = (id: string) => Promise<{ success: boolean; error?: string }>;
+type SpeakFn    = (text: string) => Promise<void>;
+
+const _cronTasks = new Map<string, ReturnType<typeof cron.schedule>>();
+const _timeouts  = new Map<string, ReturnType<typeof setTimeout>>();
+
+let _onOrder:   OrderFn    | null = null;
+let _onOutput:  OutputFn   | null = null;
+let _runScene:  RunSceneFn | null = null;
+let _speak:     SpeakFn    | null = null;
+
+async function execute(automation: Automation): Promise<void> {
+    Logger.info(`Automation trigger: "${automation.name}" (${automation.id})`);
+    try {
+        if (automation.action.type === 'scene') {
+            if (!_runScene) {
+                Logger.warn(`Automation "${automation.name}": no scene runner`);
+                return;
+            }
+            const result = await _runScene(automation.action.sceneId);
+            if (!result.success)
+                Logger.warn(`Automation "${automation.name}": scene error — ${result.error}`);
+            if (automation.notify && _speak)
+                await _speak(automation.notify);
+        } else {
+            if (!_onOrder) return;
+            const response = await _onOrder(automation.action.text);
+            if (_onOutput && response)
+                await _onOutput(response, automation.action.output ?? 'cast');
+        }
+    } catch (err) {
+        Logger.error(`Automation "${automation.name}" failed: ${err}`);
+    }
+    // delay = one-shot: auto-delete after execution
+    if (automation.trigger.type === 'delay') deleteAutomation(automation.id);
+}
+
+function scheduleAutomation(automation: Automation): void {
+    cancelAutomation(automation.id);
+
+    if (automation.trigger.type === 'cron') {
+        if (!cron.validate(automation.trigger.expr)) {
+            Logger.warn(`Invalid cron for "${automation.name}": ${automation.trigger.expr}`);
+            return;
+        }
+        const task = cron.schedule(
+            automation.trigger.expr,
+            () => void execute(automation),
+            { timezone: 'Europe/Paris' },
+        );
+        _cronTasks.set(automation.id, task);
+    } else {
+        const remaining = automation.trigger.fireAt - Date.now();
+        if (remaining <= 0) {
+            Logger.info(`Automation "${automation.name}": delay expired at startup, removing`);
+            deleteAutomation(automation.id);
+            return;
+        }
+        const timeout = setTimeout(() => void execute(automation), remaining);
+        _timeouts.set(automation.id, timeout);
+    }
+}
+
+function cancelAutomation(id: string): void {
+    const task = _cronTasks.get(id);
+    if (task) { task.stop(); _cronTasks.delete(id); }
+    const timeout = _timeouts.get(id);
+    if (timeout) { clearTimeout(timeout); _timeouts.delete(id); }
+}
+
+export function initAutomations(
+    onOrder:  OrderFn,
+    onOutput: OutputFn,
+    runScene: RunSceneFn,
+    speak:    SpeakFn,
+): void {
+    _onOrder  = onOrder;
+    _onOutput = onOutput;
+    _runScene = runScene;
+    _speak    = speak;
+
+    const automations = loadAutomations();
+    let active = 0;
+    for (const a of automations) {
+        if (a.enabled) { scheduleAutomation(a); active++; }
+    }
+    Logger.info(`Automations: ${active} active loaded`);
 }
