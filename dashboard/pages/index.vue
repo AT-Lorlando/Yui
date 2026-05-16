@@ -33,15 +33,22 @@
         <p>Orchestrator not reachable</p>
       </div>
 
-      <div v-else class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-        <div
-          v-for="server in status.servers"
-          :key="server.name"
-          class="bg-gray-50 dark:bg-gray-800 rounded-lg px-4 py-3 text-center"
-        >
-          <p class="text-xs text-gray-500 truncate">{{ server.name.replace('mcp-', '') }}</p>
-          <p class="text-2xl font-bold text-primary-500 mt-1">{{ server.tools }}</p>
-          <p class="text-xs text-gray-400">tools</p>
+      <div v-else class="space-y-5">
+        <div v-for="{ group, items } in groupedServers" :key="group">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            {{ group }}
+          </p>
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            <div
+              v-for="server in items"
+              :key="server.name"
+              class="bg-gray-50 dark:bg-gray-800 rounded-lg px-4 py-3 text-center"
+            >
+              <p class="text-xs text-gray-500 truncate">{{ server.name.replace('mcp-', '') }}</p>
+              <p class="text-2xl font-bold text-primary-500 mt-1">{{ server.tools }}</p>
+              <p class="text-xs text-gray-400">tools</p>
+            </div>
+          </div>
         </div>
       </div>
     </UCard>
@@ -192,6 +199,10 @@ const { $api } = useNuxtApp()
 const { data: status, pending: statusPending, refresh: refreshStatus } = await useAsyncData<ServerStatus>(
   'status',
   () => $fetch('/api/orch/status'),
+)
+
+const groupedServers = computed(() =>
+  groupServers(status.value?.servers ?? []),
 )
 
 // ── PM2 ───────────────────────────────────────────────────────────────────────
