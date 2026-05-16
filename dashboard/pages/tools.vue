@@ -12,7 +12,7 @@
             {{ group }}
           </p>
           <div v-for="{ name: serverName, tools } in servers" :key="serverName" class="mb-2">
-            <p class="text-xs font-medium text-gray-300 dark:text-gray-600 px-2 mb-0.5">
+            <p class="text-xs font-medium text-gray-600 dark:text-gray-400 px-2 mb-0.5">
               {{ serverName.replace('mcp-', '') }}
             </p>
             <div class="space-y-0.5">
