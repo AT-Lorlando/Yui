@@ -1,30 +1,35 @@
 <template>
-  <div class="py-6 flex gap-4" style="height: calc(100vh - 100px)">
+  <div class="py-6 flex gap-4" style="height: calc(100vh - 48px)">
     <!-- Left: Tool list sidebar -->
-    <div class="w-60 flex-shrink-0 overflow-y-auto space-y-3 pr-1">
+    <div class="w-64 flex-shrink-0 overflow-y-auto pr-1">
       <div v-if="toolsPending" class="flex justify-center pt-10">
         <UIcon name="i-heroicons-arrow-path" class="animate-spin text-gray-400 text-2xl" />
       </div>
 
       <template v-else>
-        <div v-for="(tools, server) in groupedTools" :key="server">
+        <div v-for="{ group, items: servers } in groupedByCategory" :key="group" class="mb-4">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 mb-1">
-            {{ String(server).replace('mcp-', '') }}
+            {{ group }}
           </p>
-          <div class="space-y-0.5">
-            <button
-              v-for="tool in tools"
-              :key="tool.name"
-              class="w-full text-left px-3 py-2 rounded-md text-sm transition"
-              :class="
-                selectedTool?.name === tool.name
-                  ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 font-medium'
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
-              "
-              @click="selectTool(tool)"
-            >
-              {{ tool.name }}
-            </button>
+          <div v-for="{ name: serverName, tools } in servers" :key="serverName" class="mb-2">
+            <p class="text-xs font-medium text-gray-300 dark:text-gray-600 px-2 mb-0.5">
+              {{ serverName.replace('mcp-', '') }}
+            </p>
+            <div class="space-y-0.5">
+              <button
+                v-for="tool in tools"
+                :key="tool.name"
+                class="w-full text-left px-3 py-1.5 rounded-md text-sm transition"
+                :class="
+                  selectedTool?.name === tool.name
+                    ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 font-medium'
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                "
+                @click="selectTool(tool)"
+              >
+                {{ tool.name }}
+              </button>
+            </div>
           </div>
         </div>
       </template>
@@ -179,6 +184,11 @@ const groupedTools = computed(() => {
     groups[tool.serverName].push(tool)
   }
   return groups
+})
+
+const groupedByCategory = computed(() => {
+  const servers = Object.entries(groupedTools.value).map(([name, tools]) => ({ name, tools }))
+  return groupServers(servers)
 })
 
 // ── Selected tool ─────────────────────────────────────────────────────────────
