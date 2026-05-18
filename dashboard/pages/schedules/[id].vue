@@ -205,7 +205,6 @@ function buildPayload() {
     enabled: form.enabled,
     trigger,
     action,
-    notify: null,
   }
 }
 
