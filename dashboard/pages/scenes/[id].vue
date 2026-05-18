@@ -124,6 +124,9 @@ if (!isNew) {
       favorite: data.value.favorite,
     })
     isBuiltIn.value = !!(data.value as any).builtIn
+  } else {
+    toast.add({ title: 'Scène introuvable', color: 'red' })
+    await router.push('/scenes')
   }
   loading.value = false
 }
