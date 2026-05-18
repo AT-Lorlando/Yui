@@ -44,9 +44,9 @@
             </div>
 
             <!-- Expanded: ArgForm -->
-            <div v-if="expandedIndex === idx && !disabled" class="px-5 pb-4 bg-gray-50 dark:bg-gray-900/30">
+            <div v-if="expandedIndex === idx" class="px-5 pb-4 bg-gray-50 dark:bg-gray-900/30">
               <ArgForm
-                :schema="(action as any)._schema ?? {}"
+                :schema="action._schema ?? {}"
                 :args="action.args"
                 :delay-ms="action.delayMs"
                 @update:args="updateArgs(idx, $event)"
