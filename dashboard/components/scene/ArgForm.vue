@@ -25,7 +25,7 @@
           v-else-if="prop.type === 'number' || prop.type === 'integer'"
           type="number"
           :model-value="args[key] ?? ''"
-          @update:model-value="update(key, $event === '' ? undefined : Number($event))"
+          @update:model-value="update(key, parseNumberInput($event))"
           size="sm"
           class="flex-1"
         />
@@ -93,12 +93,18 @@ function isRequired(key: string): boolean {
   return (props.schema?.required ?? []).includes(key)
 }
 
+function parseNumberInput(raw: string | number): number | undefined {
+  if (raw === '' || raw === undefined) return undefined
+  const num = Number(raw)
+  return Number.isNaN(num) ? undefined : num
+}
+
 function update(key: string, value: unknown) {
   emit('update:args', { ...props.args, [key]: value })
 }
 
 function updateDelay(raw: string | number) {
-  const v = raw === '' ? undefined : Number(raw)
+  const v = parseNumberInput(raw)
   localDelayMs.value = v
   emit('update:delayMs', v)
 }
