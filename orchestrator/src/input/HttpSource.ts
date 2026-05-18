@@ -480,6 +480,18 @@ export class HttpSource implements InputSource {
                 res.json({ success: true });
             });
 
+            // Update a custom scene
+            sc.patch('/:id', (req: any, res: any) => {
+                try {
+                    const { name, icon, color, description, setup, state, favorite } = req.body;
+                    const scene = scenesHandler.update(req.params.id, { name, icon, color, description, setup, state, favorite });
+                    if (!scene) return res.status(404).json({ error: 'Scene not found or is built-in' });
+                    res.json(scene);
+                } catch (e: any) {
+                    res.status(400).json({ error: e.message });
+                }
+            });
+
             // Toggle favorite
             sc.patch('/:id/favorite', (req: any, res: any) => {
                 const scene = scenesHandler.toggleFavorite(req.params.id);
@@ -523,6 +535,7 @@ export class HttpSource implements InputSource {
 
             auto.patch('/:id/toggle', (req: any, res: any) => {
                 const msg = automationsHandler.toggle(req.params.id);
+                if (msg === null) return res.status(404).json({ error: 'Automation not found' });
                 res.json({ message: msg });
             });
 

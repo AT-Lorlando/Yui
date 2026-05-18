@@ -24,6 +24,10 @@ export interface ScenesHandler {
     create: (
         data: import('../orchestrator/scenes').CreateSceneInput,
     ) => import('../orchestrator/scenes').Scene;
+    update: (
+        id: string,
+        input: Partial<import('../orchestrator/scenes').CreateSceneInput>,
+    ) => import('../orchestrator/scenes').Scene | null;
     remove: (id: string) => boolean;
     toggleFavorite: (id: string) => import('../orchestrator/scenes').Scene | null;
 }
@@ -42,7 +46,7 @@ export interface AutomationsHandler {
     list:   () => import('../orchestrator/automations').Automation[];
     add:    (input: import('../orchestrator/automations').CreateAutomationInput) => import('../orchestrator/automations').Automation;
     update: (id: string, patch: Partial<Omit<import('../orchestrator/automations').Automation, 'id' | 'createdAt'>>) => import('../orchestrator/automations').Automation | null;
-    toggle: (id: string) => string;
+    toggle: (id: string) => string | null;
     remove: (id: string) => boolean;
     run:    (id: string) => Promise<{ success: boolean; error?: string }>;
 }

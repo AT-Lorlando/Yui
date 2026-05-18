@@ -17,6 +17,7 @@ import { PresenceManager, type PresenceState } from './orchestrator/presence';
 import {
     listScenes,
     createScene,
+    updateScene,
     deleteScene,
     runScene,
     toggleFavorite,
@@ -96,6 +97,7 @@ async function main() {
                 notify: (msg) => sendNotification(msg),
             }),
         create: createScene,
+        update: updateScene,
         remove: deleteScene,
         toggleFavorite,
     };

@@ -156,6 +156,16 @@ export function deleteScene(id: string): boolean {
     return true;
 }
 
+export function updateScene(id: string, input: Partial<CreateSceneInput>): Scene | null {
+    const scenes = loadScenes();
+    const idx = scenes.findIndex((s) => s.id === id);
+    if (idx === -1 || scenes[idx].builtIn) return null;
+    scenes[idx] = { ...scenes[idx], ...input };
+    saveScenes(scenes);
+    Logger.info(`Scene updated: "${scenes[idx].name}" (${id})`);
+    return scenes[idx];
+}
+
 export function toggleFavorite(id: string): Scene | null {
     const scenes = loadScenes();
     const scene = scenes.find((s) => s.id === id);
