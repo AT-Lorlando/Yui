@@ -1,8 +1,11 @@
 <template>
   <div class="py-6 space-y-6">
     <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold">Scènes</h1>
-      <UBadge v-if="scenes?.length" color="gray" variant="subtle" :label="`${scenes.length} scènes`" />
+      <div class="flex items-center gap-3">
+        <h1 class="text-2xl font-bold">Scènes</h1>
+        <UBadge v-if="scenes?.length" color="gray" variant="subtle" :label="`${scenes.length} scènes`" />
+      </div>
+      <UButton icon="i-heroicons-plus" size="sm" to="/scenes/new">Nouvelle scène</UButton>
     </div>
 
     <div v-if="pending" class="flex justify-center py-12">
@@ -55,17 +58,27 @@
                 <span>{{ scene.setup.length }} setup</span>
                 <span>{{ scene.state.length }} actions</span>
               </div>
-              <UButton
-                size="sm"
-                variant="soft"
-                :color="triggerLoading[scene.id] ? 'gray' : 'primary'"
-                :loading="triggerLoading[scene.id]"
-                :icon="triggerDone[scene.id] ? 'i-heroicons-check' : 'i-heroicons-play'"
-                class="w-full"
-                @click="trigger(scene.id)"
-              >
-                {{ triggerDone[scene.id] ? 'Lancée !' : 'Déclencher' }}
-              </UButton>
+              <div class="flex gap-2">
+                <UButton
+                  v-if="!scene.builtIn"
+                  size="sm"
+                  variant="ghost"
+                  color="gray"
+                  icon="i-heroicons-pencil-square"
+                  :to="`/scenes/${scene.id}`"
+                />
+                <UButton
+                  size="sm"
+                  variant="soft"
+                  :color="triggerLoading[scene.id] ? 'gray' : 'primary'"
+                  :loading="triggerLoading[scene.id]"
+                  :icon="triggerDone[scene.id] ? 'i-heroicons-check' : 'i-heroicons-play'"
+                  class="flex-1"
+                  @click="trigger(scene.id)"
+                >
+                  {{ triggerDone[scene.id] ? 'Lancée !' : 'Déclencher' }}
+                </UButton>
+              </div>
             </div>
           </div>
         </div>
@@ -115,17 +128,27 @@
                 <span>{{ scene.setup.length }} setup</span>
                 <span>{{ scene.state.length }} actions</span>
               </div>
-              <UButton
-                size="sm"
-                variant="soft"
-                :color="triggerLoading[scene.id] ? 'gray' : 'primary'"
-                :loading="triggerLoading[scene.id]"
-                :icon="triggerDone[scene.id] ? 'i-heroicons-check' : 'i-heroicons-play'"
-                class="w-full"
-                @click="trigger(scene.id)"
-              >
-                {{ triggerDone[scene.id] ? 'Lancée !' : 'Déclencher' }}
-              </UButton>
+              <div class="flex gap-2">
+                <UButton
+                  v-if="!scene.builtIn"
+                  size="sm"
+                  variant="ghost"
+                  color="gray"
+                  icon="i-heroicons-pencil-square"
+                  :to="`/scenes/${scene.id}`"
+                />
+                <UButton
+                  size="sm"
+                  variant="soft"
+                  :color="triggerLoading[scene.id] ? 'gray' : 'primary'"
+                  :loading="triggerLoading[scene.id]"
+                  :icon="triggerDone[scene.id] ? 'i-heroicons-check' : 'i-heroicons-play'"
+                  class="flex-1"
+                  @click="trigger(scene.id)"
+                >
+                  {{ triggerDone[scene.id] ? 'Lancée !' : 'Déclencher' }}
+                </UButton>
+              </div>
             </div>
           </div>
         </div>
