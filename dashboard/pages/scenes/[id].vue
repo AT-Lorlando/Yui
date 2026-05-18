@@ -106,21 +106,33 @@ const form = reactive<SceneForm>({
   state: [],
 })
 
+// Attach inputSchema from tools list to each action as _schema
+function attachSchemas(actions: SceneAction[], tools: any[]): SceneAction[] {
+  return actions.map((a) => {
+    const tool = tools.find((t: any) => t.name === a.tool)
+    return tool ? { ...a, _schema: tool.inputSchema } : { ...a }
+  })
+}
+
 // Load existing scene
 if (!isNew) {
-  const { data } = await useAsyncData(`scene-${id}`, () =>
-    ($api as any)('/api/orch/scenes').then((scenes: any[]) =>
-      scenes.find((s: any) => s.id === id) ?? null,
+  const [{ data }, { data: toolsData }] = await Promise.all([
+    useAsyncData(`scene-${id}`, () =>
+      ($api as any)('/api/orch/scenes').then((scenes: any[]) =>
+        scenes.find((s: any) => s.id === id) ?? null,
+      ),
     ),
-  )
+    useAsyncData('tools-scene-editor', () => ($api as any)('/api/orch/tools')),
+  ])
   if (data.value) {
+    const tools = toolsData.value ?? []
     Object.assign(form, {
       name: data.value.name,
       icon: data.value.icon,
       color: data.value.color,
       description: data.value.description,
-      setup: data.value.setup ?? [],
-      state: data.value.state ?? [],
+      setup: attachSchemas(data.value.setup ?? [], tools),
+      state: attachSchemas(data.value.state ?? [], tools),
       favorite: data.value.favorite,
     })
     isBuiltIn.value = !!(data.value as any).builtIn
@@ -159,6 +171,7 @@ async function save() {
       await $api(`/api/orch/scenes/${id}`, { method: 'PATCH', body: payload })
       toast.add({ title: 'Scène enregistrée', color: 'green' })
     }
+    await refreshNuxtData('scenes')
     router.push('/scenes')
   } catch (e: any) {
     toast.add({ title: 'Erreur', description: e?.data?.error ?? String(e), color: 'red' })

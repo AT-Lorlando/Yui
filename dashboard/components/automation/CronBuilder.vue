@@ -89,7 +89,19 @@ function parseCron(expr: string) {
   const parse = (s: string) => (s && /^\d+$/.test(s) ? s : '*')
   const parseDow = (s: string): number[] => {
     if (!s || s === '*') return DAYS.map((d) => d.value)
-    return s.split(',').map(Number).filter((n) => !isNaN(n) && n >= 0 && n <= 6)
+    const result: number[] = []
+    for (const part of s.split(',')) {
+      if (part.includes('-')) {
+        const [from, to] = part.split('-').map(Number)
+        if (!isNaN(from) && !isNaN(to)) {
+          for (let i = from; i <= to; i++) if (i >= 0 && i <= 6) result.push(i)
+        }
+      } else {
+        const n = Number(part)
+        if (!isNaN(n) && n >= 0 && n <= 6) result.push(n)
+      }
+    }
+    return result.length > 0 ? result : DAYS.map((d) => d.value)
   }
   return {
     minute: parse(parts[0]),
