@@ -18,6 +18,7 @@ import {
     PresenceHandler,
 } from './InputSource';
 import { loadStore } from '../orchestrator/memory';
+import { saveFcmToken } from '../orchestrator/notify';
 
 // ── TTS helper ────────────────────────────────────────────────────────────────
 // Calls the XTTS server to synthesise text and returns WAV audio as base64.
@@ -695,6 +696,20 @@ export class HttpSource implements InputSource {
                 `[location] → state=${result.state} distance=${result.distance_m}m next_ping=${Math.round(result.next_ping_ms / 1000)}s`,
             );
             return res.json(result);
+        });
+
+        // ── FCM device token registration ─────────────────────────────────────
+        app.post('/devices/fcm-token', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const { token } = req.body ?? {};
+            if (!token || typeof token !== 'string') {
+                return res.status(400).json({ error: 'Missing token' });
+            }
+            saveFcmToken(token);
+            return res.json({ ok: true });
         });
 
         return new Promise((resolve, reject) => {
