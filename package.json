@@ -11,7 +11,8 @@
     "build:orchestrator": "tsc -p tsconfig.json",
     "build:packages": "npm run build --workspaces",
     "dev-dashboard": "cd dashboard && npm run dev",
-    "dev:orchestrator": "npm run build:packages && PORT=4000 npx ts-node -P tsconfig.json orchestrator/src/main.ts",
+    "dev:orchestrator_": "npm run build:packages && PORT=4000 npx ts-node -P tsconfig.json orchestrator/src/main.ts",
+    "dev:orchestrator": "PORT=4000 npx ts-node -P tsconfig.json orchestrator/src/main.ts",
     "debug": "LOG_LEVEL=debug npx ts-node -P tsconfig.json orchestrator/src/main.ts",
     "start": "LOG_LEVEL=info node orchestrator/dist/main.js",
     "pm2:start": "npm run build && pm2 start ecosystem.config.js",
@@ -62,6 +63,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
+    "google-auth-library": "^10.6.2",
     "node-cron": "^4.2.1",
     "openai": "^4.85.1",
     "winston": "^3.8.2"
