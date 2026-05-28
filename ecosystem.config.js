@@ -7,6 +7,7 @@ module.exports = {
     {
       name: 'yui-tts',
       script: 'voice/tts_engine.py',
+      cwd: __dirname,
       interpreter: '/home/chuya/.venvs/xtts/bin/python',
       env: { ...env, COQUI_TOS_AGREED: '1', XTTS_PORT: env.XTTS_PORT ?? '18770' },
       listen_timeout: 60000,
@@ -20,6 +21,7 @@ module.exports = {
     {
       name: 'yui-orchestrator',
       script: 'orchestrator/dist/main.js',
+      cwd: __dirname,
       env: {
         ...env,
         NODE_ENV: 'production',
@@ -36,6 +38,7 @@ module.exports = {
     {
       name: 'yui-voice',
       script: 'scripts/start-voice.sh',
+      cwd: __dirname,
       interpreter: 'bash',
       env: {
         ...env,
@@ -56,12 +59,33 @@ module.exports = {
     {
       name: 'yui-dashboard',
       script: 'dashboard/.output/server/index.mjs',
+      cwd: __dirname,
       env: {
         ...env,
         NODE_ENV: 'production',
         PORT: env.DASHBOARD_PORT ?? '3000',
         HOST: '0.0.0.0',
         ORCHESTRATOR_URL: `http://localhost:${env.ORCHESTRATOR_PORT ?? '4000'}`,
+        PROJECT_ROOT: __dirname,
+      },
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 5000,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+    },
+
+    // ── App unifié (Nuxt 4 web build) ─────────────────────────────────────────
+    {
+      name: 'yui-app',
+      script: 'mobile/.output/server/index.mjs',
+      cwd: __dirname,
+      env: {
+        ...env,
+        NODE_ENV: 'production',
+        PORT: env.APP_PORT ?? '3002',
+        HOST: '0.0.0.0',
+        ORCHESTRATOR_URL: `http://localhost:${env.ORCHESTRATOR_PORT ?? '4000'}`,
+        NUXT_PUBLIC_BEARER_TOKEN: env.BEARER_TOKEN ?? 'yui',
       },
       autorestart: true,
       max_restarts: 10,
