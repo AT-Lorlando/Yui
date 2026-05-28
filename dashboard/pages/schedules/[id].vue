@@ -240,6 +240,8 @@ if (isNew && route.query.template) {
     actionType.value = tpl.actionType
     if (tpl.promptText) promptText.value = tpl.promptText
     if (tpl.promptOutput) promptOutput.value = tpl.promptOutput
+  } else {
+    toast.add({ title: 'Modèle inconnu', color: 'red' })
   }
 }
 
