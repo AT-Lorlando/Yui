@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import cron from 'node-cron';
 import Logger from '../logger';
+import { appendToHistory } from './history';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -116,10 +117,10 @@ export function deleteAutomation(id: string): boolean {
     return true;
 }
 
-export function toggleAutomation(id: string): string {
+export function toggleAutomation(id: string): string | null {
     const automations = loadAutomations();
     const automation = automations.find((a) => a.id === id);
-    if (!automation) return `Automation "${id}" introuvable.`;
+    if (!automation) return null;
     automation.enabled = !automation.enabled;
     saveAutomations(automations);
     if (automation.enabled) scheduleAutomation(automation);
@@ -186,8 +187,11 @@ async function execute(automation: Automation): Promise<void> {
     } catch (err) {
         Logger.error(`Automation "${automation.name}" failed: ${err}`);
     }
-    // delay = one-shot: auto-delete after execution
-    if (automation.trigger.type === 'delay') deleteAutomation(automation.id);
+    // delay = one-shot: log to history then auto-delete
+    if (automation.trigger.type === 'delay') {
+        appendToHistory(automation);
+        deleteAutomation(automation.id);
+    }
 }
 
 function scheduleAutomation(automation: Automation): void {
