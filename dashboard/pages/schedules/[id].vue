@@ -43,9 +43,11 @@
       <!-- Delay input -->
       <div v-else class="flex items-center gap-3">
         <UFormGroup label="Dans" class="flex-1">
-          <UInput v-model.number="delayMinutes" type="number" min="1" placeholder="30" />
+          <UInput v-model.number="delayValue" type="number" min="1" placeholder="30" />
         </UFormGroup>
-        <span class="text-sm text-gray-500 mt-5">minutes</span>
+        <UFormGroup label=" " class="w-36">
+          <USelect v-model="delayUnit" :options="delayUnitOptions" />
+        </UFormGroup>
       </div>
     </div>
 
@@ -123,7 +125,29 @@ const form = reactive({
 
 const triggerType = ref<'cron' | 'delay'>('cron')
 const cronExpr = ref('0 9 * * 1-5')
-const delayMinutes = ref(30)
+const delayValue = ref(30)
+const delayUnit = ref<'secondes' | 'minutes' | 'heures' | 'jours'>('minutes')
+
+const delayUnitOptions = [
+  { label: 'secondes', value: 'secondes' },
+  { label: 'minutes', value: 'minutes' },
+  { label: 'heures', value: 'heures' },
+  { label: 'jours', value: 'jours' },
+]
+
+function unitToMs(unit: string): number {
+  if (unit === 'secondes') return 1_000
+  if (unit === 'heures') return 3_600_000
+  if (unit === 'jours') return 86_400_000
+  return 60_000
+}
+
+function msToUnit(ms: number): { value: number; unit: 'secondes' | 'minutes' | 'heures' | 'jours' } {
+  if (ms % 86_400_000 === 0) return { value: ms / 86_400_000, unit: 'jours' }
+  if (ms % 3_600_000 === 0) return { value: ms / 3_600_000, unit: 'heures' }
+  if (ms % 60_000 === 0) return { value: ms / 60_000, unit: 'minutes' }
+  return { value: Math.round(ms / 1_000), unit: 'secondes' }
+}
 
 const actionType = ref<'scene' | 'prompt'>('scene')
 const sceneId = ref('')
@@ -172,7 +196,9 @@ if (!isNew) {
       cronExpr.value = a.trigger.expr ?? '* * * * *'
     } else {
       triggerType.value = 'delay'
-      delayMinutes.value = Math.round((a.trigger.ms ?? 60000) / 60000)
+      const { value, unit } = msToUnit(a.trigger.ms ?? 60_000)
+      delayValue.value = value
+      delayUnit.value = unit
     }
 
     if (a.action.type === 'scene') {
@@ -193,7 +219,7 @@ function buildPayload() {
   const trigger =
     triggerType.value === 'cron'
       ? { type: 'cron' as const, expr: cronExpr.value }
-      : { type: 'delay' as const, ms: delayMinutes.value * 60000 }
+      : { type: 'delay' as const, ms: delayValue.value * unitToMs(delayUnit.value) }
 
   const action =
     actionType.value === 'scene'
