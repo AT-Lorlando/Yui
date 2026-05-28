@@ -19,6 +19,7 @@ import {
 } from './InputSource';
 import { loadStore } from '../orchestrator/memory';
 import { saveFcmToken } from '../orchestrator/notify';
+import { loadHistory } from '../orchestrator/history';
 
 // ── TTS helper ────────────────────────────────────────────────────────────────
 // Calls the XTTS server to synthesise text and returns WAV audio as base64.
@@ -518,6 +519,10 @@ export class HttpSource implements InputSource {
 
             auto.get('/', (_req: any, res: any) => {
                 res.json(automationsHandler.list());
+            });
+
+            auto.get('/history', (_req: any, res: any) => {
+                res.json(loadHistory());
             });
 
             auto.post('/', (req: any, res: any) => {
