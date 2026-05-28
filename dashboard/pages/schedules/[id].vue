@@ -114,6 +114,24 @@ const toast = useToast()
 const id = route.params.id as string
 const isNew = id === 'new'
 
+const TEMPLATES: Record<string, {
+  name: string
+  triggerType: 'cron' | 'delay'
+  cronExpr?: string
+  actionType: 'scene' | 'prompt'
+  promptText?: string
+  promptOutput?: 'cast' | 'notify' | 'none'
+}> = {
+  morning_briefing: {
+    name: 'Briefing matinal',
+    triggerType: 'cron',
+    cronExpr: '30 7 * * 1-5',
+    actionType: 'prompt',
+    promptText: "Consulte mon agenda pour les réunions et événements d'aujourd'hui, et récupère la météo du jour. Envoie-moi une notification résumant tout ça en 3 phrases courtes.",
+    promptOutput: 'notify',
+  },
+}
+
 const saving = ref(false)
 
 const form = reactive({
@@ -210,6 +228,18 @@ if (!isNew) {
   } else {
     toast.add({ title: 'Automation introuvable', color: 'red' })
     await router.push('/schedules')
+  }
+}
+
+if (isNew && route.query.template) {
+  const tpl = TEMPLATES[route.query.template as string]
+  if (tpl) {
+    form.name = tpl.name
+    triggerType.value = tpl.triggerType
+    if (tpl.cronExpr) cronExpr.value = tpl.cronExpr
+    actionType.value = tpl.actionType
+    if (tpl.promptText) promptText.value = tpl.promptText
+    if (tpl.promptOutput) promptOutput.value = tpl.promptOutput
   }
 }
 

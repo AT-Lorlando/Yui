@@ -5,7 +5,12 @@
         <h1 class="text-2xl font-bold">Automations</h1>
         <UBadge v-if="automations?.length" color="gray" variant="subtle" :label="`${automations.length} automation${automations.length > 1 ? 's' : ''}`" />
       </div>
-      <UButton icon="i-heroicons-plus" size="sm" to="/schedules/new">Nouvelle automation</UButton>
+      <div class="flex items-center gap-2">
+        <UDropdown :items="templateItems">
+          <UButton icon="i-heroicons-document-duplicate" size="sm" variant="ghost" color="gray">Modèles</UButton>
+        </UDropdown>
+        <UButton icon="i-heroicons-plus" size="sm" to="/schedules/new">Nouvelle automation</UButton>
+      </div>
     </div>
 
     <div v-if="pending" class="flex justify-center py-12">
@@ -124,6 +129,15 @@ interface Automation {
 
 const { $api } = useNuxtApp()
 const toast = useToast()
+const router = useRouter()
+
+const templateItems = [[
+  {
+    label: 'Briefing matinal',
+    icon: 'i-heroicons-sun',
+    click: () => router.push('/schedules/new?template=morning_briefing'),
+  },
+]]
 
 const { data: automations, pending, error, refresh } = await useAsyncData<Automation[]>(
   'automations',
