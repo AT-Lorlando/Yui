@@ -171,11 +171,7 @@ function triggerDetail(a: Automation): string {
     if (diff <= 0) return 'expiré'
     return `dans ${formatDiff(diff)}`
   }
-  const ms = a.trigger.ms ?? 0
-  if (ms >= 86_400_000) return `${Math.round(ms / 86_400_000)} j`
-  if (ms >= 3_600_000) return `${Math.round(ms / 3_600_000)} h`
-  if (ms >= 60_000) return `${Math.round(ms / 60_000)} min`
-  return `${Math.round(ms / 1_000)} s`
+  return formatDiff(a.trigger.ms ?? 0)
 }
 
 async function toggle(id: string) {
