@@ -99,6 +99,53 @@
         </div>
       </div>
     </div>
+
+    <!-- History -->
+    <div class="rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <button
+        class="w-full flex items-center justify-between px-5 py-4 text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+        @click="historyOpen = !historyOpen"
+      >
+        <div class="flex items-center gap-2">
+          <UIcon name="i-heroicons-clock-rotate-left" class="text-gray-400" />
+          <span>Historique</span>
+          <UBadge v-if="history?.length" color="gray" variant="subtle" size="xs" :label="`${history.length}`" />
+        </div>
+        <UIcon :name="historyOpen ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'" class="text-gray-400" />
+      </button>
+
+      <div v-if="historyOpen" class="divide-y divide-gray-100 dark:divide-gray-700">
+        <div v-if="!history?.length" class="px-5 py-8 text-center text-gray-400 text-sm">
+          Aucune automation dans l'historique.
+        </div>
+        <div
+          v-for="entry in history"
+          :key="`${entry.id}-${entry.firedAt}`"
+          class="flex items-center justify-between px-5 py-3 gap-4"
+        >
+          <div class="flex-1 min-w-0 space-y-0.5">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm font-medium">{{ entry.name }}</span>
+              <UBadge :color="entry.action.type === 'scene' ? 'blue' : 'purple'" variant="subtle" size="xs" :label="entry.action.type" />
+            </div>
+            <p class="text-xs text-gray-400">
+              {{ relativeTime(entry.firedAt) }}
+              <span v-if="entry.action.type === 'prompt' && entry.action.text" class="ml-1 italic">· "{{ entry.action.text.slice(0, 60) }}{{ entry.action.text.length > 60 ? '…' : '' }}"</span>
+              <span v-else-if="entry.action.type === 'scene'" class="ml-1 italic">· scène : {{ entry.action.sceneId }}</span>
+            </p>
+          </div>
+          <UButton
+            size="xs"
+            variant="ghost"
+            icon="i-heroicons-arrow-path"
+            color="gray"
+            :to="recreateUrl(entry)"
+          >
+            Recréer
+          </UButton>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -144,6 +191,45 @@ const { data: automations, pending, error, refresh } = await useAsyncData<Automa
   () => $api('/api/orch/automations'),
   { default: () => [] },
 )
+
+interface HistoryEntry {
+  id: string
+  name: string
+  action: {
+    type: 'scene' | 'prompt'
+    sceneId?: string
+    text?: string
+    output?: string
+  }
+  firedAt: number
+}
+
+const { data: history, refresh: refreshHistory } = await useAsyncData<HistoryEntry[]>(
+  'automation-history',
+  () => $api('/api/orch/automations/history'),
+  { default: () => [] },
+)
+
+const historyOpen = ref(false)
+
+function relativeTime(ms: number): string {
+  const diff = Date.now() - ms
+  if (diff < 60_000) return "à l'instant"
+  if (diff < 3_600_000) return `il y a ${Math.floor(diff / 60_000)} min`
+  if (diff < 86_400_000) return `il y a ${Math.floor(diff / 3_600_000)} h`
+  return `il y a ${Math.floor(diff / 86_400_000)} j`
+}
+
+function recreateUrl(entry: HistoryEntry): string {
+  const params = new URLSearchParams({ name: entry.name, actionType: entry.action.type })
+  if (entry.action.type === 'prompt') {
+    if (entry.action.text) params.set('promptText', entry.action.text)
+    params.set('promptOutput', entry.action.output ?? 'cast')
+  } else {
+    if (entry.action.sceneId) params.set('sceneId', entry.action.sceneId)
+  }
+  return `/schedules/new?${params.toString()}`
+}
 
 const toggleLoading = ref<Record<string, boolean>>({})
 const deleteLoading = ref<Record<string, boolean>>({})
