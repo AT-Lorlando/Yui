@@ -245,6 +245,22 @@ if (isNew && route.query.template) {
   }
 }
 
+if (isNew && route.query.actionType) {
+  if (route.query.name) form.name = decodeURIComponent(route.query.name as string)
+  if (route.query.actionType === 'scene') {
+    actionType.value = 'scene'
+    if (route.query.sceneId) sceneId.value = route.query.sceneId as string
+  } else if (route.query.actionType === 'prompt') {
+    actionType.value = 'prompt'
+    if (route.query.promptText) promptText.value = decodeURIComponent(route.query.promptText as string)
+    const allowedOutputs: ('cast' | 'notify' | 'none')[] = ['cast', 'notify', 'none']
+    if (route.query.promptOutput && allowedOutputs.includes(route.query.promptOutput as 'cast' | 'notify' | 'none')) {
+      promptOutput.value = route.query.promptOutput as 'cast' | 'notify' | 'none'
+    }
+  }
+  triggerType.value = 'delay'
+}
+
 function buildPayload() {
   const trigger =
     triggerType.value === 'cron'
