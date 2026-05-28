@@ -1,7 +1,7 @@
 <template>
-  <div class="py-6 flex gap-4" style="height: calc(100vh - 48px)">
+  <div class="py-6 flex flex-col md:flex-row gap-4 md:h-[calc(100vh-48px)]">
     <!-- Left: Tool list sidebar -->
-    <div class="w-64 flex-shrink-0 overflow-y-auto pr-1">
+    <div class="w-full md:w-64 md:flex-shrink-0 overflow-y-auto md:pr-1 max-h-64 md:max-h-none border md:border-0 border-gray-200 dark:border-gray-700 rounded-xl md:rounded-none">
       <div v-if="toolsPending" class="flex justify-center pt-10">
         <UIcon name="i-heroicons-arrow-path" class="animate-spin text-gray-400 text-2xl" />
       </div>

@@ -45,7 +45,7 @@
 
             <!-- Expanded: ArgForm -->
             <div v-if="expandedIndex === idx" class="px-5 pb-4 bg-gray-50 dark:bg-gray-900/30">
-              <ArgForm
+              <SceneArgForm
                 :schema="action._schema ?? {}"
                 :args="action.args"
                 :delay-ms="action.delayMs"
@@ -82,7 +82,7 @@
     </div>
 
     <!-- ToolPicker modal -->
-    <ToolPicker v-model="pickerOpen" @select="addAction" />
+    <SceneToolPicker v-model="pickerOpen" @select="addAction" />
   </div>
 </template>
 

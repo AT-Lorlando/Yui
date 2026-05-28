@@ -59,10 +59,10 @@
       </div>
 
       <!-- Setup actions -->
-      <ActionList v-model="form.setup" label="Setup" :disabled="isBuiltIn" />
+      <SceneActionList v-model="form.setup" label="Setup" :disabled="isBuiltIn" />
 
       <!-- State actions -->
-      <ActionList v-model="form.state" label="État" :disabled="isBuiltIn" />
+      <SceneActionList v-model="form.state" label="État" :disabled="isBuiltIn" />
     </template>
   </div>
 </template>

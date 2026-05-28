@@ -1,15 +1,33 @@
 <template>
   <div class="flex h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden">
+    <!-- Mobile overlay -->
+    <Transition name="fade">
+      <div
+        v-if="mobileMenuOpen"
+        class="fixed inset-0 bg-black/40 z-20 md:hidden"
+        @click="mobileMenuOpen = false"
+      />
+    </Transition>
+
     <!-- ── Sidebar ──────────────────────────────────────────────────────── -->
     <aside
-      class="w-56 flex-shrink-0 flex flex-col sticky top-0 h-screen
+      class="fixed inset-y-0 left-0 z-30 w-56 flex flex-col
              bg-white dark:bg-gray-900
              border-r border-gray-200 dark:border-gray-800
-             overflow-y-auto"
+             overflow-y-auto
+             transform transition-transform duration-200 ease-in-out
+             md:relative md:translate-x-0 md:z-auto md:flex-shrink-0"
+      :class="mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
     >
       <!-- Logo -->
-      <div class="px-5 py-5">
+      <div class="px-5 py-5 flex items-center justify-between">
         <span class="font-bold text-xl tracking-tight">Yui</span>
+        <button
+          class="md:hidden p-1 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+          @click="mobileMenuOpen = false"
+        >
+          <UIcon name="i-heroicons-x-mark" class="text-lg" />
+        </button>
       </div>
 
       <!-- Nav -->
@@ -73,7 +91,20 @@
 
     <!-- ── Main content ───────────────────────────────────────────────── -->
     <main class="flex-1 min-w-0 overflow-y-auto">
-      <div class="px-6 max-w-6xl mx-auto">
+      <!-- Mobile header -->
+      <div class="md:hidden sticky top-0 z-10 flex items-center px-4 py-3
+                  bg-white/80 dark:bg-gray-900/80 backdrop-blur
+                  border-b border-gray-200 dark:border-gray-800">
+        <button
+          class="p-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+          @click="mobileMenuOpen = true"
+        >
+          <UIcon name="i-heroicons-bars-3" class="text-xl" />
+        </button>
+        <span class="ml-3 font-bold text-lg">Yui</span>
+      </div>
+
+      <div class="px-4 md:px-6 max-w-6xl mx-auto">
         <NuxtPage />
       </div>
     </main>
@@ -85,6 +116,9 @@
 <script setup lang="ts">
 const colorMode = useColorMode()
 const route = useRoute()
+const mobileMenuOpen = ref(false)
+
+watch(() => route.path, () => { mobileMenuOpen.value = false })
 
 function toggleColorMode() {
   colorMode.preference = colorMode.value === 'dark' ? 'light' : 'dark'
@@ -100,3 +134,14 @@ function linkClass(path: string, exact = false): string[] {
   ]
 }
 </script>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>
