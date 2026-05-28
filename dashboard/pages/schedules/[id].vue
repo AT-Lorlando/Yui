@@ -41,13 +41,11 @@
       <CronBuilder v-if="triggerType === 'cron'" v-model="cronExpr" />
 
       <!-- Delay input -->
-      <div v-else class="flex items-center gap-3">
+      <div v-else class="flex items-end gap-3">
         <UFormGroup label="Dans" class="flex-1">
           <UInput v-model.number="delayValue" type="number" min="1" placeholder="30" />
         </UFormGroup>
-        <UFormGroup label=" " class="w-36">
-          <USelect v-model="delayUnit" :options="delayUnitOptions" />
-        </UFormGroup>
+        <USelect v-model="delayUnit" :options="delayUnitOptions" class="w-36 mb-0.5" />
       </div>
     </div>
 
@@ -135,7 +133,7 @@ const delayUnitOptions = [
   { label: 'jours', value: 'jours' },
 ]
 
-function unitToMs(unit: string): number {
+function unitToMs(unit: 'secondes' | 'minutes' | 'heures' | 'jours'): number {
   if (unit === 'secondes') return 1_000
   if (unit === 'heures') return 3_600_000
   if (unit === 'jours') return 86_400_000
@@ -237,6 +235,10 @@ function buildPayload() {
 async function save() {
   if (!form.name.trim()) {
     toast.add({ title: 'Le nom est requis', color: 'red' })
+    return
+  }
+  if (triggerType.value === 'delay' && (!delayValue.value || delayValue.value < 1)) {
+    toast.add({ title: 'La durée doit être supérieure à 0', color: 'red' })
     return
   }
   if (actionType.value === 'scene' && !sceneId.value) {
