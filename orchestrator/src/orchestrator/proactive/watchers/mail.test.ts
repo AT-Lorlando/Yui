@@ -26,6 +26,16 @@ async function run(): Promise<void> {
         assert.strictEqual(events.length, 0);
     }
 
+    // résultat très long → facts tronqués (borne le coût tokens du LLM)
+    {
+        const long = '10 résultat(s) :\n' + 'x'.repeat(5000);
+        const handler = async () => long;
+        const events = await evaluateMail(handler, cfg);
+        assert.strictEqual(events.length, 1);
+        assert.ok(events[0].facts.length < 1100);
+        assert.ok(events[0].facts.endsWith('…'));
+    }
+
     console.log('All mail tests passed');
 }
 
