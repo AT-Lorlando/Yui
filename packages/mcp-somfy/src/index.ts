@@ -16,17 +16,14 @@ import Logger from './logger';
 
 const host = process.env.TAHOMA_HOST ?? '';
 const port = parseInt(process.env.TAHOMA_PORT ?? '8443', 10);
-const email = process.env.TAHOMA_EMAIL ?? '';
-const password = process.env.TAHOMA_PASSWORD ?? '';
+const token = process.env.TAHOMA_TOKEN ?? '';
 
-if (!host || !email || !password) {
-    Logger.error(
-        'mcp-somfy: missing TAHOMA_HOST, TAHOMA_EMAIL or TAHOMA_PASSWORD in .env',
-    );
+if (!host || !token) {
+    Logger.error('mcp-somfy: missing TAHOMA_HOST or TAHOMA_TOKEN in .env');
     process.exit(1);
 }
 
-const tahoma = new TahomaClient(host, port, email, password);
+const tahoma = new TahomaClient(host, port, token);
 
 const server = new Server(
     { name: 'mcp-somfy', version: '1.0.0' },

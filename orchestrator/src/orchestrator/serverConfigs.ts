@@ -36,6 +36,7 @@ export function buildServerConfigs(): McpServerConfig[] {
     return [
         mcp('mcp-hue'),
         mcp('mcp-nuki'),
+        mcp('mcp-somfy'),
         mcp('mcp-spotify'),
         mcp('mcp-linear'),
         mcp('mcp-chromecast'),
