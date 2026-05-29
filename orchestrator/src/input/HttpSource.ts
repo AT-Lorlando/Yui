@@ -17,9 +17,11 @@ import {
     AutomationsHandler,
     PresenceHandler,
 } from './InputSource';
-import { loadStore } from '../orchestrator/memory';
+import { loadStore, saveMemory, deleteMemory, setNamespacePriority, deleteNamespace } from '../orchestrator/memory';
 import { saveFcmToken } from '../orchestrator/notify';
 import { loadHistory } from '../orchestrator/history';
+import { listPrompts, writePrompt } from '../orchestrator/prompts';
+import { listPresets, addPreset, removePreset } from '../orchestrator/timerPresets';
 
 // ── TTS helper ────────────────────────────────────────────────────────────────
 // Calls the XTTS server to synthesise text and returns WAV audio as base64.
@@ -579,6 +581,49 @@ export class HttpSource implements InputSource {
             res.json(loadStore());
         });
 
+        app.post('/memory', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const { namespace, key, value, priority } = req.body ?? {};
+            if (typeof namespace !== 'string' || !namespace.trim()) {
+                return res.status(400).json({ error: 'namespace is required' });
+            }
+            if (priority && priority !== 'always' && priority !== 'on-demand') {
+                return res.status(400).json({ error: 'priority must be always or on-demand' });
+            }
+            if (key !== undefined) {
+                if (typeof key !== 'string' || typeof value !== 'string') {
+                    return res.status(400).json({ error: 'key and value must be strings' });
+                }
+                saveMemory(namespace, key, value, priority ?? 'always');
+            } else if (priority) {
+                setNamespacePriority(namespace, priority);
+            } else {
+                setNamespacePriority(namespace, 'always');
+            }
+            res.json(loadStore());
+        });
+
+        app.delete('/memory/:namespace/:key', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            deleteMemory(req.params.namespace, req.params.key);
+            res.json(loadStore());
+        });
+
+        app.delete('/memory/:namespace', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            deleteNamespace(req.params.namespace);
+            res.json(loadStore());
+        });
+
         // ── Timers (read from shared data file) ───────────────────────────────
         app.get('/timers', (req: any, res: any) => {
             const bearer = req.headers['authorization']?.split(' ')[1];
@@ -612,6 +657,37 @@ export class HttpSource implements InputSource {
             }
         });
 
+        app.get('/timer-presets', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            res.json(listPresets());
+        });
+
+        app.post('/timer-presets', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            try {
+                const preset = addPreset(req.body ?? {});
+                res.status(201).json(preset);
+            } catch (e: any) {
+                res.status(400).json({ error: e.message });
+            }
+        });
+
+        app.delete('/timer-presets/:id', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const ok = removePreset(req.params.id);
+            if (!ok) return res.status(404).json({ error: 'Preset not found' });
+            res.json({ success: true });
+        });
+
         // ── Presence (current state) ──────────────────────────────────────────
         app.get('/presence', (req: any, res: any) => {
             const bearer = req.headers['authorization']?.split(' ')[1];
@@ -622,26 +698,31 @@ export class HttpSource implements InputSource {
         });
 
         // ── Prompts (read markdown files from prompts/) ───────────────────────
-        app.get('/prompts', (_req: any, res: any) => {
-            const promptsRoot = path.join(process.cwd(), 'prompts');
-            const result: { file: string; name: string; content: string }[] = [];
-            const readDir = (dir: string, prefix = '') => {
-                if (!fs.existsSync(dir)) return;
-                for (const entry of fs.readdirSync(dir)) {
-                    const fullPath = path.join(dir, entry);
-                    if (fs.statSync(fullPath).isDirectory()) {
-                        readDir(fullPath, `${prefix}${entry}/`);
-                    } else if (entry.endsWith('.md')) {
-                        result.push({
-                            file: `${prefix}${entry}`,
-                            name: entry.replace(/^\d+-/, '').replace('.md', '').replace(/-/g, ' '),
-                            content: fs.readFileSync(fullPath, 'utf-8'),
-                        });
-                    }
-                }
-            };
-            readDir(promptsRoot);
-            res.json(result);
+        app.get('/prompts', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            res.json(listPrompts());
+        });
+
+        // :file may contain slashes (sub-folders) → wildcard param
+        app.put('/prompts/*', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const file = req.params[0];
+            const { content } = req.body ?? {};
+            if (typeof content !== 'string') {
+                return res.status(400).json({ error: 'content must be a string' });
+            }
+            try {
+                writePrompt(file, content);
+                res.json({ success: true });
+            } catch (e: any) {
+                res.status(400).json({ error: e.message });
+            }
         });
 
         // ── Chime cast (called internally by mcp-timer, no auth) ─────────────
