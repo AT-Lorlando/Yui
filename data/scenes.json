@@ -9,10 +9,30 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_off", "args": {} },
-      { "tool": "pause_music", "args": {} },
-      { "tool": "cast_netflix", "args": {}, "delayMs": 3000 },
-      { "tool": "_lights_palette", "args": { "colors": ["#6B0000", "#1A0000", "#0D0000"], "brightness": 8 } }
+      {
+        "tool": "_lights_all_off",
+        "args": {}
+      },
+      {
+        "tool": "pause_music",
+        "args": {}
+      },
+      {
+        "tool": "cast_netflix",
+        "args": {},
+        "delayMs": 3000
+      },
+      {
+        "tool": "_lights_palette",
+        "args": {
+          "colors": [
+            "#6B0000",
+            "#1A0000",
+            "#0D0000"
+          ],
+          "brightness": 8
+        }
+      }
     ]
   },
   {
@@ -25,9 +45,30 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_on", "args": {} },
-      { "tool": "_lights_palette", "args": { "colors": ["#00FFCC", "#0088FF", "#7B00FF", "#00C8A0", "#003CFF"], "brightness": 40 } },
-      { "tool": "play_music", "args": { "speakerName": "Salon", "query": "aurora borealis ambient iceland" } }
+      {
+        "tool": "_lights_all_on",
+        "args": {}
+      },
+      {
+        "tool": "_lights_palette",
+        "args": {
+          "colors": [
+            "#00FFCC",
+            "#0088FF",
+            "#7B00FF",
+            "#00C8A0",
+            "#003CFF"
+          ],
+          "brightness": 40
+        }
+      },
+      {
+        "tool": "play_music",
+        "args": {
+          "speakerName": "Salon",
+          "query": "aurora borealis ambient iceland"
+        }
+      }
     ]
   },
   {
@@ -40,9 +81,30 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_on", "args": {} },
-      { "tool": "_lights_palette", "args": { "colors": ["#FF8C00", "#FF4500", "#FFD700", "#C2440C", "#6B21A8"], "brightness": 55 } },
-      { "tool": "play_music", "args": { "speakerName": "Salon", "query": "lofi jazz sunset afternoon" } }
+      {
+        "tool": "_lights_all_on",
+        "args": {}
+      },
+      {
+        "tool": "_lights_palette",
+        "args": {
+          "colors": [
+            "#FF8C00",
+            "#FF4500",
+            "#FFD700",
+            "#C2440C",
+            "#6B21A8"
+          ],
+          "brightness": 55
+        }
+      },
+      {
+        "tool": "play_music",
+        "args": {
+          "speakerName": "Salon",
+          "query": "lofi jazz sunset afternoon"
+        }
+      }
     ]
   },
   {
@@ -55,9 +117,30 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_on", "args": {} },
-      { "tool": "_lights_palette", "args": { "colors": ["#FF6B35", "#CC3300", "#8B1A00", "#FF9000", "#3D0C00"], "brightness": 35 } },
-      { "tool": "play_music", "args": { "speakerName": "Salon", "query": "crackling campfire nature ambient rain" } }
+      {
+        "tool": "_lights_all_on",
+        "args": {}
+      },
+      {
+        "tool": "_lights_palette",
+        "args": {
+          "colors": [
+            "#FF6B35",
+            "#CC3300",
+            "#8B1A00",
+            "#FF9000",
+            "#3D0C00"
+          ],
+          "brightness": 35
+        }
+      },
+      {
+        "tool": "play_music",
+        "args": {
+          "speakerName": "Salon",
+          "query": "crackling campfire nature ambient rain"
+        }
+      }
     ]
   },
   {
@@ -70,9 +153,30 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_on", "args": {} },
-      { "tool": "_lights_palette", "args": { "colors": ["#001B6B", "#003B8F", "#0077B6", "#00B4D8", "#023E8A"], "brightness": 30 } },
-      { "tool": "play_music", "args": { "speakerName": "Salon", "query": "deep ocean underwater ambient meditation" } }
+      {
+        "tool": "_lights_all_on",
+        "args": {}
+      },
+      {
+        "tool": "_lights_palette",
+        "args": {
+          "colors": [
+            "#001B6B",
+            "#003B8F",
+            "#0077B6",
+            "#00B4D8",
+            "#023E8A"
+          ],
+          "brightness": 30
+        }
+      },
+      {
+        "tool": "play_music",
+        "args": {
+          "speakerName": "Salon",
+          "query": "deep ocean underwater ambient meditation"
+        }
+      }
     ]
   },
   {
@@ -85,9 +189,29 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_on", "args": {} },
-      { "tool": "_lights_palette", "args": { "colors": ["#8B0038", "#CC2B52", "#FF6B6B", "#B8621A"], "brightness": 22 } },
-      { "tool": "play_music", "args": { "speakerName": "Salon", "query": "romantic jazz piano evening intimate" } }
+      {
+        "tool": "_lights_all_on",
+        "args": {}
+      },
+      {
+        "tool": "_lights_palette",
+        "args": {
+          "colors": [
+            "#8B0038",
+            "#CC2B52",
+            "#FF6B6B",
+            "#B8621A"
+          ],
+          "brightness": 22
+        }
+      },
+      {
+        "tool": "play_music",
+        "args": {
+          "speakerName": "Salon",
+          "query": "romantic jazz piano evening intimate"
+        }
+      }
     ]
   },
   {
@@ -100,10 +224,26 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_on", "args": {} },
-      { "tool": "_lights_all_brightness", "args": { "brightness": 100 } },
-      { "tool": "_lights_all_color", "args": { "color": "#E0EEFF" } },
-      { "tool": "pause_music", "args": {} }
+      {
+        "tool": "_lights_all_on",
+        "args": {}
+      },
+      {
+        "tool": "_lights_all_brightness",
+        "args": {
+          "brightness": 100
+        }
+      },
+      {
+        "tool": "_lights_all_color",
+        "args": {
+          "color": "#E0EEFF"
+        }
+      },
+      {
+        "tool": "pause_music",
+        "args": {}
+      }
     ]
   },
   {
@@ -116,11 +256,31 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "pause_music", "args": {} },
-      { "tool": "_lights_all_brightness", "args": { "brightness": 5 } },
-      { "tool": "_lights_all_color", "args": { "color": "#3D0000" } },
-      { "tool": "_doors_lock_all", "args": {} },
-      { "tool": "_lights_all_off", "args": {}, "delayMs": 300000 }
+      {
+        "tool": "pause_music",
+        "args": {}
+      },
+      {
+        "tool": "_lights_all_brightness",
+        "args": {
+          "brightness": 5
+        }
+      },
+      {
+        "tool": "_lights_all_color",
+        "args": {
+          "color": "#3D0000"
+        }
+      },
+      {
+        "tool": "_doors_lock_all",
+        "args": {}
+      },
+      {
+        "tool": "_lights_all_off",
+        "args": {},
+        "delayMs": 300000
+      }
     ]
   },
   {
@@ -133,9 +293,31 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_on", "args": {} },
-      { "tool": "_lights_palette", "args": { "colors": ["#FF0000", "#00FF00", "#0000FF", "#FF00FF", "#FFFF00", "#00FFFF"], "brightness": 100 } },
-      { "tool": "play_music", "args": { "speakerName": "Salon", "query": "hardstyle rave electronic festival" } }
+      {
+        "tool": "_lights_all_on",
+        "args": {}
+      },
+      {
+        "tool": "_lights_palette",
+        "args": {
+          "colors": [
+            "#FF0000",
+            "#00FF00",
+            "#0000FF",
+            "#FF00FF",
+            "#FFFF00",
+            "#00FFFF"
+          ],
+          "brightness": 100
+        }
+      },
+      {
+        "tool": "play_music",
+        "args": {
+          "speakerName": "Salon",
+          "query": "hardstyle rave electronic festival"
+        }
+      }
     ]
   },
   {
@@ -148,8 +330,28 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#20B2AA", "#4682B4", "#1E90FF", "#2E8B57", "#5F9EA0", "#1976D2"], "brightness": 35 } },
-      { "tool": "cast_youtube", "args": { "source": "zhDwjnYZiCo" }, "delayMs": 2000 }
+      {
+        "tool": "set_room_palette",
+        "args": {
+          "room": "Salon",
+          "colors": [
+            "#20B2AA",
+            "#4682B4",
+            "#1E90FF",
+            "#2E8B57",
+            "#5F9EA0",
+            "#1976D2"
+          ],
+          "brightness": 35
+        }
+      },
+      {
+        "tool": "cast_youtube",
+        "args": {
+          "source": "zhDwjnYZiCo"
+        },
+        "delayMs": 2000
+      }
     ]
   },
   {
@@ -162,8 +364,28 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#3B0066", "#7C3AED", "#CC0044", "#1A0033", "#FF0080", "#4B0082"], "brightness": 20 } },
-      { "tool": "cast_youtube", "args": { "source": "I0TPN1NdBEM" }, "delayMs": 2000 }
+      {
+        "tool": "set_room_palette",
+        "args": {
+          "room": "Salon",
+          "colors": [
+            "#3B0066",
+            "#7C3AED",
+            "#CC0044",
+            "#1A0033",
+            "#FF0080",
+            "#4B0082"
+          ],
+          "brightness": 20
+        }
+      },
+      {
+        "tool": "cast_youtube",
+        "args": {
+          "source": "I0TPN1NdBEM"
+        },
+        "delayMs": 2000
+      }
     ]
   },
   {
@@ -176,8 +398,28 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#00CED1", "#40E0D0", "#F4A460", "#FF7F50", "#87CEEB", "#20B2AA"], "brightness": 60 } },
-      { "tool": "cast_youtube", "args": { "source": "PoAeFpUB1hA" }, "delayMs": 2000 }
+      {
+        "tool": "set_room_palette",
+        "args": {
+          "room": "Salon",
+          "colors": [
+            "#00CED1",
+            "#40E0D0",
+            "#F4A460",
+            "#FF7F50",
+            "#87CEEB",
+            "#20B2AA"
+          ],
+          "brightness": 60
+        }
+      },
+      {
+        "tool": "cast_youtube",
+        "args": {
+          "source": "PoAeFpUB1hA"
+        },
+        "delayMs": 2000
+      }
     ]
   },
   {
@@ -190,8 +432,28 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#B45309", "#D97706", "#F59E0B", "#92400E", "#FBBF24", "#78350F"], "brightness": 30 } },
-      { "tool": "cast_youtube", "args": { "source": "jfKfPfyJRdk" }, "delayMs": 2000 }
+      {
+        "tool": "set_room_palette",
+        "args": {
+          "room": "Salon",
+          "colors": [
+            "#B45309",
+            "#D97706",
+            "#F59E0B",
+            "#92400E",
+            "#FBBF24",
+            "#78350F"
+          ],
+          "brightness": 30
+        }
+      },
+      {
+        "tool": "cast_youtube",
+        "args": {
+          "source": "jfKfPfyJRdk"
+        },
+        "delayMs": 2000
+      }
     ]
   },
   {
@@ -204,8 +466,28 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#FF0090", "#00FFFF", "#FFFFFF", "#FF4DC4", "#0088FF", "#FF2D55"], "brightness": 25 } },
-      { "tool": "cast_youtube", "args": { "source": "2y2Z06hVmWE" }, "delayMs": 2000 }
+      {
+        "tool": "set_room_palette",
+        "args": {
+          "room": "Salon",
+          "colors": [
+            "#FF0090",
+            "#00FFFF",
+            "#FFFFFF",
+            "#FF4DC4",
+            "#0088FF",
+            "#FF2D55"
+          ],
+          "brightness": 25
+        }
+      },
+      {
+        "tool": "cast_youtube",
+        "args": {
+          "source": "2y2Z06hVmWE"
+        },
+        "delayMs": 2000
+      }
     ]
   },
   {
@@ -218,8 +500,28 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#1E293B", "#334155", "#64748B", "#94A3B8", "#E2E8F0", "#0F172A"], "brightness": 15 } },
-      { "tool": "cast_youtube", "args": { "source": "8rTTEMdMh8Q" }, "delayMs": 2000 }
+      {
+        "tool": "set_room_palette",
+        "args": {
+          "room": "Salon",
+          "colors": [
+            "#1E293B",
+            "#334155",
+            "#64748B",
+            "#94A3B8",
+            "#E2E8F0",
+            "#0F172A"
+          ],
+          "brightness": 15
+        }
+      },
+      {
+        "tool": "cast_youtube",
+        "args": {
+          "source": "8rTTEMdMh8Q"
+        },
+        "delayMs": 2000
+      }
     ]
   },
   {
@@ -232,8 +534,28 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#C2410C", "#EA580C", "#D97706", "#92400E", "#F97316", "#7C2D12"], "brightness": 50 } },
-      { "tool": "cast_youtube", "args": { "source": "uKkJ0etAO5s" }, "delayMs": 2000 }
+      {
+        "tool": "set_room_palette",
+        "args": {
+          "room": "Salon",
+          "colors": [
+            "#C2410C",
+            "#EA580C",
+            "#D97706",
+            "#92400E",
+            "#F97316",
+            "#7C2D12"
+          ],
+          "brightness": 50
+        }
+      },
+      {
+        "tool": "cast_youtube",
+        "args": {
+          "source": "uKkJ0etAO5s"
+        },
+        "delayMs": 2000
+      }
     ]
   },
   {
@@ -246,8 +568,28 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#0A0A2E", "#1E1B4B", "#312E81", "#4338CA", "#818CF8", "#C7D2FE"], "brightness": 12 } },
-      { "tool": "cast_youtube", "args": { "source": "UJ4e4XVQQcY" }, "delayMs": 2000 }
+      {
+        "tool": "set_room_palette",
+        "args": {
+          "room": "Salon",
+          "colors": [
+            "#0A0A2E",
+            "#1E1B4B",
+            "#312E81",
+            "#4338CA",
+            "#818CF8",
+            "#C7D2FE"
+          ],
+          "brightness": 12
+        }
+      },
+      {
+        "tool": "cast_youtube",
+        "args": {
+          "source": "UJ4e4XVQQcY"
+        },
+        "delayMs": 2000
+      }
     ]
   },
   {
@@ -260,9 +602,18 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_off", "args": {} },
-      { "tool": "pause_music", "args": {} },
-      { "tool": "cast_crunchyroll", "args": {} }
+      {
+        "tool": "_lights_all_off",
+        "args": {}
+      },
+      {
+        "tool": "pause_music",
+        "args": {}
+      },
+      {
+        "tool": "cast_crunchyroll",
+        "args": {}
+      }
     ]
   },
   {
@@ -275,9 +626,20 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_brightness", "args": { "brightness": 20 } },
-      { "tool": "pause_music", "args": {} },
-      { "tool": "cast_youtube", "args": {} }
+      {
+        "tool": "_lights_all_brightness",
+        "args": {
+          "brightness": 20
+        }
+      },
+      {
+        "tool": "pause_music",
+        "args": {}
+      },
+      {
+        "tool": "cast_youtube",
+        "args": {}
+      }
     ]
   },
   {
@@ -290,9 +652,18 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_off", "args": {} },
-      { "tool": "pause_music", "args": {} },
-      { "tool": "cast_prime", "args": {} }
+      {
+        "tool": "_lights_all_off",
+        "args": {}
+      },
+      {
+        "tool": "pause_music",
+        "args": {}
+      },
+      {
+        "tool": "cast_prime",
+        "args": {}
+      }
     ]
   },
   {
@@ -305,9 +676,30 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_palette", "args": { "colors": ["#1DB954", "#006400", "#004D00", "#00A550", "#145A32"], "brightness": 35 } },
-      { "tool": "play_music", "args": { "speakerName": "Salon" } },
-      { "tool": "cast_wallpaper", "args": {}, "delayMs": 2000 }
+      {
+        "tool": "_lights_palette",
+        "args": {
+          "colors": [
+            "#1DB954",
+            "#006400",
+            "#004D00",
+            "#00A550",
+            "#145A32"
+          ],
+          "brightness": 35
+        }
+      },
+      {
+        "tool": "play_music",
+        "args": {
+          "speakerName": "Salon"
+        }
+      },
+      {
+        "tool": "cast_wallpaper",
+        "args": {},
+        "delayMs": 2000
+      }
     ]
   },
   {
@@ -320,10 +712,26 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "pause_music", "args": {} },
-      { "tool": "cast_stop", "args": {} },
-      { "tool": "_lights_all_off", "args": {} },
-      { "tool": "turn_on_light", "args": { "id": 23, "brightness": 8, "color": "#3D0000" } }
+      {
+        "tool": "pause_music",
+        "args": {}
+      },
+      {
+        "tool": "cast_stop",
+        "args": {}
+      },
+      {
+        "tool": "_lights_all_off",
+        "args": {}
+      },
+      {
+        "tool": "turn_on_light",
+        "args": {
+          "id": 23,
+          "brightness": 8,
+          "color": "#3D0000"
+        }
+      }
     ]
   },
   {
@@ -336,16 +744,37 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "unlock_door", "args": {} },
+      {
+        "tool": "unlock_door",
+        "args": {}
+      },
       {
         "tool": "_lights_all_on",
-        "args": { "brightness": { "$fn": "time_brightness" } },
-        "condition": { "not": { "hourBetween": [0, 6] } }
+        "args": {
+          "brightness": {
+            "$fn": "time_brightness"
+          }
+        },
+        "condition": {
+          "not": {
+            "hourBetween": [
+              0,
+              6
+            ]
+          }
+        }
       },
       {
         "tool": "_notify",
-        "args": { "message": "Bienvenue à la maison ! Il est {{ hour }}h." },
-        "condition": { "hourBetween": [7, 22] }
+        "args": {
+          "message": "Bienvenue à la maison ! Il est {{ hour }}h."
+        },
+        "condition": {
+          "hourBetween": [
+            7,
+            22
+          ]
+        }
       }
     ]
   },
@@ -359,8 +788,38 @@
     "createdAt": 0,
     "setup": [],
     "state": [
-      { "tool": "_lights_all_off", "args": {} },
-      { "tool": "lock_door", "args": {} }
+      {
+        "tool": "_lights_all_off",
+        "args": {}
+      },
+      {
+        "tool": "lock_door",
+        "args": {}
+      }
     ]
+  },
+  {
+    "name": "Test",
+    "icon": "lucide:bolt",
+    "color": "#6366f1",
+    "description": "test d'uen scece",
+    "setup": [],
+    "state": [],
+    "favorite": false,
+    "id": "05da5070",
+    "createdAt": 1779973440495,
+    "builtIn": false
+  },
+  {
+    "name": "Test",
+    "icon": "lucide:bolt",
+    "color": "#6366f1",
+    "description": "test d'uen scece",
+    "setup": [],
+    "state": [],
+    "favorite": false,
+    "id": "f71a822a",
+    "createdAt": 1779973440719,
+    "builtIn": false
   }
 ]
