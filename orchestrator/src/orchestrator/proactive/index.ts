@@ -1,7 +1,7 @@
 import Logger from '../../logger';
 import { isQuietHours, passesThreshold } from './gates';
 import { Dedup } from './dedup';
-import { DigestBuffer } from './digest';
+import { DigestBuffer, isDigestDue } from './digest';
 import { isActionBlocked } from './guard';
 import { loadHistory } from '../history';
 import { loadAutomations } from '../automations';
@@ -17,6 +17,7 @@ export class ProactiveEngine {
     private digest: DigestBuffer;
     private watchers: Watcher[] = [];
     private now: () => number;
+    private digestTimer?: ReturnType<typeof setInterval>;
 
     constructor(
         private cfg: ProactiveConfig,
@@ -97,6 +98,63 @@ export class ProactiveEngine {
         if (this.deps.presenceState() === 'home') {
             await this.deps.speak(text);
         }
+    }
+
+    start(): void {
+        if (!this.cfg.enabled) {
+            Logger.info('proactive: désactivé (config)');
+            return;
+        }
+        for (const w of this.watchers) {
+            try {
+                w.start((c) => void this.processCandidate(c));
+            } catch (err) {
+                Logger.warn(
+                    `proactive: watcher "${w.id}" n'a pas démarré — ${err}`,
+                );
+            }
+        }
+        this.digestTimer = setInterval(
+            () => void this.maybeFlushDigest(),
+            60_000,
+        );
+        Logger.info(`proactive: démarré (${this.watchers.length} watchers)`);
+    }
+
+    stop(): void {
+        for (const w of this.watchers) {
+            try {
+                w.stop();
+            } catch {
+                /* best-effort */
+            }
+        }
+        if (this.digestTimer) clearInterval(this.digestTimer);
+    }
+
+    async maybeFlushDigest(): Promise<void> {
+        const nowMs = this.now();
+        if (
+            !isDigestDue(
+                new Date(nowMs),
+                this.cfg.digestTime,
+                this.digest.lastFlush(),
+            )
+        ) {
+            return;
+        }
+        const events = this.digest.takeAll(nowMs);
+        if (events.length === 0) return;
+        const facts = events.map((e) => `- ${e.facts}`).join('\n');
+        let message: string;
+        try {
+            const sys =
+                'Tu es Yui. Résume ces points en un court message oral en français, sans markdown, en une ou deux phrases.';
+            message = (await this.deps.complete(sys, facts)).trim() || facts;
+        } catch {
+            message = facts;
+        }
+        await this.emit(message);
     }
 
     private async tryAction(
