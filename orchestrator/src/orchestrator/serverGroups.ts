@@ -91,7 +91,8 @@ export const SERVER_GROUPS: ServerGroup[] = [
             'track',
             'shuffle',
             'repeat',
-            'met',
+            'mets',
+            'mettre',
             'mettre',
             // timers
             'minuteur',
@@ -287,10 +288,14 @@ export const SERVER_GROUPS: ServerGroup[] = [
  * Returns an empty array when nothing matches (caller falls back to all tools
  * and core-only prompt).
  */
+function normalize(s: string): string {
+    return s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+}
+
 export function resolveGroups(order: string): ServerGroup[] {
-    const lc = order.toLowerCase();
+    const norm = normalize(order);
     return SERVER_GROUPS.filter((g) =>
-        g.keywords.some((kw) => lc.includes(kw)),
+        g.keywords.some((kw) => norm.includes(normalize(kw))),
     );
 }
 
