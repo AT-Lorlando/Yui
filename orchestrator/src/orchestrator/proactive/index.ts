@@ -5,6 +5,11 @@ import { DigestBuffer, isDigestDue } from './digest';
 import { isActionBlocked } from './guard';
 import { loadHistory } from '../history';
 import { loadAutomations } from '../automations';
+import { loadConfig } from './config';
+import { createWeatherWatcher } from './watchers/weather';
+import { createPresenceWatcher } from './watchers/presence';
+import { createCalendarWatcher } from './watchers/calendar';
+import { createMailWatcher } from './watchers/mail';
 import type {
     CandidateEvent,
     ProactiveConfig,
@@ -195,4 +200,17 @@ export class ProactiveEngine {
             Logger.warn(`proactive: action "${pa.id}" a échoué — ${err}`);
         }
     }
+}
+
+export function initProactive(deps: ProactiveDeps): ProactiveEngine {
+    const cfg = loadConfig();
+    const engine = new ProactiveEngine(cfg, deps);
+    const watchers: Watcher[] = [];
+    if (cfg.weather) watchers.push(createWeatherWatcher(cfg.weather, deps));
+    watchers.push(createPresenceWatcher(deps));
+    if (cfg.calendar) watchers.push(createCalendarWatcher(cfg.calendar, deps));
+    if (cfg.mail) watchers.push(createMailWatcher(cfg.mail, deps));
+    engine.setWatchers(watchers);
+    engine.start();
+    return engine;
 }

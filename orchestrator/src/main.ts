@@ -1,6 +1,7 @@
 import './env'; // load env first
 import http from 'http';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
+import { initProactive } from './orchestrator/proactive';
 import { InputSource, StdinSource, HttpSource } from './input';
 import {
     initAutomations,
@@ -126,12 +127,12 @@ async function main() {
         });
 
     const automationsHandler = {
-        list:   loadAutomations,
-        add:    addAutomation,
+        list: loadAutomations,
+        add: addAutomation,
         update: updateAutomation,
         toggle: toggleAutomation,
         remove: deleteAutomation,
-        run:    (id: string) => runAutomation(id),
+        run: (id: string) => runAutomation(id),
     };
 
     // Automations: fires cron/delay jobs, dispatches response to the configured channel
@@ -144,6 +145,17 @@ async function main() {
         // 'none' → silent automation, no output
     }
     initAutomations(handler, dispatchOutput, makeSceneRunner, speakViaPipeline);
+
+    // Proactivité : observe présence/météo/agenda/mail et notifie/agit de sa propre initiative
+    const proactive = initProactive({
+        complete: (system, user) => orchestrator.complete(system, user),
+        notify: (text) => sendNotification(text),
+        speak: (text) => speakViaPipeline(text),
+        presenceState: () => presence.getState(),
+        subscribePresence: (cb) => presence.onChange(cb),
+        deviceHandler: (tool, args) => orchestrator.callTool(tool, args ?? {}),
+        runScene: makeSceneRunner,
+    });
 
     const locationHandler = (lat: number, lng: number, accuracy: number) =>
         presence.handleLocation(lat, lng, accuracy);
@@ -168,6 +180,7 @@ async function main() {
     const shutdown = async (signal: string) => {
         Logger.info(`Received ${signal}, shutting down…`);
         presence.stop();
+        proactive.stop();
         for (const source of sources) {
             await source.stop();
         }
