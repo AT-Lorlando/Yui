@@ -92,10 +92,14 @@ function nextPingMs(distanceM: number): number {
  */
 function parseMikrotikDuration(s: string): number {
     let ms = 0;
-    const d = s.match(/(\d+)d/); if (d) ms += parseInt(d[1]) * 86_400_000;
-    const h = s.match(/(\d+)h/); if (h) ms += parseInt(h[1]) * 3_600_000;
-    const m = s.match(/(\d+)m/); if (m) ms += parseInt(m[1]) * 60_000;
-    const sec = s.match(/(\d+)s/); if (sec) ms += parseInt(sec[1]) * 1_000;
+    const d = s.match(/(\d+)d/);
+    if (d) ms += parseInt(d[1]) * 86_400_000;
+    const h = s.match(/(\d+)h/);
+    if (h) ms += parseInt(h[1]) * 3_600_000;
+    const m = s.match(/(\d+)m/);
+    if (m) ms += parseInt(m[1]) * 60_000;
+    const sec = s.match(/(\d+)s/);
+    if (sec) ms += parseInt(sec[1]) * 1_000;
     return ms;
 }
 
@@ -117,42 +121,55 @@ interface NetworkCheckResult {
  * pattern caused by Android WiFi power-saving waking the radio briefly.
  */
 async function checkPhoneOnNetwork(): Promise<NetworkCheckResult> {
-    const auth = Buffer.from(`${MIKROTIK_USER}:${MIKROTIK_PASS}`).toString('base64');
+    const auth = Buffer.from(`${MIKROTIK_USER}:${MIKROTIK_PASS}`).toString(
+        'base64',
+    );
     const headers = { Authorization: `Basic ${auth}` };
     const fail: NetworkCheckResult = { present: null };
 
     try {
         if (PHONE_IP) {
             const [dhcpRes, arpRes] = await Promise.all([
-                fetch(`http://${MIKROTIK_IP}/rest/ip/dhcp-server/lease?address=${PHONE_IP}`, {
-                    headers, signal: AbortSignal.timeout(5_000),
-                }),
+                fetch(
+                    `http://${MIKROTIK_IP}/rest/ip/dhcp-server/lease?address=${PHONE_IP}`,
+                    {
+                        headers,
+                        signal: AbortSignal.timeout(5_000),
+                    },
+                ),
                 fetch(`http://${MIKROTIK_IP}/rest/ip/arp?address=${PHONE_IP}`, {
-                    headers, signal: AbortSignal.timeout(5_000),
+                    headers,
+                    signal: AbortSignal.timeout(5_000),
                 }),
             ]);
 
             if (!dhcpRes.ok && !arpRes.ok) {
-                Logger.warn(`[presence] Mikrotik error: DHCP=${dhcpRes.status} ARP=${arpRes.status}`);
+                Logger.warn(
+                    `[presence] Mikrotik error: DHCP=${dhcpRes.status} ARP=${arpRes.status}`,
+                );
                 return fail;
             }
 
             // DHCP: phone is associated to the network (survives WiFi power-save sleep)
             let dhcpBound = false;
             if (dhcpRes.ok) {
-                const leases: { 'mac-address'?: string; status?: string }[] = await dhcpRes.json();
+                const leases: { 'mac-address'?: string; status?: string }[] =
+                    await dhcpRes.json();
                 const lease = leases[0];
-                dhcpBound = lease?.['mac-address']?.toLowerCase() === PHONE_MAC &&
-                            lease?.status === 'bound';
+                dhcpBound =
+                    lease?.['mac-address']?.toLowerCase() === PHONE_MAC &&
+                    lease?.status === 'bound';
             }
 
             // ARP: real-time reachability (true only when phone is awake/responding)
             let arpReachable = false;
             if (arpRes.ok) {
-                const entries: { 'mac-address'?: string; status?: string }[] = await arpRes.json();
+                const entries: { 'mac-address'?: string; status?: string }[] =
+                    await arpRes.json();
                 const entry = entries[0];
-                arpReachable = entry?.['mac-address']?.toLowerCase() === PHONE_MAC &&
-                               entry?.status === 'reachable';
+                arpReachable =
+                    entry?.['mac-address']?.toLowerCase() === PHONE_MAC &&
+                    entry?.status === 'reachable';
             }
 
             // present = DHCP bound OR ARP reachable
@@ -161,20 +178,30 @@ async function checkPhoneOnNetwork(): Promise<NetworkCheckResult> {
             //   → departure is caught by the 15min absence timeout, not by DHCP expiry
             const present = dhcpBound || arpReachable;
 
-            Logger.debug(`[presence] DHCP=${dhcpBound ? 'bound' : 'absent'} ARP=${arpReachable ? 'reachable' : 'stale'}`);
+            Logger.debug(
+                `[presence] DHCP=${dhcpBound ? 'bound' : 'absent'} ARP=${
+                    arpReachable ? 'reachable' : 'stale'
+                }`,
+            );
             return { present };
         } else {
             // Fallback: full ARP table scan
             const res = await fetch(`http://${MIKROTIK_IP}/rest/ip/arp`, {
-                headers, signal: AbortSignal.timeout(5_000),
+                headers,
+                signal: AbortSignal.timeout(5_000),
             });
             if (!res.ok) {
-                Logger.warn(`[presence] Mikrotik ARP API returned ${res.status}`);
+                Logger.warn(
+                    `[presence] Mikrotik ARP API returned ${res.status}`,
+                );
                 return fail;
             }
-            const entries: { 'mac-address'?: string; status?: string }[] = await res.json();
+            const entries: { 'mac-address'?: string; status?: string }[] =
+                await res.json();
             const found = entries.some(
-                (e) => e['mac-address']?.toLowerCase() === PHONE_MAC && e.status === 'reachable',
+                (e) =>
+                    e['mac-address']?.toLowerCase() === PHONE_MAC &&
+                    e.status === 'reachable',
             );
             return { present: found };
         }
@@ -190,8 +217,28 @@ export class PresenceManager {
     private state: PresenceState = 'unknown';
     private lastSeenOnNetwork: number | null = null;
     private macWatcherTimer: ReturnType<typeof setInterval> | null = null;
+    private _onChange:
+        | ((prev: PresenceState, next: PresenceState) => void)
+        | null = null;
 
     constructor(private readonly runScene: (id: string) => Promise<unknown>) {}
+
+    onChange(cb: (prev: PresenceState, next: PresenceState) => void): void {
+        this._onChange = cb;
+    }
+
+    private setState(next: PresenceState): void {
+        const prev = this.state;
+        if (prev === next) return;
+        this.state = next;
+        if (this._onChange) {
+            try {
+                this._onChange(prev, next);
+            } catch (err) {
+                Logger.warn(`presence onChange handler failed: ${err}`);
+            }
+        }
+    }
 
     getState(): PresenceState {
         return this.state;
@@ -218,14 +265,18 @@ export class PresenceManager {
         const distanceM = Math.round(haversine(lat, lng, HOME_LAT, HOME_LNG));
         Logger.info(
             `[presence] GPS update: ${distanceM}m from home` +
-            ` (radius=${ARRIVAL_RADIUS_M}m, state=${this.state})`,
+                ` (radius=${ARRIVAL_RADIUS_M}m, state=${this.state})`,
         );
 
         if (distanceM <= ARRIVAL_RADIUS_M && this.state === 'away') {
-            Logger.info(`[presence] Within arrival radius → triggering arrival scene`);
+            Logger.info(
+                `[presence] Within arrival radius → triggering arrival scene`,
+            );
             this.triggerArrival();
         } else if (distanceM <= ARRIVAL_RADIUS_M) {
-            Logger.info(`[presence] Within radius but state=${this.state} — no scene triggered`);
+            Logger.info(
+                `[presence] Within radius but state=${this.state} — no scene triggered`,
+            );
         }
 
         return {
@@ -278,16 +329,20 @@ export class PresenceManager {
             // ARP confirmed the phone is actively reachable right now
             this.lastSeenOnNetwork = Date.now();
             if (this.state !== 'home') {
-                Logger.info(`[presence] Phone on network → state=home (was ${this.state})`);
-                this.state = 'home';
+                Logger.info(
+                    `[presence] Phone on network → state=home (was ${this.state})`,
+                );
+                this.setState('home');
             }
             return;
         }
 
         // Phone not found and router responded
         if (this.lastSeenOnNetwork === null) {
-            Logger.info(`[presence] Phone not found on first check → state=away`);
-            this.state = 'away';
+            Logger.info(
+                `[presence] Phone not found on first check → state=away`,
+            );
+            this.setState('away');
             return;
         }
 
@@ -295,19 +350,27 @@ export class PresenceManager {
         const absentMin = Math.round(absentMs / 60_000);
         // Only log at INFO when absence is long enough to be meaningful
         if (absentMs > 5 * 60_000) {
-            Logger.info(`[presence] Phone absent for ${absentMin}min (timeout=${AWAY_TIMEOUT_MS / 60_000}min, state=${this.state})`);
+            Logger.info(
+                `[presence] Phone absent for ${absentMin}min (timeout=${
+                    AWAY_TIMEOUT_MS / 60_000
+                }min, state=${this.state})`,
+            );
         } else {
-            Logger.debug(`[presence] Phone absent for ${absentMin}min (WiFi sleep likely)`);
+            Logger.debug(
+                `[presence] Phone absent for ${absentMin}min (WiFi sleep likely)`,
+            );
         }
 
         if (absentMs > AWAY_TIMEOUT_MS && this.state !== 'away') {
-            Logger.info(`[presence] Timeout reached → triggering departure scene`);
+            Logger.info(
+                `[presence] Timeout reached → triggering departure scene`,
+            );
             this.triggerDeparture();
         }
     }
 
     private triggerDeparture(): void {
-        this.state = 'away';
+        this.setState('away');
         if (!DEPARTURE_SCENE_ID) {
             Logger.warn(
                 'Presence: departure detected but PRESENCE_DEPARTURE_SCENE not set',
@@ -323,7 +386,7 @@ export class PresenceManager {
     }
 
     private triggerArrival(): void {
-        this.state = 'home';
+        this.setState('home');
         this.lastSeenOnNetwork = Date.now();
         if (!ARRIVAL_SCENE_ID) {
             Logger.warn(
