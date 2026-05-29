@@ -2,6 +2,9 @@ import Logger from '../../logger';
 import { isQuietHours, passesThreshold } from './gates';
 import { Dedup } from './dedup';
 import { DigestBuffer } from './digest';
+import { isActionBlocked } from './guard';
+import { loadHistory } from '../history';
+import { loadAutomations } from '../automations';
 import type {
     CandidateEvent,
     ProactiveConfig,
@@ -52,6 +55,11 @@ export class ProactiveEngine {
                 ev.cooldownMs ?? this.cfg.defaultCooldownMin * 60_000;
             if (this.dedup.isDuplicate(ev.subject, nowMs, cooldown)) return;
 
+            // 4 + 6. action whitelist (avec garde anti-conflit)
+            if (ev.proposedAction) {
+                await this.tryAction(ev.proposedAction, nowMs);
+            }
+
             // 5. formulation
             const message = await this.phrase(ev);
             if (!message) return;
@@ -88,6 +96,45 @@ export class ProactiveEngine {
         await this.deps.notify(text);
         if (this.deps.presenceState() === 'home') {
             await this.deps.speak(text);
+        }
+    }
+
+    private async tryAction(
+        pa: { id: string; tag: string },
+        nowMs: number,
+    ): Promise<void> {
+        const wl = this.cfg.whitelist.find((w) => w.id === pa.id);
+        if (!wl) {
+            Logger.warn(`proactive: action "${pa.id}" non whitelistée`);
+            return;
+        }
+        const blocked = isActionBlocked({
+            tag: wl.tag,
+            now: nowMs,
+            windowMs: this.cfg.automationGuardWindowMin * 60_000,
+            history: loadHistory(),
+            enabledAutomationTags: loadAutomations()
+                .filter((a) => a.enabled && a.tag)
+                .map((a) => a.tag as string),
+        });
+        if (blocked) {
+            Logger.info(
+                `proactive: action "${pa.id}" bridée (garde tag=${wl.tag})`,
+            );
+            return;
+        }
+        try {
+            if ('sceneId' in wl.action) {
+                await this.deps.runScene(wl.action.sceneId);
+            } else {
+                await this.deps.deviceHandler(
+                    wl.action.tool,
+                    wl.action.args ?? {},
+                );
+            }
+            Logger.info(`proactive: action "${pa.id}" exécutée`);
+        } catch (err) {
+            Logger.warn(`proactive: action "${pa.id}" a échoué — ${err}`);
         }
     }
 }
