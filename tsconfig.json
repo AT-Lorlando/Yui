@@ -5,5 +5,5 @@
     "rootDir": "./orchestrator/src"
   },
   "include": ["orchestrator/src/**/*"],
-  "exclude": ["packages", "node_modules", "dist"]
+  "exclude": ["packages", "node_modules", "dist", "**/*.test.ts"]
 }

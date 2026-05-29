@@ -6,8 +6,8 @@ export interface SystemPromptContext {
     alwaysMemory: string;
     onDemandNamespaces: string;
     storySummaries: string;
-    /** Compact entity summary fetched at startup (lights, doors, speakers). */
-    entities?: string;
+    /** Snapshot near-live de l'état des appareils, injecté à chaque ordre. */
+    deviceState?: string;
     /** Active domain group names — used to load prompts/domains/<name>.md */
     activeGroups?: string[];
 }
@@ -109,7 +109,11 @@ function loadDomainDocs(activeGroups: string[]): string {
  * pour les providers de streaming connus. Vide si fichier absent/illisible.
  */
 function loadMediaCatalog(): string {
-    const cacheFile = path.resolve(process.cwd(), 'data', 'chromecast-content.json');
+    const cacheFile = path.resolve(
+        process.cwd(),
+        'data',
+        'chromecast-content.json',
+    );
     if (!fs.existsSync(cacheFile)) return '';
 
     let cache: Record<string, Record<string, { title: string }>>;
@@ -164,8 +168,13 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
         sections.push(mem);
     }
 
-    if (ctx.entities) {
-        sections.push(`## Appareils connus\n\n${ctx.entities}`);
+    if (ctx.deviceState) {
+        sections.push(
+            '## État actuel des appareils\n\n' +
+                '(État récent, peut dater de quelques secondes — pour confirmer un état ' +
+                "à Jérémy ou pour agir, utilise toujours l'outil correspondant.)\n\n" +
+                ctx.deviceState,
+        );
     }
 
     const mediaCatalog = loadMediaCatalog();
@@ -173,7 +182,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
         sections.push(
             '## Catalogue séries/films connus\n\n' +
                 'Plateforme où regarder chaque titre. Pour lancer, appelle directement ' +
-                "cast_<plateforme> (cast_crunchyroll, cast_netflix, cast_disney, cast_prime) avec le titre. " +
+                'cast_<plateforme> (cast_crunchyroll, cast_netflix, cast_disney, cast_prime) avec le titre. ' +
                 "Si un titre demandé n'est pas dans cette liste, appelle find_show pour trouver la plateforme.\n\n" +
                 mediaCatalog,
         );

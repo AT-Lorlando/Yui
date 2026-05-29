@@ -19,6 +19,14 @@ import {
 } from './virtualTools';
 import { runScene } from './scenes';
 import type { McpServerConfig, CollectedTool } from './types';
+import {
+    formatLights,
+    formatDoors,
+    formatPlayback,
+    formatTv,
+    formatCovers,
+    buildDeviceStateSnapshot,
+} from './deviceState';
 
 export type { McpServerConfig, CollectedTool };
 export { buildServerConfigs, LLM_HIDDEN_TOOLS } from './serverConfigs';
@@ -76,8 +84,9 @@ export class Orchestrator {
      */
     private sessionStory: Story | null = null;
 
-    /** Compact entity summary built at startup (rooms, doors, speakers). */
-    private entitySnapshot: string = '';
+    /** Snapshot near-live de l'état des appareils, rafraîchi en fond. */
+    private deviceStateSnapshot: string = '';
+    private deviceStateTimer?: NodeJS.Timeout;
 
     constructor(servers: McpServerConfig[]) {
         this.openai = new OpenAI({
@@ -107,7 +116,14 @@ export class Orchestrator {
                 `Total tools available: ${this.collectedTools.length}`,
         );
 
-        await this.refreshEntitySnapshot();
+        await this.refreshDeviceState();
+        const refreshMs = Number(process.env.DEVICE_STATE_REFRESH_MS ?? 30000);
+        this.deviceStateTimer = setInterval(() => {
+            this.refreshDeviceState().catch((e) =>
+                Logger.warn(`device state refresh failed: ${e}`),
+            );
+        }, refreshMs);
+        this.deviceStateTimer.unref?.();
 
         // Index any stories written to disk but not yet summarized
         // (happens when the process is killed without a clean shutdown).
@@ -118,56 +134,44 @@ export class Orchestrator {
         }
     }
 
-    /** Fetch entities from MCP servers and build a compact snapshot string. */
-    private async refreshEntitySnapshot(): Promise<void> {
-        const parts: string[] = [];
-
+    /** Appelle un outil MCP avec un timeout court ; renvoie null en cas d'échec/timeout. */
+    private async callToolTimed(
+        name: string,
+        ms = 1500,
+    ): Promise<unknown | null> {
         try {
-            const raw = await this.callTool('list_lights');
-            const lights = Array.isArray(raw) ? raw : [];
-            if (lights.length > 0) {
-                const rooms = [
-                    ...new Set(
-                        lights
-                            .map((l: any) => l.room ?? l.name)
-                            .filter(Boolean),
-                    ),
-                ];
-                parts.push(
-                    `Lumières (${lights.length}) — pièces : ${rooms.join(
-                        ', ',
-                    )}`,
-                );
-            }
+            return await Promise.race([
+                this.callTool(name),
+                new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error('timeout')), ms),
+                ),
+            ]);
         } catch (e) {
-            Logger.debug(`Entity snapshot: list_lights failed — ${e}`);
+            Logger.debug(`deviceState: ${name} indisponible — ${e}`);
+            return null;
         }
+    }
 
-        try {
-            const raw = await this.callTool('list_doors');
-            const doors = Array.isArray(raw) ? raw : [];
-            if (doors.length > 0) {
-                const names = doors.map((d: any) => d.name).filter(Boolean);
-                parts.push(`Portes Nuki : ${names.join(', ')}`);
-            }
-        } catch (e) {
-            Logger.debug(`Entity snapshot: list_doors failed — ${e}`);
-        }
+    /** Interroge l'état réel des appareils (en parallèle) et met à jour le snapshot. */
+    private async refreshDeviceState(): Promise<void> {
+        const [lights, doors, playback, tv, covers] = await Promise.all([
+            this.callToolTimed('list_lights'),
+            this.callToolTimed('list_doors'),
+            this.callToolTimed('get_playback_state'),
+            this.callToolTimed('tv_get_status'),
+            this.callToolTimed('list_covers'),
+        ]);
 
-        try {
-            const raw = await this.callTool('list_speakers');
-            const speakers = Array.isArray(raw) ? raw : [];
-            if (speakers.length > 0) {
-                const names = speakers.map((s: any) => s.name).filter(Boolean);
-                parts.push(`Enceintes Spotify : ${names.join(', ')}`);
-            }
-        } catch (e) {
-            Logger.debug(`Entity snapshot: list_speakers failed — ${e}`);
-        }
+        this.deviceStateSnapshot = buildDeviceStateSnapshot([
+            formatLights(lights),
+            formatDoors(doors),
+            formatPlayback(playback),
+            formatTv(tv),
+            formatCovers(covers),
+        ]);
 
-        this.entitySnapshot = parts.join('\n');
-        if (this.entitySnapshot) {
-            Logger.info(`Entity snapshot: ${this.entitySnapshot}`);
+        if (this.deviceStateSnapshot) {
+            Logger.info(`Device state:\n${this.deviceStateSnapshot}`);
         }
     }
 
@@ -345,12 +349,27 @@ export class Orchestrator {
             alwaysMemory: memCtx.alwaysMemory,
             onDemandNamespaces: memCtx.onDemandNamespaces,
             storySummaries: buildStorySummariesContext(),
-            entities: this.entitySnapshot || undefined,
+            deviceState: this.deviceStateSnapshot || undefined,
             activeGroups,
         });
     }
 
     // ── Main entry point ─────────────────────────────────────────────────────
+
+    /**
+     * Appel LLM borné, sans tools — pour la formulation proactive et les digests.
+     * Garantit que le chemin proactif ne peut ni agir ni halluciner une action.
+     */
+    async complete(system: string, user: string): Promise<string> {
+        const response = await this.openai.chat.completions.create({
+            model: env.LLM_MODEL,
+            messages: [
+                { role: 'system', content: system },
+                { role: 'user', content: user },
+            ],
+        });
+        return response.choices[0]?.message?.content?.trim() ?? '';
+    }
 
     async processOrder(
         order: string,
