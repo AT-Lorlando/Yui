@@ -1,6 +1,7 @@
 import assert from 'assert';
 import { ProactiveEngine } from './index';
 import { DigestBuffer } from './digest';
+import { Dedup } from './dedup';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
 import type { PresenceState } from '../presence';
 
@@ -57,6 +58,7 @@ async function run(): Promise<void> {
             baseConfig(),
             deps,
             new DigestBuffer(file),
+            new Dedup(),
         );
         await eng.processCandidate(ev());
         assert.strictEqual(notified.length, 1);
@@ -75,6 +77,7 @@ async function run(): Promise<void> {
             baseConfig(),
             deps,
             new DigestBuffer(file),
+            new Dedup(),
         );
         await eng.processCandidate(ev());
         assert.strictEqual(notified.length, 1);
@@ -87,7 +90,12 @@ async function run(): Promise<void> {
         const file = `data/proactive-digest.t3.json`;
         const { deps, notified } = makeDeps();
         const digest = new DigestBuffer(file);
-        const eng = new ProactiveEngine(baseConfig(), deps, digest);
+        const eng = new ProactiveEngine(
+            baseConfig(),
+            deps,
+            digest,
+            new Dedup(),
+        );
         await eng.processCandidate(ev({ importance: 'info' }));
         assert.strictEqual(notified.length, 0);
         assert.strictEqual(digest.size(), 1);
@@ -102,6 +110,7 @@ async function run(): Promise<void> {
             baseConfig(),
             deps,
             new DigestBuffer(file),
+            new Dedup(),
         );
         await eng.processCandidate(ev());
         await eng.processCandidate(ev());
@@ -115,7 +124,12 @@ async function run(): Promise<void> {
         const night = () => new Date('2026-05-29T23:30:00').getTime();
         const { deps, notified } = makeDeps({ now: night });
         const digest = new DigestBuffer(file);
-        const eng = new ProactiveEngine(baseConfig(), deps, digest);
+        const eng = new ProactiveEngine(
+            baseConfig(),
+            deps,
+            digest,
+            new Dedup(),
+        );
         await eng.processCandidate(ev({ importance: 'urgent' }));
         assert.strictEqual(notified.length, 0);
         assert.strictEqual(digest.size(), 1);
@@ -134,6 +148,7 @@ async function run(): Promise<void> {
             baseConfig(),
             deps,
             new DigestBuffer(file),
+            new Dedup(),
         );
         await eng.processCandidate(ev({ template: 'texte brut' }));
         assert.strictEqual(notified[0], 'texte brut');
@@ -148,6 +163,7 @@ async function run(): Promise<void> {
             baseConfig(),
             deps,
             new DigestBuffer(file),
+            new Dedup(),
         );
         await eng.processCandidate(ev());
         assert.strictEqual(notified.length, 0);

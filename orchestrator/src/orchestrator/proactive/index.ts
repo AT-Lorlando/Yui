@@ -1,3 +1,4 @@
+import * as path from 'path';
 import Logger from '../../logger';
 import { isQuietHours, passesThreshold } from './gates';
 import { Dedup } from './dedup';
@@ -17,8 +18,10 @@ import type {
     Watcher,
 } from './types';
 
+const DEDUP_FILE = path.resolve(process.cwd(), 'data/proactive-dedup.json');
+
 export class ProactiveEngine {
-    private dedup = new Dedup();
+    private dedup: Dedup;
     private digest: DigestBuffer;
     private watchers: Watcher[] = [];
     private now: () => number;
@@ -28,9 +31,11 @@ export class ProactiveEngine {
         private cfg: ProactiveConfig,
         private deps: ProactiveDeps,
         digest?: DigestBuffer,
+        dedup?: Dedup,
     ) {
         this.now = deps.now ?? (() => Date.now());
         this.digest = digest ?? new DigestBuffer();
+        this.dedup = dedup ?? new Dedup(DEDUP_FILE);
     }
 
     setWatchers(ws: Watcher[]): void {

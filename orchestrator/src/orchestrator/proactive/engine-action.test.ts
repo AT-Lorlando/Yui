@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ProactiveEngine } from './index';
 import { DigestBuffer } from './digest';
+import { Dedup } from './dedup';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
 import type { PresenceState } from '../presence';
 
@@ -76,6 +77,7 @@ async function run(): Promise<void> {
                 cfg(),
                 deps(calls),
                 new DigestBuffer('data/proactive-digest.ta.json'),
+                new Dedup(),
             );
             await eng.processCandidate(evt());
             assert.strictEqual(calls.length, 1);
@@ -104,6 +106,7 @@ async function run(): Promise<void> {
                 cfg(),
                 deps(calls),
                 new DigestBuffer('data/proactive-digest.tb.json'),
+                new Dedup(),
             );
             await eng.processCandidate(evt());
             assert.strictEqual(calls.length, 0); // action bridée

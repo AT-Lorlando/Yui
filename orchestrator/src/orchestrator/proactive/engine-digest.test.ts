@@ -2,6 +2,7 @@ import assert from 'assert';
 import * as fs from 'fs';
 import { ProactiveEngine } from './index';
 import { DigestBuffer } from './digest';
+import { Dedup } from './dedup';
 import type { ProactiveConfig, ProactiveDeps } from './types';
 import type { PresenceState } from '../presence';
 
@@ -45,7 +46,7 @@ async function run(): Promise<void> {
         facts: 'fait b',
     });
 
-    const eng = new ProactiveEngine(cfg(), deps, digest);
+    const eng = new ProactiveEngine(cfg(), deps, digest, new Dedup());
     await eng.maybeFlushDigest();
 
     assert.strictEqual(notified.length, 1);
