@@ -353,8 +353,10 @@ export async function handleVirtualTool(
                     : `Automation "${args.id}" introuvable.`,
             };
 
-        case 'automation_toggle':
-            return { id: toolCall.id, content: toggleAutomation(args.id as string) };
+        case 'automation_toggle': {
+            const msg = toggleAutomation(args.id as string);
+            return { id: toolCall.id, content: msg ?? `Automation "${args.id}" introuvable.` };
+        }
 
         case 'scene_list': {
             const scenes = listScenes();
