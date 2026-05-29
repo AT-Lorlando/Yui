@@ -75,6 +75,7 @@ export function setNamespacePriority(
         store[namespace]._priority = priority;
     }
     saveStore(store);
+    Logger.debug(`Namespace priority set: [${namespace}] = ${priority}`);
 }
 
 export function deleteNamespace(namespace: string): boolean {
@@ -82,6 +83,7 @@ export function deleteNamespace(namespace: string): boolean {
     if (!store[namespace]) return false;
     delete store[namespace];
     saveStore(store);
+    Logger.debug(`Namespace deleted: [${namespace}]`);
     return true;
 }
 
