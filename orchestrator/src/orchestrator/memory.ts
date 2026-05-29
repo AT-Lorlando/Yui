@@ -64,6 +64,27 @@ export function deleteMemory(namespace: string, key: string): void {
     saveStore(store);
 }
 
+export function setNamespacePriority(
+    namespace: string,
+    priority: MemoryPriority,
+): void {
+    const store = loadStore();
+    if (!store[namespace]) {
+        store[namespace] = { _priority: priority };
+    } else {
+        store[namespace]._priority = priority;
+    }
+    saveStore(store);
+}
+
+export function deleteNamespace(namespace: string): boolean {
+    const store = loadStore();
+    if (!store[namespace]) return false;
+    delete store[namespace];
+    saveStore(store);
+    return true;
+}
+
 export function readNamespace(namespace: string): string {
     const store = loadStore();
     const ns = store[namespace];
