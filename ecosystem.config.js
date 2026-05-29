@@ -55,26 +55,7 @@ module.exports = {
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
     },
 
-    // ── Dashboard (Nuxt 3 — proxy vers l'orchestrateur) ────────────────────
-    {
-      name: 'yui-dashboard',
-      script: 'dashboard/.output/server/index.mjs',
-      cwd: __dirname,
-      env: {
-        ...env,
-        NODE_ENV: 'production',
-        PORT: env.DASHBOARD_PORT ?? '3000',
-        HOST: '0.0.0.0',
-        ORCHESTRATOR_URL: `http://localhost:${env.ORCHESTRATOR_PORT ?? '4000'}`,
-        PROJECT_ROOT: __dirname,
-      },
-      autorestart: true,
-      max_restarts: 10,
-      restart_delay: 5000,
-      log_date_format: 'YYYY-MM-DD HH:mm:ss',
-    },
-
-    // ── App unifié (Nuxt 4 web build) ─────────────────────────────────────────
+    // ── App unifié (Nuxt 4 web build — remplace l'ancien dashboard) ────────
     {
       name: 'yui-app',
       script: 'mobile/.output/server/index.mjs',
@@ -82,7 +63,7 @@ module.exports = {
       env: {
         ...env,
         NODE_ENV: 'production',
-        PORT: env.APP_PORT ?? '3002',
+        PORT: env.APP_PORT ?? '3000',
         HOST: '0.0.0.0',
         ORCHESTRATOR_URL: `http://localhost:${env.ORCHESTRATOR_PORT ?? '4000'}`,
         NUXT_PUBLIC_BEARER_TOKEN: env.BEARER_TOKEN ?? 'yui',
