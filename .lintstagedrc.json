@@ -1,5 +1,8 @@
 {
-    "src/**/*.ts": [
-      "prettier --check"
-    ]
-  }
+  "orchestrator/src/**/*.ts": [
+    "prettier --check"
+  ],
+  "packages/*/src/**/*.ts": [
+    "prettier --check"
+  ]
+}
