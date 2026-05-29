@@ -53,7 +53,12 @@ export const SPOTIFY_TOOLS = [
     },
     {
         name: 'pause_music',
-        description: 'Pause the current playback',
+        description: 'Pause playback temporarily — amplifier stays on for quick resume.',
+        inputSchema: { type: 'object' as const, properties: {}, required: [] },
+    },
+    {
+        name: 'stop_music',
+        description: 'Stop music entirely: pauses Spotify and turns off the amplifier. Use when the user is done listening, not for a temporary pause.',
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {

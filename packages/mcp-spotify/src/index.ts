@@ -12,10 +12,14 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { SpotifyAuth } from './SpotifyAuth';
 import { SpotifyController } from './SpotifyController';
+import { AmpController } from './AmpController';
 import { SPOTIFY_TOOLS } from './tools';
 import Logger from './logger';
 
 const DEFAULT_SPEAKER = process.env.SPOTIFY_DEFAULT_SPEAKER || 'WiiM Ultra-65B6';
+const BROADLINK_HOST   = process.env.BROADLINK_HOST || '';
+
+let amp: AmpController | null = null;
 
 let spotify: SpotifyController;
 
@@ -34,20 +38,30 @@ async function playOnSpeaker(
     speakerName: string | undefined,
     playFn: (deviceId?: string) => Promise<string>,
 ): Promise<McpContent> {
+    if (amp) {
+        await amp.ensureOn().catch((err) =>
+            Logger.warn(`Amp power-on failed: ${err instanceof Error ? err.message : err}`),
+        );
+    }
+
     if (!speakerName) {
         const description = await playFn(undefined);
         return { content: [{ type: 'text', text: description }] };
     }
 
     const devices = await spotify.getDevices();
-    const device = devices.find(
-        (d) => d.name?.toLowerCase() === speakerName.toLowerCase(),
-    );
+    const device =
+        // Exact name match (case-insensitive)
+        devices.find((d) => d.name?.toLowerCase() === speakerName.toLowerCase()) ??
+        // Partial name match (e.g. "Sono" matches "Sono - WiiM Ultra")
+        devices.find((d) => d.name?.toLowerCase().includes(speakerName.toLowerCase())) ??
+        // Fallback: single AVR device (WiiM Ultra after rename, before Spotify sync)
+        (() => { const avrs = devices.filter((d) => d.type === 'AVR'); return avrs.length === 1 ? avrs[0] : undefined; })();
 
     if (!device?.id) {
-        const names = devices.map((d) => d.name).filter(Boolean).join(', ') || 'none';
+        const names = devices.map((d) => `${d.name} (${d.type})`).filter(Boolean).join(', ') || 'none';
         return {
-            content: [{ type: 'text', text: `Device "${speakerName}" not found or offline. Active Spotify Connect devices: ${names}.` }],
+            content: [{ type: 'text', text: `Device "${speakerName}" not found. Available: ${names}.` }],
             isError: true,
         };
     }
@@ -145,6 +159,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 return { content: [{ type: 'text', text: 'Playback paused.' }] };
             }
 
+            case 'stop_music': {
+                await spotify.pause();
+                if (amp) {
+                    await amp.turnOff().catch((err) =>
+                        Logger.warn(`Amp power-off failed: ${err instanceof Error ? err.message : err}`),
+                    );
+                }
+                return { content: [{ type: 'text', text: 'Music stopped and amplifier turned off.' }] };
+            }
+
             case 'next_track': {
                 await spotify.nextTrack();
                 return { content: [{ type: 'text', text: 'Skipped to next track.' }] };
@@ -232,6 +256,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
+    if (BROADLINK_HOST) {
+        amp = new AmpController(BROADLINK_HOST);
+        amp.connect().catch((err) =>
+            Logger.warn(`Broadlink connect failed: ${err instanceof Error ? err.message : err}`),
+        );
+    }
+
     Logger.info('Authenticating with Spotify...');
     const api = await SpotifyAuth.connect();
     spotify = new SpotifyController(api);
