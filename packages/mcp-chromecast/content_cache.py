@@ -21,7 +21,7 @@ import re
 import subprocess
 import sys
 
-import requests
+import justwatch
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -29,70 +29,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.abspath(os.path.join(_HERE, '..', '..'))
 CACHE_FILE = os.path.join(_PROJECT_ROOT, 'data', 'chromecast-content.json')
 
-# ── JustWatch config ──────────────────────────────────────────────────────────
-
-_JW_API = 'https://apis.justwatch.com/graphql'
-
-# JustWatch provider short names
-_PROVIDER = {
-    'netflix':     'nfx',
-    'crunchyroll': 'cru',
-    'disney':      'dnp',
-    'prime':       'amp',
-}
-
-# Regex to extract content ID from each service's URL
-_ID_PATTERN = {
-    'nfx': re.compile(r'netflix\.com/(?:title|watch)/(\d+)'),
-    'cru': re.compile(r'crunchyroll\.com/(?:series|watch)/([A-Z0-9]+)', re.I),
-    'dnp': re.compile(r'disneyplus\.com/(?:[^/?#]+/){1,3}([^/?&#]+)'),
-    'amp': re.compile(r'(?:primevideo|amazon)\.com/(?:dp|detail)/([A-Z0-9]+)', re.I),
-}
-
-_SERVICE_BY_SHORT = {'nfx': 'netflix', 'cru': 'crunchyroll', 'dnp': 'disney', 'amp': 'prime'}
-
 # Ordre de préférence quand un titre est dispo sur plusieurs plateformes.
 PROVIDER_PREFERENCE = ['crunchyroll', 'netflix', 'disney', 'prime']
-
-# JustWatch refuse les requêtes sans User-Agent (403) et a changé son schéma
-# GraphQL (popularTitles + filter, country/language en variables).
-_JW_HEADERS = {
-    'Content-Type': 'application/json',
-    'User-Agent': (
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
-        '(KHTML, like Gecko) Chrome/120.0 Safari/537.36'
-    ),
-}
-
-_JW_QUERY = '''
-query GetSearchTitles($searchTitlesFilter: TitleFilter!, $country: Country!, $language: Language!, $first: Int!) {
-  popularTitles(country: $country, filter: $searchTitlesFilter, first: $first) {
-    edges {
-      node {
-        ... on MovieOrShow {
-          objectType
-          content(country: $country, language: $language) {
-            title
-          }
-          offers(country: $country, platform: WEB) {
-            standardWebURL
-            package { shortName }
-          }
-        }
-      }
-    }
-  }
-}
-'''
-
-
-def _jw_variables(title: str) -> dict:
-    return {
-        'searchTitlesFilter': {'searchQuery': title},
-        'country': 'FR',
-        'language': 'fr',
-        'first': 4,
-    }
 
 # ── YouTube URL / ID patterns ─────────────────────────────────────────────────
 
@@ -134,109 +72,6 @@ def _put(service: str, title: str, content_id: str, full_title: str) -> None:
     }
     _save(cache)
 
-# ── JustWatch lookup ──────────────────────────────────────────────────────────
-
-def _justwatch(service: str, title: str) -> tuple[str | None, str | None]:
-    provider = _PROVIDER.get(service)
-    if not provider:
-        return None, None
-
-    try:
-        resp = requests.post(
-            _JW_API,
-            json={'query': _JW_QUERY, 'variables': _jw_variables(title)},
-            headers=_JW_HEADERS,
-            timeout=10,
-        )
-        resp.raise_for_status()
-        edges = (
-            resp.json()
-            .get('data', {})
-            .get('popularTitles', {})
-            .get('edges', [])
-        )
-    except Exception as exc:
-        print(f'[justwatch] API error: {exc}', file=sys.stderr)
-        return None, None
-
-    if not edges:
-        return None, None
-
-    # La recherche peut renvoyer des spin-offs/films au même titre approchant ;
-    # on se limite aux edges qui portent exactement le titre du meilleur résultat.
-    target = (edges[0].get('node', {}).get('content', {}).get('title') or title).strip().lower()
-
-    pattern = _ID_PATTERN.get(provider)
-    for edge in edges:
-        node = edge.get('node', {})
-        node_title = node.get('content', {}).get('title', title)
-        if node_title.strip().lower() != target:
-            continue
-        for offer in node.get('offers', []):
-            if offer.get('package', {}).get('shortName') != provider:
-                continue
-            url = offer.get('standardWebURL', '')
-            if pattern:
-                m = pattern.search(url)
-                if m:
-                    return m.group(1), node_title
-
-    return None, None
-
-
-def _justwatch_any(title: str) -> tuple[str | None, str | None, str | None]:
-    """
-    Cherche un titre sur JustWatch sans filtre de provider.
-    Renvoie (service, content_id, full_title) pour le provider supporté
-    le plus prioritaire (PROVIDER_PREFERENCE), ou (None, None, None).
-    """
-    try:
-        resp = requests.post(
-            _JW_API,
-            json={'query': _JW_QUERY, 'variables': _jw_variables(title)},
-            headers=_JW_HEADERS,
-            timeout=10,
-        )
-        resp.raise_for_status()
-        edges = (
-            resp.json().get('data', {}).get('popularTitles', {}).get('edges', [])
-        )
-    except Exception as exc:
-        print(f'[justwatch] API error: {exc}', file=sys.stderr)
-        return None, None, None
-
-    if not edges:
-        return None, None, None
-
-    # JustWatch éclate parfois un même titre sur plusieurs edges (ex. Crunchyroll
-    # sur un edge frère de l'edge Netflix). On agrège les offres de tous les edges
-    # qui portent exactement le titre du meilleur résultat, puis on applique la
-    # préférence de provider.
-    target = (edges[0].get('node', {}).get('content', {}).get('title') or title).strip().lower()
-
-    found: dict[str, tuple[str, str]] = {}  # service -> (id, full_title)
-    for edge in edges:
-        node = edge.get('node', {})
-        node_title = node.get('content', {}).get('title', title)
-        if node_title.strip().lower() != target:
-            continue
-        for offer in node.get('offers', []):
-            short = offer.get('package', {}).get('shortName')
-            service = _SERVICE_BY_SHORT.get(short)
-            if not service or service in found:
-                continue
-            pattern = _ID_PATTERN.get(short)
-            m = pattern.search(offer.get('standardWebURL', '')) if pattern else None
-            if m:
-                found[service] = (m.group(1), node_title)
-
-    for service in PROVIDER_PREFERENCE:
-        if service in found:
-            cid, ft = found[service]
-            return service, cid, ft
-    return None, None, None
-
-
 def resolve_any(title: str | None) -> tuple[str | None, str | None, str | None]:
     """
     Trouve sur quelle plateforme regarder *title*, sans provider imposé.
@@ -254,7 +89,7 @@ def resolve_any(title: str | None) -> tuple[str | None, str | None, str | None]:
             return service, entry['id'], entry['title']
 
     print(f'[justwatch] any / "{title}" ...')
-    service, cid, ft = _justwatch_any(title)
+    service, cid, ft = justwatch.find_any(title, PROVIDER_PREFERENCE)
     if service:
         _put(service, title, cid, ft or title)
         print(f'[cache] stored {service}/{ft} → {cid}')
@@ -271,11 +106,11 @@ def remember(title: str, service: str) -> dict | None:
     plateforme dans tous les cas (id = None si non trouvé → l'app s'ouvre sans
     deep-link). Renvoie l'entrée stockée, ou None si service non supporté.
     """
-    if service not in _PROVIDER:
+    if service not in justwatch.SUPPORTED_SERVICES:
         print(f'[remember] service non supporté : {service}', file=sys.stderr)
         return None
 
-    content_id, full_title = _justwatch(service, title)
+    content_id, full_title = justwatch.find_on_service(title, service)
     _put(service, title, content_id, full_title or title)
     print(f'[remember] {service}/{title} → {content_id}')
     return {'service': service, 'id': content_id, 'title': full_title or title}
@@ -297,7 +132,7 @@ def resolve(service: str, title: str | None) -> tuple[str | None, str | None]:
         return cached['id'], cached['title']
 
     print(f'[justwatch] {service} / "{title}" ...')
-    content_id, full_title = _justwatch(service, title)
+    content_id, full_title = justwatch.find_on_service(title, service)
     if content_id:
         _put(service, title, content_id, full_title or title)
         print(f'[cache] stored {service}/{full_title} → {content_id}')

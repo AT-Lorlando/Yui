@@ -27,7 +27,7 @@ def test_resolve_any_cache_hit_prefers_crunchyroll():
 
 def test_resolve_any_justwatch_fallback_caches():
     _setup_cache({})
-    cc._justwatch_any = lambda title: ('crunchyroll', 'GXYZ', 'Naruto')
+    cc.justwatch.find_any = lambda title, preference: ('crunchyroll', 'GXYZ', 'Naruto')
     service, cid, title = cc.resolve_any('Naruto')
     assert service == 'crunchyroll', service
     assert cid == 'GXYZ', cid
@@ -38,13 +38,13 @@ def test_resolve_any_justwatch_fallback_caches():
 
 def test_resolve_any_miss_returns_none():
     _setup_cache({})
-    cc._justwatch_any = lambda title: (None, None, None)
+    cc.justwatch.find_any = lambda title, preference: (None, None, None)
     assert cc.resolve_any('Inconnu') == (None, None, None)
 
 
 def test_remember_stores_platform_with_id():
     _setup_cache({})
-    cc._justwatch = lambda service, title: ('CRU9', 'Naruto')
+    cc.justwatch.find_on_service = lambda title, service: ('CRU9', 'Naruto')
     res = cc.remember('Naruto', 'crunchyroll')
     assert res['service'] == 'crunchyroll', res
     assert res['id'] == 'CRU9', res
@@ -55,7 +55,7 @@ def test_remember_stores_platform_with_id():
 
 def test_remember_stores_platform_without_id():
     _setup_cache({})
-    cc._justwatch = lambda service, title: (None, None)
+    cc.justwatch.find_on_service = lambda title, service: (None, None)
     res = cc.remember('Naruto', 'crunchyroll')
     assert res['service'] == 'crunchyroll', res
     with open(cc.CACHE_FILE) as f:
