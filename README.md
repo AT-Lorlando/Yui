@@ -9,15 +9,15 @@ Yui est une assistante vocale locale qui contrôle l'appartement via commande vo
 - **Musique** — Spotify via WiiM Ultra (Spotify Connect)
 - **Informations** — météo, calendrier, emails, notes Obsidian
 - **Automatisations** — scènes, cron jobs, détection de présence GPS/MAC
-- **Dashboard web** — interface de contrôle (port 3002)
+- **App web/mobile** — interface de contrôle unifiée Nuxt (port 3000)
 
 ## Architecture
 
 ```
-[ReSpeaker XVF3800] ──UDP──► [Voice Pipeline]
-                                  │ Porcupine + Silero VAD + Whisper
-                                  ▼
-                         [Orchestrateur :3000]
+[Satellite micro] ──WS──► [Voice server Python]
+                              │ wakeword + VAD + Whisper
+                              ▼
+                         [Orchestrateur :4000]
                               │ Deepseek LLM
                          ┌────┴────────────────────────┐
                          │        MCP Servers           │
@@ -25,9 +25,13 @@ Yui est une assistante vocale locale qui contrôle l'appartement via commande vo
                          │  Chromecast · Samsung TV     │
                          │  Calendar · Gmail · Weather  │
                          │  Timer · Obsidian · Linear   │
+                         │  Somfy · Irrigation · Browser│
+                         │  Search (Tavily)             │
                          └─────────────────────────────┘
                                   │ réponse TTS
                          [XTTS v2] ──► [Google Home Max "Salon"]
+
+      [App Nuxt (mobile/) :3000] ── UI web + mobile (proxy → :4000)
 ```
 
 ## Stack technique
@@ -37,7 +41,7 @@ Yui est une assistante vocale locale qui contrôle l'appartement via commande vo
 | Orchestrateur | Node.js / TypeScript |
 | Voice pipeline | Python (Porcupine, Silero, Whisper, XTTS) |
 | Outils domotiques | MCP (Model Context Protocol) |
-| Dashboard | Nuxt 3 + Nuxt UI |
+| App web/mobile | Nuxt (`mobile/`, sous-module) |
 | LLM | Deepseek (API OpenAI-compatible) |
 | Process manager | PM2 |
 
@@ -45,16 +49,17 @@ Yui est une assistante vocale locale qui contrôle l'appartement via commande vo
 
 ```
 Yui/
-├── src/
-│   ├── main.ts                    # Entry point
-│   ├── orchestrator/              # LLM loop, scheduler, scenes, presence
-│   ├── input/                     # HTTP API (port 3000), stdin
-│   └── voice/                     # Pipeline Python (wakeword, VAD, ASR, TTS)
+├── orchestrator/
+│   └── src/
+│       ├── main.ts                # Entry point
+│       ├── orchestrator/          # LLM loop, automations, scenes, presence
+│       └── input/                 # HTTP API (port 4000), stdin
+├── voice/                         # Serveur voix Python (wakeword, VAD, ASR, TTS)
 ├── packages/
 │   ├── mcp-hue/                   # Philips Hue
 │   ├── mcp-nuki/                  # Serrure Nuki
-│   ├── mcp-spotify/               # Spotify
-│   ├── mcp-chromecast/            # Chromecast + Samsung TV
+│   ├── mcp-spotify/               # Spotify → WiiM
+│   ├── mcp-chromecast/            # Chromecast + Samsung TV + routage séries
 │   ├── mcp-samsung/               # TV Samsung (WebSocket)
 │   ├── mcp-timer/                 # Timers
 │   ├── mcp-calendar/              # Google Calendar
@@ -62,14 +67,15 @@ Yui/
 │   ├── mcp-weather/               # Météo
 │   ├── mcp-obsidian/              # Notes Obsidian
 │   ├── mcp-linear/                # Tickets Linear
-│   ├── mcp-somfy/                 # Volets Somfy (WIP)
+│   ├── mcp-somfy/                 # Volets Somfy (Tahoma)
+│   ├── mcp-irrigation/            # Arrosage
+│   ├── mcp-browser/               # Navigation web
 │   └── shared/                    # GoogleAuth partagé
-├── dashboard/                     # Nuxt 3 dashboard
+├── mobile/                        # App unifiée Nuxt (web + mobile, sous-module)
 ├── prompts/                       # System prompts LLM
-├── data/                          # État persistant (scenes, schedules, memory...)
+├── data/                          # État persistant (scenes, automations, memory...)
 ├── assets/                        # Wakeword, chimes, ringtones, media
-├── ecosystem.config.js            # Config PM2
-└── TODO.md                        # Backlog
+└── ecosystem.config.js            # Config PM2
 ```
 
 ## Installation
@@ -152,7 +158,7 @@ pm2 logs             # logs en temps réel
 
 ```bash
 npm run dev           # orchestrateur en mode watch (ts-node)
-npm run dev:dashboard # dashboard Nuxt (port 3002)
+npm run dev:app       # app Nuxt en mode web (dev)
 npm run dev:hue       # tester le MCP Hue seul
 # etc. pour chaque package
 ```
