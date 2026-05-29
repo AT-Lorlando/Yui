@@ -28,11 +28,6 @@ sans que le LLM le choisisse. Options :
 - Champ `output` dans `data/schedules.json` (admin-only, édité à la main)
 - L'orchestrateur déduit le canal selon le contexte d'entrée (HTTP vs vocal)
 
-### Notifications push (ntfy / Pushover)
-**Branche :** `feat/notify`
-`src/orchestrator/notify.ts` est un stub vide. Brancher sur ntfy ou Pushover
-pour que le canal `notify` des schedules soit réellement utile.
-
 ### Volume TV (optimisation)
 **Branche :** `feat/tv-volume`
 `setVolume()` envoie 50 KEY_VOLDOWN + N KEY_VOLUP (~7s). Trouver une API
@@ -81,3 +76,4 @@ Package `packages/mcp-somfy/` présent mais non intégré/testé.
 - mcp-somfy package initial
 - Pipeline wakeword_pending (Silero confirm après OWW trigger)
 - Chimes pour acknowledgment Yui
+- Moteur de proactivité (watchers météo/présence/agenda/mail + digest + garde anti-conflit)
