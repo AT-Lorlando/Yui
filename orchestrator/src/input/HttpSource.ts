@@ -597,6 +597,9 @@ export class HttpSource implements InputSource {
                 if (typeof key !== 'string' || typeof value !== 'string') {
                     return res.status(400).json({ error: 'key and value must be strings' });
                 }
+                if (key === '_priority') {
+                    return res.status(400).json({ error: '_priority is reserved' });
+                }
                 saveMemory(namespace, key, value, priority ?? 'always');
             } else if (priority) {
                 setNamespacePriority(namespace, priority);
