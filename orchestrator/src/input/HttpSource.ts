@@ -614,6 +614,9 @@ export class HttpSource implements InputSource {
             if (!this.checkPassword(bearer, req.ip)) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
+            if (req.params.key === '_priority') {
+                return res.status(400).json({ error: '_priority is reserved' });
+            }
             deleteMemory(req.params.namespace, req.params.key);
             res.json(loadStore());
         });
