@@ -100,6 +100,20 @@ export class ChromecastController {
         return title ? run(['prime', title]) : run(['prime']);
     }
 
+    async findShow(title: string): Promise<{ platform: string | null; id: string | null; title: string | null }> {
+        Logger.info(`Chromecast: find_show "${title}"`);
+        const out = await run(['find', title]);
+        const lastLine = out.split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? '{}';
+        return JSON.parse(lastLine);
+    }
+
+    async rememberShow(title: string, platform: string): Promise<{ service: string; id: string | null; title: string }> {
+        Logger.info(`Chromecast: remember_show "${title}" → ${platform}`);
+        const out = await run(['remember', title, platform]);
+        const lastLine = out.split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? '{}';
+        return JSON.parse(lastLine);
+    }
+
     castMedia(url: string): Promise<string> {
         Logger.info(`Chromecast: media ${url}`);
         return run(['media', url]);

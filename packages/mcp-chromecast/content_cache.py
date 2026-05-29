@@ -26,7 +26,7 @@ import requests
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_HERE, '..', '..', '..'))
+_PROJECT_ROOT = os.path.abspath(os.path.join(_HERE, '..', '..'))
 CACHE_FILE = os.path.join(_PROJECT_ROOT, 'data', 'chromecast-content.json')
 
 # ── JustWatch config ──────────────────────────────────────────────────────────
@@ -49,21 +49,50 @@ _ID_PATTERN = {
     'amp': re.compile(r'(?:primevideo|amazon)\.com/(?:dp|detail)/([A-Z0-9]+)', re.I),
 }
 
+_SERVICE_BY_SHORT = {'nfx': 'netflix', 'cru': 'crunchyroll', 'dnp': 'disney', 'amp': 'prime'}
+
+# Ordre de préférence quand un titre est dispo sur plusieurs plateformes.
+PROVIDER_PREFERENCE = ['crunchyroll', 'netflix', 'disney', 'prime']
+
+# JustWatch refuse les requêtes sans User-Agent (403) et a changé son schéma
+# GraphQL (popularTitles + filter, country/language en variables).
+_JW_HEADERS = {
+    'Content-Type': 'application/json',
+    'User-Agent': (
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+    ),
+}
+
 _JW_QUERY = '''
-query SearchTitles($searchInput: SearchTitlesInput!) {
-  searchTitles(searchInput: $searchInput, country: "FR", language: "fr") {
+query GetSearchTitles($searchTitlesFilter: TitleFilter!, $country: Country!, $language: Language!, $first: Int!) {
+  popularTitles(country: $country, filter: $searchTitlesFilter, first: $first) {
     edges {
       node {
-        content { title objectType }
-        offers(country: "FR", platform: WEB) {
-          standardWebURL
-          package { shortName }
+        ... on MovieOrShow {
+          objectType
+          content(country: $country, language: $language) {
+            title
+          }
+          offers(country: $country, platform: WEB) {
+            standardWebURL
+            package { shortName }
+          }
         }
       }
     }
   }
 }
 '''
+
+
+def _jw_variables(title: str) -> dict:
+    return {
+        'searchTitlesFilter': {'searchQuery': title},
+        'country': 'FR',
+        'language': 'fr',
+        'first': 4,
+    }
 
 # ── YouTube URL / ID patterns ─────────────────────────────────────────────────
 
@@ -115,28 +144,34 @@ def _justwatch(service: str, title: str) -> tuple[str | None, str | None]:
     try:
         resp = requests.post(
             _JW_API,
-            json={
-                'query': _JW_QUERY,
-                'variables': {'searchInput': {'query': title}},
-            },
-            headers={'Content-Type': 'application/json'},
+            json={'query': _JW_QUERY, 'variables': _jw_variables(title)},
+            headers=_JW_HEADERS,
             timeout=10,
         )
         resp.raise_for_status()
         edges = (
             resp.json()
             .get('data', {})
-            .get('searchTitles', {})
+            .get('popularTitles', {})
             .get('edges', [])
         )
     except Exception as exc:
         print(f'[justwatch] API error: {exc}', file=sys.stderr)
         return None, None
 
+    if not edges:
+        return None, None
+
+    # La recherche peut renvoyer des spin-offs/films au même titre approchant ;
+    # on se limite aux edges qui portent exactement le titre du meilleur résultat.
+    target = (edges[0].get('node', {}).get('content', {}).get('title') or title).strip().lower()
+
     pattern = _ID_PATTERN.get(provider)
     for edge in edges:
-        node      = edge.get('node', {})
-        full_title = node.get('content', {}).get('title', title)
+        node = edge.get('node', {})
+        node_title = node.get('content', {}).get('title', title)
+        if node_title.strip().lower() != target:
+            continue
         for offer in node.get('offers', []):
             if offer.get('package', {}).get('shortName') != provider:
                 continue
@@ -144,9 +179,106 @@ def _justwatch(service: str, title: str) -> tuple[str | None, str | None]:
             if pattern:
                 m = pattern.search(url)
                 if m:
-                    return m.group(1), full_title
+                    return m.group(1), node_title
 
     return None, None
+
+
+def _justwatch_any(title: str) -> tuple[str | None, str | None, str | None]:
+    """
+    Cherche un titre sur JustWatch sans filtre de provider.
+    Renvoie (service, content_id, full_title) pour le provider supporté
+    le plus prioritaire (PROVIDER_PREFERENCE), ou (None, None, None).
+    """
+    try:
+        resp = requests.post(
+            _JW_API,
+            json={'query': _JW_QUERY, 'variables': _jw_variables(title)},
+            headers=_JW_HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        edges = (
+            resp.json().get('data', {}).get('popularTitles', {}).get('edges', [])
+        )
+    except Exception as exc:
+        print(f'[justwatch] API error: {exc}', file=sys.stderr)
+        return None, None, None
+
+    if not edges:
+        return None, None, None
+
+    # JustWatch éclate parfois un même titre sur plusieurs edges (ex. Crunchyroll
+    # sur un edge frère de l'edge Netflix). On agrège les offres de tous les edges
+    # qui portent exactement le titre du meilleur résultat, puis on applique la
+    # préférence de provider.
+    target = (edges[0].get('node', {}).get('content', {}).get('title') or title).strip().lower()
+
+    found: dict[str, tuple[str, str]] = {}  # service -> (id, full_title)
+    for edge in edges:
+        node = edge.get('node', {})
+        node_title = node.get('content', {}).get('title', title)
+        if node_title.strip().lower() != target:
+            continue
+        for offer in node.get('offers', []):
+            short = offer.get('package', {}).get('shortName')
+            service = _SERVICE_BY_SHORT.get(short)
+            if not service or service in found:
+                continue
+            pattern = _ID_PATTERN.get(short)
+            m = pattern.search(offer.get('standardWebURL', '')) if pattern else None
+            if m:
+                found[service] = (m.group(1), node_title)
+
+    for service in PROVIDER_PREFERENCE:
+        if service in found:
+            cid, ft = found[service]
+            return service, cid, ft
+    return None, None, None
+
+
+def resolve_any(title: str | None) -> tuple[str | None, str | None, str | None]:
+    """
+    Trouve sur quelle plateforme regarder *title*, sans provider imposé.
+    Cache d'abord (tous les buckets, ordre de préférence), puis JustWatch.
+    Renvoie (service, content_id, full_title) ou (None, None, None).
+    """
+    if not title:
+        return None, None, None
+
+    cache = _load()
+    for service in PROVIDER_PREFERENCE:
+        entry = cache.get(service, {}).get(_key(title))
+        if entry:
+            print(f'[cache] any/"{title}" → {service}/{entry["id"]}')
+            return service, entry['id'], entry['title']
+
+    print(f'[justwatch] any / "{title}" ...')
+    service, cid, ft = _justwatch_any(title)
+    if service:
+        _put(service, title, cid, ft or title)
+        print(f'[cache] stored {service}/{ft} → {cid}')
+        return service, cid, ft
+
+    print(f'[justwatch] no result for any/"{title}"', file=sys.stderr)
+    return None, None, None
+
+
+def remember(title: str, service: str) -> dict | None:
+    """
+    Mémorise sur quelle plateforme se trouve *title*.
+    Tente de résoudre un content id deep-link via JustWatch ; enregistre la
+    plateforme dans tous les cas (id = None si non trouvé → l'app s'ouvre sans
+    deep-link). Renvoie l'entrée stockée, ou None si service non supporté.
+    """
+    if service not in _PROVIDER:
+        print(f'[remember] service non supporté : {service}', file=sys.stderr)
+        return None
+
+    content_id, full_title = _justwatch(service, title)
+    _put(service, title, content_id, full_title or title)
+    print(f'[remember] {service}/{title} → {content_id}')
+    return {'service': service, 'id': content_id, 'title': full_title or title}
 
 # ── Public API ────────────────────────────────────────────────────────────────
 

@@ -13,6 +13,8 @@ Usage:
   python3 cast.py <host> <port> prime      [title]
   python3 cast.py <host> <port> media      <url>           # direct mp4 / m3u8 / …
   python3 cast.py <host> <port> stop
+  python3 cast.py <host> <port> find       <title>         # → JSON {platform,id,title}
+  python3 cast.py <host> <port> remember   <title> <service>
 """
 
 import os
@@ -141,6 +143,22 @@ def main() -> None:
     if CMD == 'stop':
         # Stop never needs TV preparation
         print(cmd_stop())
+        return
+
+    if CMD == 'find':
+        import json as _json
+        title = sys.argv[4] if len(sys.argv) > 4 else None
+        service, cid, full_title = content_cache.resolve_any(title)
+        print(_json.dumps({'platform': service, 'id': cid, 'title': full_title}))
+        return
+
+    if CMD == 'remember':
+        import json as _json
+        if len(sys.argv) < 6:
+            print('ERROR: remember requires <title> <service>', file=sys.stderr)
+            sys.exit(1)
+        res = content_cache.remember(sys.argv[4], sys.argv[5])
+        print(_json.dumps(res or {}))
         return
 
     # All cast commands prepare the TV first (WoL + HDMI3)

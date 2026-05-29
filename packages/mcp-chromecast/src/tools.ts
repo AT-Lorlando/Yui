@@ -83,6 +83,39 @@ export const CHROMECAST_TOOLS = [
         description: 'Stop current Chromecast playback without turning off the TV.',
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
+    {
+        name: 'find_show',
+        description:
+            'Trouver sur quelle plateforme de streaming regarder une série, un film ou un animé ' +
+            '(Netflix, Crunchyroll, Disney+, Prime Video). Renvoie la plateforme. ' +
+            'Appelle ensuite cast_<plateforme> avec le titre pour lancer la lecture. ' +
+            'Utilise cet outil quand tu ne connais pas déjà la plateforme du titre demandé.',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {
+                title: { type: 'string', description: 'Titre de la série, film ou animé (ex: "Naruto")' },
+            },
+            required: ['title'],
+        },
+    },
+    {
+        name: 'remember_show',
+        description:
+            "Mémoriser sur quelle plateforme se trouve une série/film/animé, pour les prochaines fois. " +
+            "Utilise quand l'utilisateur t'apprend où regarder un titre (ex: \"Naruto c'est sur Crunchyroll\").",
+        inputSchema: {
+            type: 'object' as const,
+            properties: {
+                title: { type: 'string', description: 'Titre du contenu' },
+                platform: {
+                    type: 'string',
+                    enum: ['crunchyroll', 'netflix', 'disney', 'prime'],
+                    description: 'Plateforme de streaming',
+                },
+            },
+            required: ['title', 'platform'],
+        },
+    },
 
     // ── TV power & controls ───────────────────────────────────────────────────
     {

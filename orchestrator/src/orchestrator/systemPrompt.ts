@@ -104,6 +104,40 @@ function loadDomainDocs(activeGroups: string[]): string {
     return parts.join('\n\n---\n\n');
 }
 
+/**
+ * Lit data/chromecast-content.json et renvoie une liste "titre → Plateforme"
+ * pour les providers de streaming connus. Vide si fichier absent/illisible.
+ */
+function loadMediaCatalog(): string {
+    const cacheFile = path.resolve(process.cwd(), 'data', 'chromecast-content.json');
+    if (!fs.existsSync(cacheFile)) return '';
+
+    let cache: Record<string, Record<string, { title: string }>>;
+    try {
+        cache = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
+    } catch (err) {
+        Logger.warn(`Could not parse chromecast-content.json: ${err}`);
+        return '';
+    }
+
+    const display: Record<string, string> = {
+        crunchyroll: 'Crunchyroll',
+        netflix: 'Netflix',
+        disney: 'Disney+',
+        prime: 'Prime Video',
+    };
+
+    const lines: string[] = [];
+    for (const [service, label] of Object.entries(display)) {
+        const bucket = cache[service];
+        if (!bucket) continue;
+        for (const entry of Object.values(bucket)) {
+            if (entry?.title) lines.push(`- ${entry.title} → ${label}`);
+        }
+    }
+    return lines.join('\n');
+}
+
 export function buildSystemPrompt(ctx: SystemPromptContext): string {
     const coreDocs = loadCoreDocs();
     const domainDocs = loadDomainDocs(ctx.activeGroups ?? []);
@@ -132,6 +166,17 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 
     if (ctx.entities) {
         sections.push(`## Appareils connus\n\n${ctx.entities}`);
+    }
+
+    const mediaCatalog = loadMediaCatalog();
+    if (mediaCatalog) {
+        sections.push(
+            '## Catalogue séries/films connus\n\n' +
+                'Plateforme où regarder chaque titre. Pour lancer, appelle directement ' +
+                "cast_<plateforme> (cast_crunchyroll, cast_netflix, cast_disney, cast_prime) avec le titre. " +
+                "Si un titre demandé n'est pas dans cette liste, appelle find_show pour trouver la plateforme.\n\n" +
+                mediaCatalog,
+        );
     }
 
     if (ctx.storySummaries) {

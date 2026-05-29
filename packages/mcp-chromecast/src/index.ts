@@ -69,6 +69,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 return { content: [{ type: 'text', text: await chromecast.castStop() }] };
             }
 
+            case 'find_show': {
+                const title = String((args as any).title);
+                const res = await chromecast.findShow(title);
+                if (!res.platform) {
+                    return { content: [{ type: 'text', text: `Titre introuvable : "${title}"` }] };
+                }
+                return {
+                    content: [{ type: 'text', text: JSON.stringify({ platform: res.platform, title: res.title }) }],
+                };
+            }
+
+            case 'remember_show': {
+                const title = String((args as any).title);
+                const platform = String((args as any).platform);
+                const res = await chromecast.rememberShow(title, platform);
+                return {
+                    content: [{ type: 'text', text: `Enregistré : ${res.title ?? title} → ${platform}` }],
+                };
+            }
+
             case 'list_media': {
                 const type = (args as any)?.type as 'wallpaper' | 'video' | 'all' | undefined;
                 return { content: [{ type: 'text', text: JSON.stringify(listMediaFiles(type ?? 'all')) }] };
