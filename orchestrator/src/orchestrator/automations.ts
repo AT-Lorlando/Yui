@@ -26,6 +26,8 @@ export interface Automation {
     notify?: string | null;
     enabled: boolean;
     createdAt: number;
+    /** Domaine touché par l'automation (ex. "irrigation"), lu par la garde proactive. */
+    tag?: string;
 }
 
 export type CreateAutomationInput = Omit<Automation, 'id' | 'createdAt'>;
@@ -33,7 +35,7 @@ export type CreateAutomationInput = Omit<Automation, 'id' | 'createdAt'>;
 // ── Storage ────────────────────────────────────────────────────────────────────
 
 const AUTOMATIONS_FILE = path.resolve(process.cwd(), 'data/automations.json');
-const SCHEDULES_FILE   = path.resolve(process.cwd(), 'data/schedules.json');
+const SCHEDULES_FILE = path.resolve(process.cwd(), 'data/schedules.json');
 
 function ensureDataDir(): void {
     const dir = path.dirname(AUTOMATIONS_FILE);
@@ -55,24 +57,35 @@ interface LegacySchedule {
 
 function migrateIfNeeded(): void {
     if (fs.existsSync(AUTOMATIONS_FILE)) return;
-    if (!fs.existsSync(SCHEDULES_FILE))  return;
+    if (!fs.existsSync(SCHEDULES_FILE)) return;
     try {
-        const raw = JSON.parse(fs.readFileSync(SCHEDULES_FILE, 'utf-8')) as LegacySchedule[];
+        const raw = JSON.parse(
+            fs.readFileSync(SCHEDULES_FILE, 'utf-8'),
+        ) as LegacySchedule[];
         // Oneshot schedules should have already fired — skip them
         const automations: Automation[] = raw
             .filter((s) => !s.oneshot)
             .map((s) => ({
-                id:        s.id,
-                name:      s.name,
-                trigger:   { type: 'cron' as const, expr: s.cron },
-                action:    { type: 'prompt' as const, text: s.prompt, ...(s.output ? { output: s.output } : {}) },
-                notify:    null,
-                enabled:   s.enabled,
+                id: s.id,
+                name: s.name,
+                trigger: { type: 'cron' as const, expr: s.cron },
+                action: {
+                    type: 'prompt' as const,
+                    text: s.prompt,
+                    ...(s.output ? { output: s.output } : {}),
+                },
+                notify: null,
+                enabled: s.enabled,
                 createdAt: s.createdAt ?? Date.now(),
             }));
         ensureDataDir();
-        fs.writeFileSync(AUTOMATIONS_FILE, JSON.stringify(automations, null, 2));
-        Logger.info(`Migrated ${automations.length} schedule(s) → automations.json`);
+        fs.writeFileSync(
+            AUTOMATIONS_FILE,
+            JSON.stringify(automations, null, 2),
+        );
+        Logger.info(
+            `Migrated ${automations.length} schedule(s) → automations.json`,
+        );
     } catch (err) {
         Logger.warn(`Migration from schedules.json failed: ${err}`);
     }
@@ -84,7 +97,9 @@ export function loadAutomations(): Automation[] {
     migrateIfNeeded();
     try {
         if (!fs.existsSync(AUTOMATIONS_FILE)) return [];
-        return JSON.parse(fs.readFileSync(AUTOMATIONS_FILE, 'utf-8')) as Automation[];
+        return JSON.parse(
+            fs.readFileSync(AUTOMATIONS_FILE, 'utf-8'),
+        ) as Automation[];
     } catch {
         return [];
     }
@@ -98,7 +113,11 @@ function saveAutomations(automations: Automation[]): void {
 // ── CRUD ───────────────────────────────────────────────────────────────────────
 
 export function addAutomation(input: CreateAutomationInput): Automation {
-    const automation: Automation = { ...input, id: crypto.randomUUID().slice(0, 8), createdAt: Date.now() };
+    const automation: Automation = {
+        ...input,
+        id: crypto.randomUUID().slice(0, 8),
+        createdAt: Date.now(),
+    };
     const automations = loadAutomations();
     automations.push(automation);
     saveAutomations(automations);
@@ -125,7 +144,9 @@ export function toggleAutomation(id: string): string | null {
     saveAutomations(automations);
     if (automation.enabled) scheduleAutomation(automation);
     else cancelAutomation(id);
-    return `Automation "${automation.name}" ${automation.enabled ? 'activée' : 'désactivée'}.`;
+    return `Automation "${automation.name}" ${
+        automation.enabled ? 'activée' : 'désactivée'
+    }.`;
 }
 
 export function updateAutomation(
@@ -143,27 +164,30 @@ export function updateAutomation(
 }
 
 /** Trigger an automation manually, regardless of its enabled state. */
-export async function runAutomation(id: string): Promise<{ success: boolean; error?: string }> {
+export async function runAutomation(
+    id: string,
+): Promise<{ success: boolean; error?: string }> {
     const automation = loadAutomations().find((a) => a.id === id);
-    if (!automation) return { success: false, error: `Automation "${id}" not found` };
+    if (!automation)
+        return { success: false, error: `Automation "${id}" not found` };
     await execute(automation);
     return { success: true };
 }
 
 // ── Runtime ────────────────────────────────────────────────────────────────────
 
-type OrderFn    = (prompt: string) => Promise<string>;
-type OutputFn   = (text: string, channel: OutputChannel) => Promise<void>;
+type OrderFn = (prompt: string) => Promise<string>;
+type OutputFn = (text: string, channel: OutputChannel) => Promise<void>;
 type RunSceneFn = (id: string) => Promise<{ success: boolean; error?: string }>;
-type SpeakFn    = (text: string) => Promise<void>;
+type SpeakFn = (text: string) => Promise<void>;
 
 const _cronTasks = new Map<string, ReturnType<typeof cron.schedule>>();
-const _timeouts  = new Map<string, ReturnType<typeof setTimeout>>();
+const _timeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
-let _onOrder:   OrderFn    | null = null;
-let _onOutput:  OutputFn   | null = null;
-let _runScene:  RunSceneFn | null = null;
-let _speak:     SpeakFn    | null = null;
+let _onOrder: OrderFn | null = null;
+let _onOutput: OutputFn | null = null;
+let _runScene: RunSceneFn | null = null;
+let _speak: SpeakFn | null = null;
 
 async function execute(automation: Automation): Promise<void> {
     Logger.info(`Automation trigger: "${automation.name}" (${automation.id})`);
@@ -175,9 +199,10 @@ async function execute(automation: Automation): Promise<void> {
             }
             const result = await _runScene(automation.action.sceneId);
             if (!result.success)
-                Logger.warn(`Automation "${automation.name}": scene error — ${result.error}`);
-            if (automation.notify && _speak)
-                await _speak(automation.notify);
+                Logger.warn(
+                    `Automation "${automation.name}": scene error — ${result.error}`,
+                );
+            if (automation.notify && _speak) await _speak(automation.notify);
         } else {
             if (!_onOrder) return;
             const response = await _onOrder(automation.action.text);
@@ -187,9 +212,13 @@ async function execute(automation: Automation): Promise<void> {
     } catch (err) {
         Logger.error(`Automation "${automation.name}" failed: ${err}`);
     }
-    // delay = one-shot: log to history then auto-delete
+    // Historise tout déclenchement effectif (y compris si l'action a levé une
+    // exception catchée ci-dessus) afin que la garde proactive anti-conflit
+    // sache qu'une automation a agi sur ce domaine. Les early-returns ci-dessus
+    // (dépendance non câblée) sortent de la fonction et ne sont donc pas historisés.
+    appendToHistory(automation);
+    // delay = one-shot : supprime après exécution
     if (automation.trigger.type === 'delay') {
-        appendToHistory(automation);
         deleteAutomation(automation.id);
     }
 }
@@ -199,7 +228,9 @@ function scheduleAutomation(automation: Automation): void {
 
     if (automation.trigger.type === 'cron') {
         if (!cron.validate(automation.trigger.expr)) {
-            Logger.warn(`Invalid cron for "${automation.name}": ${automation.trigger.expr}`);
+            Logger.warn(
+                `Invalid cron for "${automation.name}": ${automation.trigger.expr}`,
+            );
             return;
         }
         const task = cron.schedule(
@@ -211,7 +242,9 @@ function scheduleAutomation(automation: Automation): void {
     } else {
         const remaining = automation.trigger.fireAt - Date.now();
         if (remaining <= 0) {
-            Logger.info(`Automation "${automation.name}": delay expired at startup, removing`);
+            Logger.info(
+                `Automation "${automation.name}": delay expired at startup, removing`,
+            );
             deleteAutomation(automation.id);
             return;
         }
@@ -222,26 +255,35 @@ function scheduleAutomation(automation: Automation): void {
 
 function cancelAutomation(id: string): void {
     const task = _cronTasks.get(id);
-    if (task) { task.stop(); _cronTasks.delete(id); }
+    if (task) {
+        task.stop();
+        _cronTasks.delete(id);
+    }
     const timeout = _timeouts.get(id);
-    if (timeout) { clearTimeout(timeout); _timeouts.delete(id); }
+    if (timeout) {
+        clearTimeout(timeout);
+        _timeouts.delete(id);
+    }
 }
 
 export function initAutomations(
-    onOrder:  OrderFn,
+    onOrder: OrderFn,
     onOutput: OutputFn,
     runScene: RunSceneFn,
-    speak:    SpeakFn,
+    speak: SpeakFn,
 ): void {
-    _onOrder  = onOrder;
+    _onOrder = onOrder;
     _onOutput = onOutput;
     _runScene = runScene;
-    _speak    = speak;
+    _speak = speak;
 
     const automations = loadAutomations();
     let active = 0;
     for (const a of automations) {
-        if (a.enabled) { scheduleAutomation(a); active++; }
+        if (a.enabled) {
+            scheduleAutomation(a);
+            active++;
+        }
     }
     Logger.info(`Automations: ${active} active loaded`);
 }
