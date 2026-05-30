@@ -41,6 +41,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
         switch (name) {
             case 'list_covers': {
+                // Auto-refresh to dodge Tahoma cache being stale (occasional partial /setup response)
+                try {
+                    await tahoma.fetchDevices();
+                } catch {
+                    /* serve cached on error */
+                }
                 const covers = tahoma.listCovers();
                 if (covers.length === 0) {
                     return {
@@ -54,12 +60,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 }
                 const lines = covers.map((c) => {
                     const pos =
-                        c.position != null ? `${c.position}%` : 'position inconnue';
+                        c.position != null
+                            ? `${c.position}%`
+                            : 'position inconnue';
                     return `• ${c.name} [${c.uiClass}] — ${pos}\n  URL: ${c.url}`;
                 });
-                return {
-                    content: [{ type: 'text', text: lines.join('\n') }],
-                };
+                return { content: [{ type: 'text', text: lines.join('\n') }] };
             }
 
             case 'open_cover': {
@@ -77,7 +83,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     };
                 await tahoma.exec(d.deviceURL, 'open', [], `Ouvrir ${d.label}`);
                 return {
-                    content: [{ type: 'text', text: `${d.label} : ouverture en cours.` }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: `${d.label} : ouverture en cours.`,
+                        },
+                    ],
                 };
             }
 
@@ -94,9 +105,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         ],
                         isError: true,
                     };
-                await tahoma.exec(d.deviceURL, 'close', [], `Fermer ${d.label}`);
+                await tahoma.exec(
+                    d.deviceURL,
+                    'close',
+                    [],
+                    `Fermer ${d.label}`,
+                );
                 return {
-                    content: [{ type: 'text', text: `${d.label} : fermeture en cours.` }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: `${d.label} : fermeture en cours.`,
+                        },
+                    ],
                 };
             }
 
@@ -106,7 +127,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const d = tahoma.resolveDevice(device);
                 if (!d)
                     return {
-                        content: [{ type: 'text', text: `Device introuvable : "${device}".` }],
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Device introuvable : "${device}".`,
+                            },
+                        ],
                         isError: true,
                     };
                 // setClosure: 0=open, 100=closed (matches our convention)
@@ -131,7 +157,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const d = tahoma.resolveDevice(device);
                 if (!d)
                     return {
-                        content: [{ type: 'text', text: `Device introuvable : "${device}".` }],
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Device introuvable : "${device}".`,
+                            },
+                        ],
                         isError: true,
                     };
                 await tahoma.exec(d.deviceURL, 'stop', [], `Stop ${d.label}`);
@@ -145,12 +176,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const d = tahoma.resolveDevice(device);
                 if (!d)
                     return {
-                        content: [{ type: 'text', text: `Device introuvable : "${device}".` }],
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Device introuvable : "${device}".`,
+                            },
+                        ],
                         isError: true,
                     };
                 await tahoma.exec(d.deviceURL, 'my', [], `My ${d.label}`);
                 return {
-                    content: [{ type: 'text', text: `${d.label} : position "My" en cours.` }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: `${d.label} : position "My" en cours.`,
+                        },
+                    ],
                 };
             }
 
@@ -168,7 +209,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             default:
-                throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+                throw new McpError(
+                    ErrorCode.MethodNotFound,
+                    `Unknown tool: ${name}`,
+                );
         }
     } catch (error) {
         if (error instanceof McpError) throw error;
@@ -188,7 +232,9 @@ async function main() {
         Logger.info(`mcp-somfy: ${tahoma.listCovers().length} cover(s) ready`);
     } catch (err) {
         Logger.warn(
-            `mcp-somfy: initial fetch failed (${err instanceof Error ? err.message : err}) — will retry on first tool call`,
+            `mcp-somfy: initial fetch failed (${
+                err instanceof Error ? err.message : err
+            }) — will retry on first tool call`,
         );
     }
 

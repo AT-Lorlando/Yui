@@ -10,14 +10,20 @@ export const SOMFY_TOOLS = [
     },
     {
         name: 'open_cover',
-        description: 'Ouvrir un volet / store / portail Somfy (position 0%)',
+        description:
+            'Ouvrir un volet / store / portail Somfy (commande "vers position 0%"). ' +
+            "IMPORTANT : appelle ce tool dès que l'utilisateur demande d'ouvrir, " +
+            "SANS vérifier l'état actuel avec list_covers — la position rapportée par " +
+            'list_covers est souvent stale (cache cloud Tahoma), tu pourrais croire ' +
+            'à tort que le volet est déjà ouvert. La commande est idempotente.',
         inputSchema: {
             type: 'object',
             properties: {
                 device: {
                     type: 'string',
                     description:
-                        'Nom ou URL du device (ex: "Volet salon" ou "io://xxx/yyy")',
+                        'Nom EXACT du device tel que retourné par list_covers (ex: "Terrasse"). ' +
+                        "N'invente jamais de nom — si tu n'es pas sûr, appelle list_covers d'abord.",
                 },
             },
             required: ['device'],
@@ -25,13 +31,19 @@ export const SOMFY_TOOLS = [
     },
     {
         name: 'close_cover',
-        description: 'Fermer un volet / store / portail Somfy (position 100%)',
+        description:
+            'Fermer un volet / store / portail Somfy (commande "vers position 100%"). ' +
+            "IMPORTANT : appelle ce tool dès que l'utilisateur demande de fermer, " +
+            "SANS vérifier l'état actuel avec list_covers — la position rapportée par " +
+            'list_covers est souvent stale. La commande est idempotente.',
         inputSchema: {
             type: 'object',
             properties: {
                 device: {
                     type: 'string',
-                    description: 'Nom ou URL du device',
+                    description:
+                        'Nom EXACT du device tel que retourné par list_covers (ex: "Terrasse"). ' +
+                        "N'invente jamais de nom — si tu n'es pas sûr, appelle list_covers d'abord.",
                 },
             },
             required: ['device'],
@@ -40,7 +52,7 @@ export const SOMFY_TOOLS = [
     {
         name: 'set_cover_position',
         description:
-            'Régler la position d\'un volet Somfy (0 = ouvert, 100 = fermé). Uniquement pour les devices IO (pas RTS).',
+            "Régler la position d'un volet Somfy (0 = ouvert, 100 = fermé). Uniquement pour les devices IO (pas RTS).",
         inputSchema: {
             type: 'object',
             properties: {
@@ -60,7 +72,7 @@ export const SOMFY_TOOLS = [
     },
     {
         name: 'stop_cover',
-        description: 'Stopper le mouvement en cours d\'un volet Somfy',
+        description: "Stopper le mouvement en cours d'un volet Somfy",
         inputSchema: {
             type: 'object',
             properties: {
