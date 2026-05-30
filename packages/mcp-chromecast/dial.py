@@ -25,6 +25,16 @@ DIAL_APP = {
     'spotify':     'Spotify',
 }
 
+# Cast SDK app IDs — fallback for apps that no longer register via DIAL on
+# modern Chromecast firmware. Used when dial.launch returns 404.
+CAST_APP_ID = {
+    'netflix':     'CA5E8412',
+    'crunchyroll': '6B9FA461',
+    'disney':      'C3DE6BC2',
+    'prime':       '17608BC8',
+    'youtube':     '233637DE',
+}
+
 
 def launch(host: str, service: str, content_id: str | None = None) -> str:
     """

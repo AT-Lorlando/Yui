@@ -87,21 +87,48 @@ def cmd_youtube(source: str | None) -> str:
 
 
 def cmd_service(service: str, title: str | None) -> str:
-    """Named service: resolve content ID via cache/JustWatch, then DIAL launch."""
+    """Named service: resolve content ID via cache/JustWatch, then launch.
+
+    Strategy:
+      1. If a title resolves to a content ID → try DIAL deep-link first.
+         If that 404s (app not registered for DIAL) → Cast SDK play_media.
+      2. No title (or lookup fails) → DIAL app launch, fallback to Cast SDK
+         start_app for apps that no longer expose DIAL.
+    """
     content_id, full_title = content_cache.resolve(service, title)
 
     if content_id:
         result = dial.launch(HOST, service, content_id)
         label = full_title or title
+        if 'HTTP 404' in result:
+            # DIAL doesn't know this app — fall back to Cast SDK media_controller.
+            try:
+                cast = _connect_cast()
+                cast.media_controller.play_media(content_id, 'video/mp4')
+                cast.media_controller.block_until_active(timeout=8)
+                return f'Cast SDK: {service} → {label} (id={content_id})'
+            except Exception as exc:
+                return f'{result} — Cast SDK fallback failed: {exc}'
         return f'{result} ({label})'
 
-    # No content ID (no title provided, or lookup failed) — just open the app
+    # No content ID — open the app only.
     if title:
         print(
             f'No content ID found for "{title}" on {service}, launching app only',
             file=sys.stderr,
         )
-    return dial.launch(HOST, service)
+    result = dial.launch(HOST, service)
+    if 'HTTP 404' in result:
+        app_id = dial.CAST_APP_ID.get(service)
+        if app_id:
+            try:
+                cast = _connect_cast()
+                cast.start_app(app_id)
+                time.sleep(2)
+                return f'Cast SDK: launched {service} (app_id={app_id})'
+            except Exception as exc:
+                return f'{result} — Cast SDK start_app failed: {exc}'
+    return result
 
 
 _IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'}
