@@ -60,42 +60,57 @@ def _send_key(key: str) -> None:
         ws.close()
 
 
+def _ws_alive() -> bool:
+    """Real liveness check : open the remote-control WebSocket. Standby refuses."""
+    try:
+        ws = websocket.create_connection(_WS_URL, timeout=2)
+        ws.close()
+        return True
+    except Exception:
+        return False
+
+
 def prepare() -> str:
     """
     Ensure Samsung TV is on and set to HDMI3 (Chromecast input).
     Returns a status message. Never raises.
+
+    Note: the REST endpoint `_is_on()` lies (returns PowerState='on' in standby too).
+    We use WebSocket reachability as ground truth, and always send WoL first as it's
+    a no-op when the TV is awake.
     """
     if not _TV_IP:
         print('[tv_prep] skipped — SMARTTHINGS_TV_IP not set', file=sys.stderr)
         return 'TV preparation skipped (TV IP not configured)'
 
-    # Already on → just switch input
-    if _is_on():
-        try:
-            _send_key('KEY_HDMI3')
-            print('[tv_prep] TV already on — switched to HDMI3')
-            return 'TV already on — HDMI3'
-        except Exception as exc:
-            print(f'[tv_prep] HDMI3 key failed: {exc}', file=sys.stderr)
-            return 'TV already on — could not switch input'
-
-    # TV off — Wake-on-LAN
-    print('[tv_prep] TV off — sending WoL ...')
+    # Always send WoL first (idempotent — no-op if TV awake)
     if _MAC:
         try:
             _send_wol()
+            print('[tv_prep] WoL sent')
         except Exception as exc:
             print(f'[tv_prep] WoL failed: {exc}', file=sys.stderr)
-    else:
-        print('[tv_prep] no MAC configured — cannot send WoL', file=sys.stderr)
+
+    # If WebSocket is already up, TV was awake → just switch input
+    if _ws_alive():
+        try:
+            _send_key('KEY_HDMI3')
+            print('[tv_prep] TV awake — switched to HDMI3')
+            return 'TV awake — HDMI3'
+        except Exception as exc:
+            print(f'[tv_prep] HDMI3 key failed: {exc}', file=sys.stderr)
+            return 'TV awake — could not switch input'
+
+    if not _MAC:
+        print('[tv_prep] no MAC configured — cannot wake TV', file=sys.stderr)
         return 'TV off and no MAC address configured — cannot power on'
 
-    # Poll until TV responds (up to 30 s)
+    # Poll until TV's WS server responds (up to 30 s)
     deadline = time.time() + 30
     while time.time() < deadline:
-        time.sleep(3)
-        if _is_on():
-            time.sleep(1.5)  # let WS server start
+        time.sleep(2)
+        if _ws_alive():
+            time.sleep(1.5)  # let WS server stabilise
             try:
                 _send_key('KEY_HDMI3')
             except Exception as exc:

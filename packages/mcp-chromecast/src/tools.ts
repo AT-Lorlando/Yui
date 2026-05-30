@@ -10,7 +10,11 @@ export const CHROMECAST_TOOLS = [
         inputSchema: {
             type: 'object' as const,
             properties: {
-                source: { type: 'string', description: 'YouTube URL, video ID, or search query. Omit for browse mode.' },
+                source: {
+                    type: 'string',
+                    description:
+                        'YouTube URL, video ID, or search query. Omit for browse mode.',
+                },
             },
             required: [],
         },
@@ -19,11 +23,17 @@ export const CHROMECAST_TOOLS = [
         name: 'cast_netflix',
         description:
             'Launch Netflix on the Chromecast. TV turns on and switches to HDMI3 automatically. ' +
-            'Optionally deep-link to a specific title.',
+            'IMPORTANT: if the user mentions a specific title (e.g. "lance Breaking Bad sur Netflix"), ' +
+            'ALWAYS pass it in `title` so the deep-link opens the show directly. ' +
+            'Omit `title` only when the user just says "lance Netflix" with no show.',
         inputSchema: {
             type: 'object' as const,
             properties: {
-                title: { type: 'string', description: 'Movie or series title (e.g. "Breaking Bad")' },
+                title: {
+                    type: 'string',
+                    description:
+                        'Movie or series title mentioned by the user (e.g. "Breaking Bad")',
+                },
             },
             required: [],
         },
@@ -32,11 +42,17 @@ export const CHROMECAST_TOOLS = [
         name: 'cast_crunchyroll',
         description:
             'Launch Crunchyroll on the Chromecast. TV turns on and switches to HDMI3 automatically. ' +
-            'Optionally deep-link to a specific anime.',
+            'IMPORTANT: if the user mentions a specific anime (e.g. "lance Re:Zero", "lance One Piece"), ' +
+            'ALWAYS pass it in `title` so the deep-link opens the anime directly. ' +
+            'Omit `title` only when the user just says "lance Crunchyroll" with no anime.',
         inputSchema: {
             type: 'object' as const,
             properties: {
-                title: { type: 'string', description: 'Anime or series title (e.g. "Demon Slayer")' },
+                title: {
+                    type: 'string',
+                    description:
+                        'Anime title mentioned by the user (e.g. "Re:Zero", "Demon Slayer")',
+                },
             },
             required: [],
         },
@@ -45,11 +61,16 @@ export const CHROMECAST_TOOLS = [
         name: 'cast_disney',
         description:
             'Launch Disney+ on the Chromecast. TV turns on and switches to HDMI3 automatically. ' +
-            'Optionally deep-link to a specific title.',
+            'IMPORTANT: if the user mentions a specific title, ALWAYS pass it in `title`. ' +
+            'Omit `title` only when the user just says "lance Disney" with no show.',
         inputSchema: {
             type: 'object' as const,
             properties: {
-                title: { type: 'string', description: 'Movie or series title (e.g. "The Mandalorian")' },
+                title: {
+                    type: 'string',
+                    description:
+                        'Movie or series title mentioned by the user (e.g. "The Mandalorian")',
+                },
             },
             required: [],
         },
@@ -58,29 +79,39 @@ export const CHROMECAST_TOOLS = [
         name: 'cast_prime',
         description:
             'Launch Prime Video on the Chromecast. TV turns on and switches to HDMI3 automatically. ' +
-            'Optionally deep-link to a specific title.',
+            'IMPORTANT: if the user mentions a specific title, ALWAYS pass it in `title`. ' +
+            'Omit `title` only when the user just says "lance Prime" with no show.',
         inputSchema: {
             type: 'object' as const,
             properties: {
-                title: { type: 'string', description: 'Movie or series title (e.g. "The Boys")' },
+                title: {
+                    type: 'string',
+                    description:
+                        'Movie or series title mentioned by the user (e.g. "The Boys")',
+                },
             },
             required: [],
         },
     },
     {
         name: 'cast_media',
-        description: 'Cast a direct media URL (mp4, m3u8, mp3…) to the Chromecast. TV turns on automatically.',
+        description:
+            'Cast a direct media URL (mp4, m3u8, mp3…) to the Chromecast. TV turns on automatically.',
         inputSchema: {
             type: 'object' as const,
             properties: {
-                url: { type: 'string', description: 'Direct media URL to cast' },
+                url: {
+                    type: 'string',
+                    description: 'Direct media URL to cast',
+                },
             },
             required: ['url'],
         },
     },
     {
         name: 'cast_stop',
-        description: 'Stop current Chromecast playback without turning off the TV.',
+        description:
+            'Stop current Chromecast playback without turning off the TV.',
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {
@@ -93,7 +124,11 @@ export const CHROMECAST_TOOLS = [
         inputSchema: {
             type: 'object' as const,
             properties: {
-                title: { type: 'string', description: 'Titre de la série, film ou animé (ex: "Naruto")' },
+                title: {
+                    type: 'string',
+                    description:
+                        'Titre de la série, film ou animé (ex: "Naruto")',
+                },
             },
             required: ['title'],
         },
@@ -101,7 +136,7 @@ export const CHROMECAST_TOOLS = [
     {
         name: 'remember_show',
         description:
-            "Mémoriser sur quelle plateforme se trouve une série/film/animé, pour les prochaines fois. " +
+            'Mémoriser sur quelle plateforme se trouve une série/film/animé, pour les prochaines fois. ' +
             "Utilise quand l'utilisateur t'apprend où regarder un titre (ex: \"Naruto c'est sur Crunchyroll\").",
         inputSchema: {
             type: 'object' as const,
@@ -120,12 +155,14 @@ export const CHROMECAST_TOOLS = [
     // ── TV power & controls ───────────────────────────────────────────────────
     {
         name: 'tv_on',
-        description: 'Turn on the TV via Wake-on-LAN and switch to Chromecast input (HDMI3). Use when the user wants to turn on the TV without casting anything yet.',
+        description:
+            'Turn on the TV via Wake-on-LAN and switch to Chromecast input (HDMI3). Use when the user wants to turn on the TV without casting anything yet.',
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {
         name: 'tv_off',
-        description: 'Stop Chromecast playback and turn off the TV. Call this when the user wants to turn off the TV or stop everything on the TV.',
+        description:
+            'Stop Chromecast playback and turn off the TV. Call this when the user wants to turn off the TV or stop everything on the TV.',
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {
@@ -134,7 +171,12 @@ export const CHROMECAST_TOOLS = [
         inputSchema: {
             type: 'object' as const,
             properties: {
-                level: { type: 'number', minimum: 0, maximum: 100, description: 'Volume level 0–100' },
+                level: {
+                    type: 'number',
+                    minimum: 0,
+                    maximum: 100,
+                    description: 'Volume level 0–100',
+                },
             },
             required: ['level'],
         },
@@ -142,7 +184,8 @@ export const CHROMECAST_TOOLS = [
     // ── Media library (hidden from LLM — orchestrator/scenes only) ───────────
     {
         name: 'list_media',
-        description: 'Lister les médias locaux disponibles (wallpapers, vidéos).',
+        description:
+            'Lister les médias locaux disponibles (wallpapers, vidéos).',
         inputSchema: {
             type: 'object' as const,
             properties: {
@@ -153,22 +196,30 @@ export const CHROMECAST_TOOLS = [
     },
     {
         name: 'cast_wallpaper',
-        description: 'Caster un fond d\'écran local sur le Chromecast. Sans argument = aléatoire.',
+        description:
+            "Caster un fond d'écran local sur le Chromecast. Sans argument = aléatoire.",
         inputSchema: {
             type: 'object' as const,
             properties: {
-                file: { type: 'string', description: 'Nom du fichier (ex: "photo.jpg"). Optionnel.' },
+                file: {
+                    type: 'string',
+                    description: 'Nom du fichier (ex: "photo.jpg"). Optionnel.',
+                },
             },
             required: [],
         },
     },
     {
         name: 'cast_video',
-        description: 'Caster une vidéo locale sur le Chromecast. Sans argument = aléatoire.',
+        description:
+            'Caster une vidéo locale sur le Chromecast. Sans argument = aléatoire.',
         inputSchema: {
             type: 'object' as const,
             properties: {
-                file: { type: 'string', description: 'Nom du fichier (ex: "film.mp4"). Optionnel.' },
+                file: {
+                    type: 'string',
+                    description: 'Nom du fichier (ex: "film.mp4"). Optionnel.',
+                },
             },
             required: [],
         },
@@ -180,7 +231,10 @@ export const CHROMECAST_TOOLS = [
         inputSchema: {
             type: 'object' as const,
             properties: {
-                mute: { type: 'boolean', description: 'true to mute, false to unmute' },
+                mute: {
+                    type: 'boolean',
+                    description: 'true to mute, false to unmute',
+                },
             },
             required: ['mute'],
         },
