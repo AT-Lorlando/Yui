@@ -156,16 +156,19 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
                         },
                         scene_id: {
                             type: 'string',
-                            description: 'Id de la scène (requis si action_type = scene)',
+                            description:
+                                'Id de la scène (requis si action_type = scene)',
                         },
                         prompt_text: {
                             type: 'string',
-                            description: 'Ordre à envoyer à Yui (requis si action_type = prompt)',
+                            description:
+                                'Ordre à envoyer à Yui (requis si action_type = prompt)',
                         },
                         prompt_output: {
                             type: 'string',
                             enum: ['cast', 'notify', 'none'],
-                            description: 'Canal de sortie pour la réponse LLM (défaut: cast)',
+                            description:
+                                'Canal de sortie pour la réponse LLM (défaut: cast)',
                         },
                         notify: {
                             type: 'string',
@@ -201,7 +204,8 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
             type: 'function',
             function: {
                 name: 'automation_toggle',
-                description: 'Activer ou désactiver une automation sans la supprimer',
+                description:
+                    'Activer ou désactiver une automation sans la supprimer',
                 parameters: {
                     type: 'object',
                     properties: { id: { type: 'string' } },
@@ -223,14 +227,19 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
             function: {
                 name: 'scene_trigger',
                 description:
-                    'Déclencher une scène par son nom ou son id. Recherche partielle insensible à la casse.',
+                    'Déclencher une scène (ambiance pré-définie combinant lumières, musique, etc.) par son nom ou son id. ' +
+                    "IMPORTANT : n'utilise scene_trigger QUE pour des ambiances génériques explicitement nommées par l'utilisateur " +
+                    '(ex: "lance la scène cinéma", "ambiance forêt"). ' +
+                    'Pour lancer un film/anime/série spécifique (ex: "lance Re:Zero", "lance Breaking Bad"), ' +
+                    'utilise toujours les tools cast_netflix/cast_crunchyroll/cast_disney/cast_prime ' +
+                    'en passant le titre dans `title`, JAMAIS scene_trigger.',
                 parameters: {
                     type: 'object',
                     properties: {
                         name_or_id: {
                             type: 'string',
                             description:
-                                'Nom ou id de la scène (ex: "Forêt", "foret", "aurora")',
+                                'Nom ou id exact d\'une scène existante (vue via scene_list). Ex: "Forêt", "aurora", "cinéma"',
                         },
                     },
                     required: ['name_or_id'],
@@ -283,48 +292,71 @@ export async function handleVirtualTool(
 
         case 'automation_add': {
             const triggerType = args.trigger_type as 'cron' | 'delay';
-            const actionType  = args.action_type  as 'scene' | 'prompt';
+            const actionType = args.action_type as 'scene' | 'prompt';
 
             let trigger: import('./automations').AutomationTrigger;
             if (triggerType === 'cron') {
                 if (!args.cron_expr)
-                    return { id: toolCall.id, content: 'cron_expr requis pour trigger_type=cron.' };
+                    return {
+                        id: toolCall.id,
+                        content: 'cron_expr requis pour trigger_type=cron.',
+                    };
                 trigger = { type: 'cron', expr: args.cron_expr as string };
             } else {
                 const minutes = Number(args.delay_minutes);
                 if (!minutes || minutes <= 0)
-                    return { id: toolCall.id, content: 'delay_minutes requis pour trigger_type=delay.' };
-                trigger = { type: 'delay', ms: minutes * 60_000, fireAt: Date.now() + minutes * 60_000 };
+                    return {
+                        id: toolCall.id,
+                        content:
+                            'delay_minutes requis pour trigger_type=delay.',
+                    };
+                trigger = {
+                    type: 'delay',
+                    ms: minutes * 60_000,
+                    fireAt: Date.now() + minutes * 60_000,
+                };
             }
 
             let action: import('./automations').AutomationAction;
             if (actionType === 'scene') {
                 if (!args.scene_id)
-                    return { id: toolCall.id, content: 'scene_id requis pour action_type=scene.' };
+                    return {
+                        id: toolCall.id,
+                        content: 'scene_id requis pour action_type=scene.',
+                    };
                 action = { type: 'scene', sceneId: args.scene_id as string };
             } else {
                 if (!args.prompt_text)
-                    return { id: toolCall.id, content: 'prompt_text requis pour action_type=prompt.' };
+                    return {
+                        id: toolCall.id,
+                        content: 'prompt_text requis pour action_type=prompt.',
+                    };
                 action = {
                     type: 'prompt',
                     text: args.prompt_text as string,
-                    ...(args.prompt_output ? { output: args.prompt_output as OutputChannel } : {}),
+                    ...(args.prompt_output
+                        ? { output: args.prompt_output as OutputChannel }
+                        : {}),
                 };
             }
 
             const automation = addAutomation({
-                name:    args.name as string,
+                name: args.name as string,
                 trigger,
                 action,
-                notify:  (args.notify as string | undefined) ?? null,
+                notify: (args.notify as string | undefined) ?? null,
                 enabled: true,
             });
             return {
-                id:      toolCall.id,
-                content: `Automation "${automation.name}" créée (id: ${automation.id}, trigger: ${
+                id: toolCall.id,
+                content: `Automation "${automation.name}" créée (id: ${
+                    automation.id
+                }, trigger: ${
                     automation.trigger.type === 'cron'
                         ? `cron ${automation.trigger.expr}`
-                        : `dans ${Math.round(automation.trigger.ms / 60_000)} min`
+                        : `dans ${Math.round(
+                              automation.trigger.ms / 60_000,
+                          )} min`
                 })`,
             };
         }
@@ -332,22 +364,31 @@ export async function handleVirtualTool(
         case 'automation_list': {
             const automations = loadAutomations();
             if (automations.length === 0)
-                return { id: toolCall.id, content: '(aucune automation enregistrée)' };
+                return {
+                    id: toolCall.id,
+                    content: '(aucune automation enregistrée)',
+                };
             const lines = automations.map((a) => {
-                const trig = a.trigger.type === 'cron'
-                    ? `cron: ${a.trigger.expr}`
-                    : `dans ${Math.round((a.trigger.fireAt - Date.now()) / 60_000)} min`;
-                const act = a.action.type === 'scene'
-                    ? `scène: ${a.action.sceneId}`
-                    : `prompt: "${a.action.text.slice(0, 40)}..."`;
-                return `[${a.id}] "${a.name}" — ${trig} — ${act} — ${a.enabled ? '✓' : '✗'}`;
+                const trig =
+                    a.trigger.type === 'cron'
+                        ? `cron: ${a.trigger.expr}`
+                        : `dans ${Math.round(
+                              (a.trigger.fireAt - Date.now()) / 60_000,
+                          )} min`;
+                const act =
+                    a.action.type === 'scene'
+                        ? `scène: ${a.action.sceneId}`
+                        : `prompt: "${a.action.text.slice(0, 40)}..."`;
+                return `[${a.id}] "${a.name}" — ${trig} — ${act} — ${
+                    a.enabled ? '✓' : '✗'
+                }`;
             });
             return { id: toolCall.id, content: lines.join('\n') };
         }
 
         case 'automation_delete':
             return {
-                id:      toolCall.id,
+                id: toolCall.id,
                 content: deleteAutomation(args.id as string)
                     ? `Automation "${args.id}" supprimée.`
                     : `Automation "${args.id}" introuvable.`,
@@ -355,7 +396,10 @@ export async function handleVirtualTool(
 
         case 'automation_toggle': {
             const msg = toggleAutomation(args.id as string);
-            return { id: toolCall.id, content: msg ?? `Automation "${args.id}" introuvable.` };
+            return {
+                id: toolCall.id,
+                content: msg ?? `Automation "${args.id}" introuvable.`,
+            };
         }
 
         case 'scene_list': {

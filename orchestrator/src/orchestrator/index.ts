@@ -154,11 +154,10 @@ export class Orchestrator {
 
     /** Interroge l'état réel des appareils (en parallèle) et met à jour le snapshot. */
     private async refreshDeviceState(): Promise<void> {
-        const [lights, doors, playback, tv, covers] = await Promise.all([
+        const [lights, doors, playback, covers] = await Promise.all([
             this.callToolTimed('list_lights'),
             this.callToolTimed('list_doors'),
             this.callToolTimed('get_playback_state'),
-            this.callToolTimed('tv_get_status'),
             this.callToolTimed('list_covers'),
         ]);
 
@@ -166,7 +165,7 @@ export class Orchestrator {
             formatLights(lights),
             formatDoors(doors),
             formatPlayback(playback),
-            formatTv(tv),
+            formatTv(null),
             formatCovers(covers),
         ]);
 
