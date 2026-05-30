@@ -10,18 +10,19 @@ import {
     McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { IrrigationController } from './IrrigationController';
-import { IRRIGATION_TOOLS } from './tools';
+import { buildIrrigationTools } from './tools';
+import type { AmountKey } from './config';
 import Logger from './logger';
 
 const irrigation = new IrrigationController();
 
 const server = new Server(
-    { name: 'mcp-irrigation', version: '1.0.0' },
+    { name: 'mcp-irrigation', version: '2.0.0' },
     { capabilities: { tools: {} } },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: IRRIGATION_TOOLS };
+    return { tools: buildIrrigationTools() };
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -29,10 +30,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (!irrigation.isConfigured()) {
         return {
-            content: [{
-                type: 'text',
-                text: 'Irrigation non configurée. Renseigner TUYA_DEVICE_ID, TUYA_LOCAL_KEY et TUYA_DEVICE_IP dans .env.',
-            }],
+            content: [
+                {
+                    type: 'text',
+                    text: 'Irrigation non configurée. Renseigner TUYA_DEVICE_ID, TUYA_LOCAL_KEY et TUYA_DEVICE_IP dans .env.',
+                },
+            ],
             isError: true,
         };
     }
@@ -41,29 +44,40 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         switch (name) {
             case 'irrigation_status': {
                 const status = await irrigation.getStatus();
-                return { content: [{ type: 'text', text: JSON.stringify(status, null, 2) }] };
+                return {
+                    content: [
+                        { type: 'text', text: JSON.stringify(status, null, 2) },
+                    ],
+                };
             }
 
             case 'irrigation_start': {
-                const pump = String((args as any).pump ?? 'both') as 'A' | 'B' | 'both';
-                const duration = Number((args as any).duration_seconds);
-                const msg = await irrigation.startPump(pump, duration);
+                const target = String((args as any).target);
+                const amount = String((args as any).amount) as AmountKey;
+                const msg = await irrigation.startAmount(target, amount);
                 return { content: [{ type: 'text', text: msg }] };
             }
 
             case 'irrigation_stop': {
-                const pump = ((args as any).pump ?? 'both') as 'A' | 'B' | 'both';
-                const msg = await irrigation.stopPump(pump);
+                const target = String((args as any).target ?? 'all');
+                const msg = await irrigation.stop(target);
                 return { content: [{ type: 'text', text: msg }] };
             }
 
             case 'irrigation_discover_dps': {
                 const dps = await irrigation.discoverDps();
-                return { content: [{ type: 'text', text: JSON.stringify(dps, null, 2) }] };
+                return {
+                    content: [
+                        { type: 'text', text: JSON.stringify(dps, null, 2) },
+                    ],
+                };
             }
 
             default:
-                throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+                throw new McpError(
+                    ErrorCode.MethodNotFound,
+                    `Unknown tool: ${name}`,
+                );
         }
     } catch (error) {
         if (error instanceof McpError) throw error;
@@ -79,7 +93,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
     Logger.info('Starting Irrigation MCP server...');
     if (!irrigation.isConfigured()) {
-        Logger.warn('TUYA_DEVICE_ID / TUYA_LOCAL_KEY / TUYA_DEVICE_IP not set — tools will return config error');
+        Logger.warn(
+            'TUYA_DEVICE_ID / TUYA_LOCAL_KEY / TUYA_DEVICE_IP not set — tools will return config error',
+        );
     }
     const transport = new StdioServerTransport();
     await server.connect(transport);

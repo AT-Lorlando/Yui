@@ -17,11 +17,25 @@ import {
     AutomationsHandler,
     PresenceHandler,
 } from './InputSource';
-import { loadStore, saveMemory, deleteMemory, setNamespacePriority, deleteNamespace } from '../orchestrator/memory';
+import {
+    loadStore,
+    saveMemory,
+    deleteMemory,
+    setNamespacePriority,
+    deleteNamespace,
+} from '../orchestrator/memory';
 import { saveFcmToken } from '../orchestrator/notify';
 import { loadHistory } from '../orchestrator/history';
 import { listPrompts, writePrompt } from '../orchestrator/prompts';
-import { listPresets, addPreset, removePreset } from '../orchestrator/timerPresets';
+import {
+    listPresets,
+    addPreset,
+    removePreset,
+} from '../orchestrator/timerPresets';
+import {
+    loadIrrigationConfig,
+    saveIrrigationConfig,
+} from '../orchestrator/irrigationConfig';
 
 // ── TTS helper ────────────────────────────────────────────────────────────────
 // Calls the XTTS server to synthesise text and returns WAV audio as base64.
@@ -467,8 +481,24 @@ export class HttpSource implements InputSource {
             // Create a custom scene
             sc.post('/', (req: any, res: any) => {
                 try {
-                    const { name, icon, color, description, setup, state, favorite } = req.body;
-                    const scene = scenesHandler.create({ name, icon, color, description, setup, state, favorite });
+                    const {
+                        name,
+                        icon,
+                        color,
+                        description,
+                        setup,
+                        state,
+                        favorite,
+                    } = req.body;
+                    const scene = scenesHandler.create({
+                        name,
+                        icon,
+                        color,
+                        description,
+                        setup,
+                        state,
+                        favorite,
+                    });
                     res.status(201).json(scene);
                 } catch (e: any) {
                     res.status(400).json({ error: e.message });
@@ -488,9 +518,28 @@ export class HttpSource implements InputSource {
             // Update a custom scene
             sc.patch('/:id', (req: any, res: any) => {
                 try {
-                    const { name, icon, color, description, setup, state, favorite } = req.body;
-                    const scene = scenesHandler.update(req.params.id, { name, icon, color, description, setup, state, favorite });
-                    if (!scene) return res.status(404).json({ error: 'Scene not found or is built-in' });
+                    const {
+                        name,
+                        icon,
+                        color,
+                        description,
+                        setup,
+                        state,
+                        favorite,
+                    } = req.body;
+                    const scene = scenesHandler.update(req.params.id, {
+                        name,
+                        icon,
+                        color,
+                        description,
+                        setup,
+                        state,
+                        favorite,
+                    });
+                    if (!scene)
+                        return res
+                            .status(404)
+                            .json({ error: 'Scene not found or is built-in' });
                     res.json(scene);
                 } catch (e: any) {
                     res.status(400).json({ error: e.message });
@@ -500,7 +549,8 @@ export class HttpSource implements InputSource {
             // Toggle favorite
             sc.patch('/:id/favorite', (req: any, res: any) => {
                 const scene = scenesHandler.toggleFavorite(req.params.id);
-                if (!scene) return res.status(404).json({ error: 'Scene not found' });
+                if (!scene)
+                    return res.status(404).json({ error: 'Scene not found' });
                 res.json({ scene });
             });
 
@@ -539,8 +589,17 @@ export class HttpSource implements InputSource {
             auto.patch('/:id', (req: any, res: any) => {
                 try {
                     const { name, trigger, action, notify, enabled } = req.body;
-                    const result = automationsHandler.update(req.params.id, { name, trigger, action, notify, enabled });
-                    if (!result) return res.status(404).json({ error: 'Automation not found' });
+                    const result = automationsHandler.update(req.params.id, {
+                        name,
+                        trigger,
+                        action,
+                        notify,
+                        enabled,
+                    });
+                    if (!result)
+                        return res
+                            .status(404)
+                            .json({ error: 'Automation not found' });
                     res.json(result);
                 } catch (e: any) {
                     res.status(400).json({ error: e.message });
@@ -549,20 +608,27 @@ export class HttpSource implements InputSource {
 
             auto.patch('/:id/toggle', (req: any, res: any) => {
                 const msg = automationsHandler.toggle(req.params.id);
-                if (msg === null) return res.status(404).json({ error: 'Automation not found' });
+                if (msg === null)
+                    return res
+                        .status(404)
+                        .json({ error: 'Automation not found' });
                 res.json({ message: msg });
             });
 
             auto.delete('/:id', (req: any, res: any) => {
                 const ok = automationsHandler.remove(req.params.id);
-                if (!ok) return res.status(404).json({ error: 'Automation not found' });
+                if (!ok)
+                    return res
+                        .status(404)
+                        .json({ error: 'Automation not found' });
                 res.json({ success: true });
             });
 
             auto.post('/:id/run', async (req: any, res: any) => {
                 try {
                     const result = await automationsHandler.run(req.params.id);
-                    if (!result.success) return res.status(404).json({ error: result.error });
+                    if (!result.success)
+                        return res.status(404).json({ error: result.error });
                     res.json({ success: true });
                 } catch (e: any) {
                     res.status(500).json({ error: e.message });
@@ -591,14 +657,20 @@ export class HttpSource implements InputSource {
                 return res.status(400).json({ error: 'namespace is required' });
             }
             if (priority && priority !== 'always' && priority !== 'on-demand') {
-                return res.status(400).json({ error: 'priority must be always or on-demand' });
+                return res
+                    .status(400)
+                    .json({ error: 'priority must be always or on-demand' });
             }
             if (key !== undefined) {
                 if (typeof key !== 'string' || typeof value !== 'string') {
-                    return res.status(400).json({ error: 'key and value must be strings' });
+                    return res
+                        .status(400)
+                        .json({ error: 'key and value must be strings' });
                 }
                 if (key === '_priority') {
-                    return res.status(400).json({ error: '_priority is reserved' });
+                    return res
+                        .status(400)
+                        .json({ error: '_priority is reserved' });
                 }
                 saveMemory(namespace, key, value, priority ?? 'always');
             } else if (priority) {
@@ -700,7 +772,9 @@ export class HttpSource implements InputSource {
             if (!this.checkPassword(bearer, req.ip)) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            res.json({ state: presenceHandler ? presenceHandler() : 'unknown' });
+            res.json({
+                state: presenceHandler ? presenceHandler() : 'unknown',
+            });
         });
 
         // ── Prompts (read markdown files from prompts/) ───────────────────────
@@ -721,7 +795,9 @@ export class HttpSource implements InputSource {
             const file = req.params[0];
             const { content } = req.body ?? {};
             if (typeof content !== 'string') {
-                return res.status(400).json({ error: 'content must be a string' });
+                return res
+                    .status(400)
+                    .json({ error: 'content must be a string' });
             }
             try {
                 writePrompt(file, content);
@@ -753,6 +829,29 @@ export class HttpSource implements InputSource {
         // ── Location & presence ───────────────────────────────────────────────
         // POST /location  — called by the mobile app with GPS coordinates.
         // Returns next_ping_ms so the app knows when to send the next update.
+        app.get('/irrigation/config', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            res.json(loadIrrigationConfig());
+        });
+
+        app.put('/irrigation/config', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            try {
+                const saved = saveIrrigationConfig(req.body);
+                res.json(saved);
+            } catch (err) {
+                res.status(400).json({
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+        });
+
         app.post('/location', (req: any, res: any) => {
             const bearer = req.headers['authorization']?.split(' ')[1];
             if (!this.checkPassword(bearer, req.ip)) {
@@ -781,11 +880,15 @@ export class HttpSource implements InputSource {
             }
 
             Logger.info(
-                `[location] lat=${lat.toFixed(6)} lng=${lng.toFixed(6)} accuracy=±${Math.round(accuracy ?? 0)}m`,
+                `[location] lat=${lat.toFixed(6)} lng=${lng.toFixed(
+                    6,
+                )} accuracy=±${Math.round(accuracy ?? 0)}m`,
             );
             const result = locationHandler(lat, lng, accuracy ?? 0);
             Logger.info(
-                `[location] → state=${result.state} distance=${result.distance_m}m next_ping=${Math.round(result.next_ping_ms / 1000)}s`,
+                `[location] → state=${result.state} distance=${
+                    result.distance_m
+                }m next_ping=${Math.round(result.next_ping_ms / 1000)}s`,
             );
             return res.json(result);
         });
