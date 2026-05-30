@@ -17,7 +17,7 @@ import {
     handleVirtualTool,
     ToolCallResult,
 } from './virtualTools';
-import { runScene } from './scenes';
+import { runScene, runVirtualAction, isVirtualSceneTool } from './scenes';
 import type { McpServerConfig, CollectedTool } from './types';
 import {
     formatLights,
@@ -625,6 +625,39 @@ export class Orchestrator {
         toolName: string,
         args: Record<string, unknown> = {},
     ): Promise<unknown> {
+        // Route to in-process virtual tools first (scene_trigger, _lights_*, …)
+        const sceneRunner = (id: string) =>
+            runScene(id, (tool, a) => this.callTool(tool, a));
+        const virtual = await handleVirtualTool(
+            {
+                id: `direct-${Date.now()}`,
+                type: 'function',
+                function: {
+                    name: toolName,
+                    arguments: JSON.stringify(args),
+                },
+            } as OpenAI.Chat.ChatCompletionMessageToolCall,
+            sceneRunner,
+        );
+        if (virtual) {
+            try {
+                return JSON.parse(virtual.content);
+            } catch {
+                return virtual.content;
+            }
+        }
+
+        // Scene-internal virtual tools (_lights_all_off, _lights_palette, …).
+        // Allow direct invocation from automations, bindings, REST, etc.
+        if (isVirtualSceneTool(toolName)) {
+            await runVirtualAction(
+                { tool: toolName, args },
+                (t, a) => this.callTool(t, a),
+                {},
+            );
+            return null;
+        }
+
         const collectedTool = this.collectedTools.find(
             (ct) => ct.tool.name === toolName,
         );

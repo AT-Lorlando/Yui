@@ -1,0 +1,80 @@
+{
+  "Hue tap dial switch 1": {
+    "buttons": {
+      "1": {
+        "shortPress": {
+          "1": [
+            {
+              "tool": "set_lights",
+              "args": {
+                "target": "salon",
+                "brightness": 50
+              }
+            },
+            {
+              "tool": "set_lights",
+              "args": {
+                "target": "salon",
+                "brightness": 10
+              }
+            }
+          ],
+          "2": [
+            {
+              "tool": "scene_trigger",
+              "args": {
+                "id": "tokyo"
+              }
+            }
+          ]
+        },
+        "longPress": [
+          {
+            "tool": "_lights_all_off",
+            "args": {}
+          }
+        ]
+      },
+      "2": {
+        "shortPress": {
+          "1": [
+            {
+              "tool": "scene_trigger",
+              "args": {
+                "id": "foret"
+              }
+            }
+          ]
+        }
+      },
+      "3": {
+        "shortPress": {
+          "1": [
+            {
+              "tool": "scene_trigger",
+              "args": {
+                "id": "musique"
+              }
+            }
+          ]
+        }
+      },
+      "4": {
+        "shortPress": {
+          "1": [
+            {
+              "tool": "scene_trigger",
+              "args": {
+                "id": "dodo"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "dial": {
+      "room": "Salon",
+      "stepFactor": 0.3
+    }
+  }
+}

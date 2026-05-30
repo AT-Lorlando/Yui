@@ -236,13 +236,13 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
                 parameters: {
                     type: 'object',
                     properties: {
-                        name_or_id: {
+                        id: {
                             type: 'string',
                             description:
-                                'Nom ou id exact d\'une scène existante (vue via scene_list). Ex: "Forêt", "aurora", "cinéma"',
+                                'Id ou nom d\'une scène existante (vue via scene_list). La résolution essaie d\'abord l\'id exact, puis le nom. Ex: "lofi", "Forêt", "cinéma"',
                         },
                     },
-                    required: ['name_or_id'],
+                    required: ['id'],
                 },
             },
         },
@@ -426,18 +426,19 @@ export async function handleVirtualTool(
                     id: toolCall.id,
                     content: 'Erreur: scene runner non disponible.',
                 };
-            const query = String(args.name_or_id).toLowerCase();
+            // Accept `id` (canonical), `name` (display name), or legacy `name_or_id`.
+            const raw = String(args.id ?? args.name ?? args.name_or_id ?? '');
+            const query = raw.toLowerCase();
             const scenes = listScenes();
             const scene =
                 scenes.find((s) => s.id === query) ??
+                scenes.find((s) => s.name.toLowerCase() === query) ??
                 scenes.find((s) => s.name.toLowerCase().includes(query)) ??
                 scenes.find((s) => s.id.includes(query));
             if (!scene)
                 return {
                     id: toolCall.id,
-                    content: `Scène introuvable : "${
-                        args.name_or_id
-                    }". Scènes disponibles : ${scenes
+                    content: `Scène introuvable : "${raw}". Scènes disponibles : ${scenes
                         .map((s) => s.name)
                         .join(', ')}`,
                 };

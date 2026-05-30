@@ -2,6 +2,7 @@ import './env'; // load env first
 import http from 'http';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
 import { initProactive } from './orchestrator/proactive';
+import { initHueRemotes } from './orchestrator/hueRemotes';
 import { InputSource, StdinSource, HttpSource } from './input';
 import {
     initAutomations,
@@ -157,6 +158,11 @@ async function main() {
         runScene: makeSceneRunner,
     });
 
+    // Hue remotes — listen to bridge SSE for button + dial events
+    const hueRemotes = await initHueRemotes({
+        callTool: (name, args) => orchestrator.callTool(name, args),
+    });
+
     const locationHandler = (lat: number, lng: number, accuracy: number) =>
         presence.handleLocation(lat, lng, accuracy);
 
@@ -181,6 +187,7 @@ async function main() {
         Logger.info(`Received ${signal}, shutting down…`);
         presence.stop();
         proactive.stop();
+        hueRemotes.stop();
         for (const source of sources) {
             await source.stop();
         }

@@ -36,6 +36,10 @@ import {
     loadIrrigationConfig,
     saveIrrigationConfig,
 } from '../orchestrator/irrigationConfig';
+import {
+    getRemotesSnapshot,
+    saveRemotesConfig,
+} from '../orchestrator/hueRemotes';
 
 // ── TTS helper ────────────────────────────────────────────────────────────────
 // Calls the XTTS server to synthesise text and returns WAV audio as base64.
@@ -908,6 +912,29 @@ export class HttpSource implements InputSource {
             try {
                 const saved = saveIrrigationConfig(req.body);
                 res.json(saved);
+            } catch (err) {
+                res.status(400).json({
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+        });
+
+        app.get('/remotes/hue', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            res.json(getRemotesSnapshot());
+        });
+
+        app.put('/remotes/hue', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            try {
+                const saved = saveRemotesConfig(req.body);
+                res.json({ ...getRemotesSnapshot(), config: saved });
             } catch (err) {
                 res.status(400).json({
                     error: err instanceof Error ? err.message : String(err),

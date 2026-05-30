@@ -302,7 +302,11 @@ function resolveArgs(args: Record<string, unknown>): Record<string, unknown> {
 
 // ── Virtual actions ────────────────────────────────────────────────────────────
 
-async function runVirtualAction(
+export function isVirtualSceneTool(name: string): boolean {
+    return name.startsWith('_');
+}
+
+export async function runVirtualAction(
     action: SceneAction,
     callTool: CallTool,
     context: SceneContext,
