@@ -40,7 +40,15 @@ export type SceneCondition =
  *   random           → integer in [$min, $max] (defaults: 0–100)
  */
 export type SceneFnRef =
-    | { $fn: 'time_brightness' | 'hour' | 'minute' | 'day_of_week' | 'is_weekend' | 'season' }
+    | {
+          $fn:
+              | 'time_brightness'
+              | 'hour'
+              | 'minute'
+              | 'day_of_week'
+              | 'is_weekend'
+              | 'season';
+      }
     | { $fn: 'random'; $min?: number; $max?: number };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -93,6 +101,8 @@ export interface Scene {
     builtIn?: boolean;
     /** Marked as favorite by the user — pinned in the dashboard */
     favorite?: boolean;
+    /** Free-text category for grouping in the UI (e.g. "Cinéma", "Ambiance", "Routines"). Defaults to "Scènes". */
+    label?: string;
 }
 
 export type CreateSceneInput = Omit<Scene, 'id' | 'createdAt' | 'builtIn'>;
@@ -156,7 +166,10 @@ export function deleteScene(id: string): boolean {
     return true;
 }
 
-export function updateScene(id: string, input: Partial<CreateSceneInput>): Scene | null {
+export function updateScene(
+    id: string,
+    input: Partial<CreateSceneInput>,
+): Scene | null {
     const scenes = loadScenes();
     const idx = scenes.findIndex((s) => s.id === id);
     if (idx === -1 || scenes[idx].builtIn) return null;
@@ -203,7 +216,9 @@ function evaluateCondition(
 
     if ('hourBetween' in condition) {
         const [from, to] = condition.hourBetween;
-        return from <= to ? hour >= from && hour < to : hour >= from || hour < to;
+        return from <= to
+            ? hour >= from && hour < to
+            : hour >= from || hour < to;
     }
     if ('presence' in condition) {
         return context.presenceState === condition.presence;
@@ -254,12 +269,18 @@ function resolveArgValue(value: unknown): unknown {
         const ref = value as SceneFnRef;
         const now = new Date();
         switch (ref.$fn) {
-            case 'time_brightness': return timeBrightness(now.getHours());
-            case 'hour':            return now.getHours();
-            case 'minute':          return now.getMinutes();
-            case 'day_of_week':     return now.getDay();
-            case 'is_weekend':      return now.getDay() === 0 || now.getDay() === 6 ? 1 : 0;
-            case 'season':          return season(now.getMonth());
+            case 'time_brightness':
+                return timeBrightness(now.getHours());
+            case 'hour':
+                return now.getHours();
+            case 'minute':
+                return now.getMinutes();
+            case 'day_of_week':
+                return now.getDay();
+            case 'is_weekend':
+                return now.getDay() === 0 || now.getDay() === 6 ? 1 : 0;
+            case 'season':
+                return season(now.getMonth());
             case 'random': {
                 const min = ('$min' in ref ? ref.$min : undefined) ?? 0;
                 const max = ('$max' in ref ? ref.$max : undefined) ?? 100;
@@ -273,9 +294,7 @@ function resolveArgValue(value: unknown): unknown {
     return value;
 }
 
-function resolveArgs(
-    args: Record<string, unknown>,
-): Record<string, unknown> {
+function resolveArgs(args: Record<string, unknown>): Record<string, unknown> {
     return Object.fromEntries(
         Object.entries(args).map(([k, v]) => [k, resolveArgValue(v)]),
     );
@@ -345,6 +364,32 @@ async function runVirtualAction(
             break;
         }
 
+        case '_close_covers_if_daylight': {
+            // Closes all Somfy covers to a given position (default 80) iff it's
+            // daylight (07h–21h local time). Skip silently at night.
+            const hour = new Date().getHours();
+            if (hour < 7 || hour >= 21) {
+                Logger.debug(
+                    'Scene _close_covers_if_daylight: night — skipping',
+                );
+                break;
+            }
+            const position =
+                typeof action.args.position === 'number'
+                    ? action.args.position
+                    : 80;
+            const covers = (await callTool('list_covers', {})) as any[];
+            await Promise.allSettled(
+                (covers ?? []).map((c) =>
+                    callTool('set_cover_position', {
+                        device: c.name ?? c.label ?? c.url,
+                        position,
+                    }),
+                ),
+            );
+            break;
+        }
+
         case '_doors_lock_all': {
             await callTool('lock_door', {});
             break;
@@ -373,7 +418,11 @@ async function runVirtualAction(
                 break;
             }
             const picked = ids[Math.floor(Math.random() * ids.length)];
-            Logger.info(`Scene _random_scene: picked "${picked}" from [${ids.join(', ')}]`);
+            Logger.info(
+                `Scene _random_scene: picked "${picked}" from [${ids.join(
+                    ', ',
+                )}]`,
+            );
             await runSceneInternal(picked, callTool, context);
             break;
         }
