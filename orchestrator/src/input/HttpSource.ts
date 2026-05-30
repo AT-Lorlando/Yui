@@ -448,6 +448,69 @@ export class HttpSource implements InputSource {
                 }
             });
 
+            // ── Covers (Somfy) ────────────────────────────────────────────────
+            dev.get('/covers', call('list_covers'));
+            dev.post('/covers/open', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('open_cover', {
+                            device: req.body.device,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.post('/covers/close', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('close_cover', {
+                            device: req.body.device,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.patch('/covers/position', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('set_cover_position', {
+                            device: req.body.device,
+                            position: +req.body.position,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+
+            // ── Irrigation ────────────────────────────────────────────────────
+            dev.get('/irrigation', call('irrigation_status'));
+            dev.post('/irrigation/start', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('irrigation_start', {
+                            target: req.body.target,
+                            amount: req.body.amount,
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.post('/irrigation/stop', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('irrigation_stop', {
+                            target: req.body?.target ?? 'all',
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+
             app.use('/devices', dev);
         }
 
