@@ -16,8 +16,9 @@ import { AmpController } from './AmpController';
 import { SPOTIFY_TOOLS } from './tools';
 import Logger from './logger';
 
-const DEFAULT_SPEAKER = process.env.SPOTIFY_DEFAULT_SPEAKER || 'WiiM Ultra-65B6';
-const BROADLINK_HOST   = process.env.BROADLINK_HOST || '';
+const DEFAULT_SPEAKER =
+    process.env.SPOTIFY_DEFAULT_SPEAKER || 'WiiM Ultra-65B6';
+const BROADLINK_HOST = process.env.BROADLINK_HOST || '';
 
 let amp: AmpController | null = null;
 
@@ -28,7 +29,10 @@ const server = new Server(
     { capabilities: { tools: {} } },
 );
 
-type McpContent = { content: Array<{ type: 'text'; text: string }>; isError?: true };
+type McpContent = {
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: true;
+};
 
 /**
  * Resolve a speaker name to a Spotify Connect device ID, then call playFn.
@@ -39,9 +43,15 @@ async function playOnSpeaker(
     playFn: (deviceId?: string) => Promise<string>,
 ): Promise<McpContent> {
     if (amp) {
-        await amp.ensureOn().catch((err) =>
-            Logger.warn(`Amp power-on failed: ${err instanceof Error ? err.message : err}`),
-        );
+        await amp
+            .ensureOn()
+            .catch((err) =>
+                Logger.warn(
+                    `Amp power-on failed: ${
+                        err instanceof Error ? err.message : err
+                    }`,
+                ),
+            );
     }
 
     if (!speakerName) {
@@ -52,16 +62,32 @@ async function playOnSpeaker(
     const devices = await spotify.getDevices();
     const device =
         // Exact name match (case-insensitive)
-        devices.find((d) => d.name?.toLowerCase() === speakerName.toLowerCase()) ??
+        devices.find(
+            (d) => d.name?.toLowerCase() === speakerName.toLowerCase(),
+        ) ??
         // Partial name match (e.g. "Sono" matches "Sono - WiiM Ultra")
-        devices.find((d) => d.name?.toLowerCase().includes(speakerName.toLowerCase())) ??
+        devices.find((d) =>
+            d.name?.toLowerCase().includes(speakerName.toLowerCase()),
+        ) ??
         // Fallback: single AVR device (WiiM Ultra after rename, before Spotify sync)
-        (() => { const avrs = devices.filter((d) => d.type === 'AVR'); return avrs.length === 1 ? avrs[0] : undefined; })();
+        (() => {
+            const avrs = devices.filter((d) => d.type === 'AVR');
+            return avrs.length === 1 ? avrs[0] : undefined;
+        })();
 
     if (!device?.id) {
-        const names = devices.map((d) => `${d.name} (${d.type})`).filter(Boolean).join(', ') || 'none';
+        const names =
+            devices
+                .map((d) => `${d.name} (${d.type})`)
+                .filter(Boolean)
+                .join(', ') || 'none';
         return {
-            content: [{ type: 'text', text: `Device "${speakerName}" not found. Available: ${names}.` }],
+            content: [
+                {
+                    type: 'text',
+                    text: `Device "${speakerName}" not found. Available: ${names}.`,
+                },
+            ],
             isError: true,
         };
     }
@@ -82,120 +108,194 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         switch (name) {
             case 'list_speakers': {
                 const devices = await spotify.getDevices();
-                return { content: [{ type: 'text', text: JSON.stringify(devices, null, 2) }] };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(devices, null, 2),
+                        },
+                    ],
+                };
             }
 
             case 'play_music': {
                 const query = (args as any)?.query as string | undefined;
                 const uri = (args as any)?.uri as string | undefined;
 
-                return await playOnSpeaker(DEFAULT_SPEAKER, async (deviceId) => {
-                    if (uri) {
-                        await spotify.playUri(uri, deviceId);
-                        return `Playing ${uri}.`;
-                    }
-                    if (query) {
-                        const results = await spotify.search(query, 'track');
-                        if (results.length === 0) throw new Error(`No tracks found for "${query}".`);
-                        const track = results[0];
-                        await spotify.playUri(track.uri, deviceId);
-                        return `Playing "${track.name}" by ${track.artist}.`;
-                    }
-                    await spotify.play(deviceId);
-                    return `Playback resumed.`;
-                });
+                return await playOnSpeaker(
+                    DEFAULT_SPEAKER,
+                    async (deviceId) => {
+                        if (uri) {
+                            await spotify.playUri(uri, deviceId);
+                            return `Playing ${uri}.`;
+                        }
+                        if (query) {
+                            const results = await spotify.search(
+                                query,
+                                'track',
+                            );
+                            if (results.length === 0)
+                                throw new Error(
+                                    `No tracks found for "${query}".`,
+                                );
+                            const track = results[0];
+                            await spotify.playUri(track.uri, deviceId);
+                            return `Playing "${track.name}" by ${track.artist}.`;
+                        }
+                        await spotify.play(deviceId);
+                        return `Playback resumed.`;
+                    },
+                );
             }
 
             case 'play_album': {
                 const query = String((args as any).query);
 
-                return await playOnSpeaker(DEFAULT_SPEAKER, async (deviceId) => {
-                    const results = await spotify.search(query, 'album');
-                    if (results.length === 0) throw new Error(`No albums found for "${query}".`);
-                    const album = results[0];
-                    await spotify.playUri(album.uri, deviceId);
-                    return `Playing album "${album.name}" by ${album.artist}.`;
-                });
+                return await playOnSpeaker(
+                    DEFAULT_SPEAKER,
+                    async (deviceId) => {
+                        const results = await spotify.search(query, 'album');
+                        if (results.length === 0)
+                            throw new Error(`No albums found for "${query}".`);
+                        const album = results[0];
+                        await spotify.playUri(album.uri, deviceId);
+                        return `Playing album "${album.name}" by ${album.artist}.`;
+                    },
+                );
             }
 
             case 'play_playlist': {
                 const query = String((args as any).query);
 
-                return await playOnSpeaker(DEFAULT_SPEAKER, async (deviceId) => {
-                    const myPlaylists = await spotify.getUserPlaylists();
-                    const match = myPlaylists.find(
-                        (p) => p.name.toLowerCase().includes(query.toLowerCase()),
-                    );
+                return await playOnSpeaker(
+                    DEFAULT_SPEAKER,
+                    async (deviceId) => {
+                        const myPlaylists = await spotify.getUserPlaylists();
+                        const match = myPlaylists.find((p) =>
+                            p.name.toLowerCase().includes(query.toLowerCase()),
+                        );
 
-                    if (match) {
-                        await spotify.playUri(match.uri, deviceId);
-                        return `Playing your playlist "${match.name}".`;
-                    }
+                        if (match) {
+                            await spotify.playUri(match.uri, deviceId);
+                            return `Playing your playlist "${match.name}".`;
+                        }
 
-                    const results = await spotify.search(query, 'playlist');
-                    if (results.length === 0) throw new Error(`No playlists found for "${query}".`);
-                    const playlist = results[0];
-                    await spotify.playUri(playlist.uri, deviceId);
-                    return `Playing playlist "${playlist.name}" by ${playlist.owner}.`;
-                });
+                        const results = await spotify.search(query, 'playlist');
+                        if (results.length === 0)
+                            throw new Error(
+                                `No playlists found for "${query}".`,
+                            );
+                        const playlist = results[0];
+                        await spotify.playUri(playlist.uri, deviceId);
+                        return `Playing playlist "${playlist.name}" by ${playlist.owner}.`;
+                    },
+                );
             }
 
             case 'play_artist_radio': {
                 const artist = String((args as any).artist);
 
-                return await playOnSpeaker(DEFAULT_SPEAKER, async (deviceId) => {
-                    const radio = await spotify.getArtistRadio(artist);
-                    if (radio.uri) {
-                        await spotify.playUri(radio.uri, deviceId);
-                    } else {
-                        await spotify.playUris(radio.uris!, deviceId);
-                    }
-                    return `Playing ${radio.label} for "${radio.artistName}".`;
-                });
+                return await playOnSpeaker(
+                    DEFAULT_SPEAKER,
+                    async (deviceId) => {
+                        const radio = await spotify.getArtistRadio(artist);
+                        if (radio.uri) {
+                            await spotify.playUri(radio.uri, deviceId);
+                        } else {
+                            await spotify.playUris(radio.uris!, deviceId);
+                        }
+                        return `Playing ${radio.label} for "${radio.artistName}".`;
+                    },
+                );
             }
 
             case 'pause_music': {
                 await spotify.pause();
-                return { content: [{ type: 'text', text: 'Playback paused.' }] };
+                return {
+                    content: [{ type: 'text', text: 'Playback paused.' }],
+                };
             }
 
             case 'stop_music': {
                 await spotify.pause();
                 if (amp) {
-                    await amp.turnOff().catch((err) =>
-                        Logger.warn(`Amp power-off failed: ${err instanceof Error ? err.message : err}`),
-                    );
+                    await amp
+                        .turnOff()
+                        .catch((err) =>
+                            Logger.warn(
+                                `Amp power-off failed: ${
+                                    err instanceof Error ? err.message : err
+                                }`,
+                            ),
+                        );
                 }
-                return { content: [{ type: 'text', text: 'Music stopped and amplifier turned off.' }] };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: 'Music stopped and amplifier turned off.',
+                        },
+                    ],
+                };
             }
 
             case 'next_track': {
                 await spotify.nextTrack();
-                return { content: [{ type: 'text', text: 'Skipped to next track.' }] };
+                return {
+                    content: [{ type: 'text', text: 'Skipped to next track.' }],
+                };
             }
 
             case 'previous_track': {
                 await spotify.previousTrack();
-                return { content: [{ type: 'text', text: 'Skipped to previous track.' }] };
+                return {
+                    content: [
+                        { type: 'text', text: 'Skipped to previous track.' },
+                    ],
+                };
             }
 
             case 'set_volume': {
                 const percent = Number((args as any).percent);
                 await spotify.setVolume(percent);
-                return { content: [{ type: 'text', text: `Volume set to ${percent}%.` }] };
+                return {
+                    content: [
+                        { type: 'text', text: `Volume set to ${percent}%.` },
+                    ],
+                };
             }
 
             case 'set_shuffle': {
                 const enabled = Boolean((args as any).enabled);
                 await spotify.setShuffle(enabled);
-                return { content: [{ type: 'text', text: `Shuffle ${enabled ? 'enabled' : 'disabled'}.` }] };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `Shuffle ${
+                                enabled ? 'enabled' : 'disabled'
+                            }.`,
+                        },
+                    ],
+                };
             }
 
             case 'set_repeat': {
                 const mode = (args as any).mode as 'off' | 'track' | 'context';
                 await spotify.setRepeat(mode);
-                const labels = { off: 'off', track: 'repeat current track', context: 'repeat album/playlist' };
-                return { content: [{ type: 'text', text: `Repeat set to: ${labels[mode]}.` }] };
+                const labels = {
+                    off: 'off',
+                    track: 'repeat current track',
+                    context: 'repeat album/playlist',
+                };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `Repeat set to: ${labels[mode]}.`,
+                        },
+                    ],
+                };
             }
 
             case 'add_to_queue': {
@@ -204,49 +304,138 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
                 if (uri) {
                     await spotify.addToQueue(uri);
-                    return { content: [{ type: 'text', text: `Added to queue: ${uri}.` }] };
+                    return {
+                        content: [
+                            { type: 'text', text: `Added to queue: ${uri}.` },
+                        ],
+                    };
                 }
                 if (query) {
                     const results = await spotify.search(query, 'track');
-                    if (results.length === 0) throw new Error(`No tracks found for "${query}".`);
+                    if (results.length === 0)
+                        throw new Error(`No tracks found for "${query}".`);
                     const track = results[0];
                     await spotify.addToQueue(track.uri);
-                    return { content: [{ type: 'text', text: `Added to queue: "${track.name}" by ${track.artist}.` }] };
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Added to queue: "${track.name}" by ${track.artist}.`,
+                            },
+                        ],
+                    };
                 }
                 throw new Error('Provide either query or uri.');
             }
 
             case 'get_playback_state': {
                 const state = await spotify.getPlaybackState();
-                return { content: [{ type: 'text', text: JSON.stringify(state, null, 2) }] };
+                return {
+                    content: [
+                        { type: 'text', text: JSON.stringify(state, null, 2) },
+                    ],
+                };
             }
 
             case 'search_music': {
                 const query = String((args as any).query);
-                const type = ((args as any).type as 'track' | 'album' | 'playlist' | 'artist') || 'track';
+                const type =
+                    ((args as any).type as
+                        | 'track'
+                        | 'album'
+                        | 'playlist'
+                        | 'artist') || 'track';
                 const results = await spotify.search(query, type);
-                return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(results, null, 2),
+                        },
+                    ],
+                };
             }
 
             case 'get_my_playlists': {
                 const playlists = await spotify.getUserPlaylists();
-                return { content: [{ type: 'text', text: JSON.stringify(playlists, null, 2) }] };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(playlists, null, 2),
+                        },
+                    ],
+                };
             }
 
             case 'refresh_speakers': {
                 const devices = await spotify.getDevices();
-                return { content: [{ type: 'text', text: `${devices.length} active Spotify Connect device(s): ${devices.map((d) => d.name).join(', ') || 'none'}.` }] };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `${
+                                devices.length
+                            } active Spotify Connect device(s): ${
+                                devices.map((d) => d.name).join(', ') || 'none'
+                            }.`,
+                        },
+                    ],
+                };
+            }
+
+            case 'amp_off': {
+                if (!amp)
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: 'Amp not configured (BROADLINK_HOST missing).',
+                            },
+                        ],
+                    };
+                await amp.turnOff();
+                return {
+                    content: [{ type: 'text', text: 'Ampli Marantz éteint.' }],
+                };
+            }
+
+            case 'amp_on': {
+                if (!amp)
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: 'Amp not configured (BROADLINK_HOST missing).',
+                            },
+                        ],
+                    };
+                await amp.ensureOn();
+                return {
+                    content: [{ type: 'text', text: 'Ampli Marantz allumé.' }],
+                };
             }
 
             default:
-                throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+                throw new McpError(
+                    ErrorCode.MethodNotFound,
+                    `Unknown tool: ${name}`,
+                );
         }
     } catch (error) {
         if (error instanceof McpError) throw error;
-        Logger.error(`Tool ${name} raw error: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
-        const message = error instanceof Error
-            ? error.message
-            : (error as any)?.error?.message ?? (error as any)?.message ?? JSON.stringify(error);
+        Logger.error(
+            `Tool ${name} raw error: ${JSON.stringify(
+                error,
+                Object.getOwnPropertyNames(error),
+            )}`,
+        );
+        const message =
+            error instanceof Error
+                ? error.message
+                : (error as any)?.error?.message ??
+                  (error as any)?.message ??
+                  JSON.stringify(error);
         Logger.error(`Tool ${name} failed: ${message}`);
         return {
             content: [{ type: 'text', text: `Error: ${message}` }],
@@ -259,7 +448,11 @@ async function main() {
     if (BROADLINK_HOST) {
         amp = new AmpController(BROADLINK_HOST);
         amp.connect().catch((err) =>
-            Logger.warn(`Broadlink connect failed: ${err instanceof Error ? err.message : err}`),
+            Logger.warn(
+                `Broadlink connect failed: ${
+                    err instanceof Error ? err.message : err
+                }`,
+            ),
         );
     }
 
@@ -272,11 +465,17 @@ async function main() {
     // token is always valid regardless of how long the process runs.
     const REFRESH_INTERVAL_MS = 50 * 60 * 1000;
     setInterval(() => {
-        spotify.refreshToken().catch((err) =>
-            Logger.warn(`Spotify token refresh failed: ${err}`),
-        );
+        spotify
+            .refreshToken()
+            .catch((err) =>
+                Logger.warn(`Spotify token refresh failed: ${err}`),
+            );
     }, REFRESH_INTERVAL_MS);
-    Logger.info(`Spotify token auto-refresh scheduled every ${REFRESH_INTERVAL_MS / 60_000} minutes`);
+    Logger.info(
+        `Spotify token auto-refresh scheduled every ${
+            REFRESH_INTERVAL_MS / 60_000
+        } minutes`,
+    );
 
     const transport = new StdioServerTransport();
     await server.connect(transport);

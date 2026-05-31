@@ -8,19 +8,26 @@
  *   set_room_palette(room, colors[]) — color atmosphere for a room (each light gets a different shade)
  */
 export function buildHueTools(roomNames: string[], lightNames: string[] = []) {
-    const roomList = roomNames.length > 0 ? roomNames.join(', ') : '(chargement…)';
-    const lightList = lightNames.length > 0 ? lightNames.join(', ') : '(chargement…)';
+    const roomList =
+        roomNames.length > 0 ? roomNames.join(', ') : '(chargement…)';
+    const lightList =
+        lightNames.length > 0 ? lightNames.join(', ') : '(chargement…)';
 
     return [
         // ── Whole flat ────────────────────────────────────────────────────────
         {
             name: 'turn_off_all_lights',
             description: 'Éteint TOUTES les lumières Hue en une fois.',
-            inputSchema: { type: 'object' as const, properties: {}, required: [] },
+            inputSchema: {
+                type: 'object' as const,
+                properties: {},
+                required: [],
+            },
         },
         {
             name: 'turn_on_all_lights',
-            description: 'Allume TOUTES les lumières Hue. Paramètre brightness optionnel (0-100 %).',
+            description:
+                'Allume TOUTES les lumières Hue. Paramètre brightness optionnel (0-100 %).',
             inputSchema: {
                 type: 'object' as const,
                 properties: {
@@ -52,7 +59,8 @@ export function buildHueTools(roomNames: string[], lightNames: string[] = []) {
                     },
                     on: {
                         type: 'boolean',
-                        description: 'Allumer (true) ou éteindre (false). Défaut : true si brightness est précisé.',
+                        description:
+                            'Allumer (true) ou éteindre (false). Défaut : true si brightness est précisé.',
                     },
                     brightness: {
                         type: 'number',
@@ -62,7 +70,8 @@ export function buildHueTools(roomNames: string[], lightNames: string[] = []) {
                     },
                     color: {
                         type: 'string',
-                        description: 'Couleur hex pour une lampe individuelle, ex : "#FF5500". Pour une pièce, utiliser set_room_palette.',
+                        description:
+                            'Couleur hex pour une lampe individuelle, ex : "#FF5500". Pour une pièce, utiliser set_room_palette.',
                     },
                 },
                 required: ['target'],
@@ -87,7 +96,8 @@ export function buildHueTools(roomNames: string[], lightNames: string[] = []) {
                     colors: {
                         type: 'array',
                         items: { type: 'string' },
-                        description: 'Tableau de couleurs hex distribuées cycliquement entre les lampes. Ex : ["#FF6600","#CC3300","#880000"].',
+                        description:
+                            'Tableau de couleurs hex distribuées cycliquement entre les lampes. Ex : ["#FF6600","#CC3300","#880000"].',
                         minItems: 1,
                     },
                     brightness: {
@@ -108,7 +118,10 @@ export function buildHueTools(roomNames: string[], lightNames: string[] = []) {
             inputSchema: {
                 type: 'object' as const,
                 properties: {
-                    lightId: { type: 'number', description: 'ID numérique de la lampe' },
+                    lightId: {
+                        type: 'number',
+                        description: 'ID numérique de la lampe',
+                    },
                 },
                 required: ['lightId'],
             },
@@ -119,31 +132,50 @@ export function buildHueTools(roomNames: string[], lightNames: string[] = []) {
             inputSchema: {
                 type: 'object' as const,
                 properties: {
-                    lightId: { type: 'number', description: 'ID numérique de la lampe' },
+                    lightId: {
+                        type: 'number',
+                        description: 'ID numérique de la lampe',
+                    },
                 },
                 required: ['lightId'],
             },
         },
         {
             name: 'set_brightness',
-            description: 'Règle la luminosité d\'une lampe individuelle par son ID (0-100 %).',
+            description:
+                "Règle la luminosité d'une lampe individuelle par son ID (0-100 %).",
             inputSchema: {
                 type: 'object' as const,
                 properties: {
-                    lightId: { type: 'number', description: 'ID numérique de la lampe' },
-                    brightness: { type: 'number', minimum: 0, maximum: 100, description: 'Luminosité 0-100 %' },
+                    lightId: {
+                        type: 'number',
+                        description: 'ID numérique de la lampe',
+                    },
+                    brightness: {
+                        type: 'number',
+                        minimum: 0,
+                        maximum: 100,
+                        description: 'Luminosité 0-100 %',
+                    },
                 },
                 required: ['lightId', 'brightness'],
             },
         },
         {
             name: 'set_color',
-            description: 'Change la couleur d\'une lampe individuelle par son ID.',
+            description:
+                "Change la couleur d'une lampe individuelle par son ID.",
             inputSchema: {
                 type: 'object' as const,
                 properties: {
-                    lightId: { type: 'number', description: 'ID numérique de la lampe' },
-                    color: { type: 'string', description: 'Couleur hex, ex : "#FF5500"' },
+                    lightId: {
+                        type: 'number',
+                        description: 'ID numérique de la lampe',
+                    },
+                    color: {
+                        type: 'string',
+                        description: 'Couleur hex, ex : "#FF5500"',
+                    },
                 },
                 required: ['lightId', 'color'],
             },
@@ -154,13 +186,81 @@ export function buildHueTools(roomNames: string[], lightNames: string[] = []) {
             name: 'list_lights',
             description:
                 'Liste toutes les lumières avec leur ID, nom, pièce et état actuel. ' +
-                'Utile pour diagnostiquer ou vérifier l\'état — pas nécessaire pour contrôler.',
-            inputSchema: { type: 'object' as const, properties: {}, required: [] },
+                "Utile pour diagnostiquer ou vérifier l'état — pas nécessaire pour contrôler.",
+            inputSchema: {
+                type: 'object' as const,
+                properties: {},
+                required: [],
+            },
         },
         {
             name: 'refresh_lights',
-            description: 'Force la re-découverte de toutes les lumières depuis le bridge Hue.',
-            inputSchema: { type: 'object' as const, properties: {}, required: [] },
+            description:
+                'Force la re-découverte de toutes les lumières depuis le bridge Hue.',
+            inputSchema: {
+                type: 'object' as const,
+                properties: {},
+                required: [],
+            },
+        },
+
+        // ── Govee ambiance presets ────────────────────────────────────────────
+        {
+            name: 'govee_ambiance_start',
+            description:
+                'Lance une ambiance animée sur une lampe Govee (gradient cyclique ' +
+                'de couleurs, pulse de luminosité). Presets : aurora, sunset, ocean, ' +
+                'fire, rainbow, rave, lavande. À utiliser sur une lampe explicitement ' +
+                'configurée en RGB (canal ambiance). Stoppe automatiquement toute ' +
+                'animation précédente sur le même device.',
+            inputSchema: {
+                type: 'object' as const,
+                properties: {
+                    device: {
+                        type: 'string',
+                        description:
+                            'Nom de la lampe Govee (ex: "Govee Ambiance")',
+                    },
+                    preset: {
+                        type: 'string',
+                        description: 'Identifiant du preset',
+                        enum: [
+                            'aurora',
+                            'sunset',
+                            'ocean',
+                            'fire',
+                            'rainbow',
+                            'rave',
+                            'lavande',
+                        ],
+                    },
+                },
+                required: ['device', 'preset'],
+            },
+        },
+        {
+            name: 'govee_ambiance_stop',
+            description:
+                "Arrête l'ambiance animée en cours sur une lampe Govee.",
+            inputSchema: {
+                type: 'object' as const,
+                properties: {
+                    device: {
+                        type: 'string',
+                        description: 'Nom de la lampe Govee',
+                    },
+                },
+                required: ['device'],
+            },
+        },
+        {
+            name: 'govee_ambiance_list',
+            description: "Liste tous les presets d'ambiance Govee disponibles.",
+            inputSchema: {
+                type: 'object' as const,
+                properties: {},
+                required: [],
+            },
         },
     ];
 }

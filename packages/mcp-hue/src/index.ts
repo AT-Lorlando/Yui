@@ -14,6 +14,12 @@ import type { LightEntity } from '@yui/shared';
 import HueBridge from './HueBridge';
 import HueController from './HueController';
 import GoveeClient from './GoveeClient';
+import {
+    startAmbiance,
+    stopAmbiance,
+    listAmbiance,
+    stopAllAmbiance,
+} from './GoveeAmbiance';
 import { buildHueTools } from './tools';
 import { discoverLights } from './discovery';
 import Logger from './logger';
@@ -24,6 +30,7 @@ const store = new EntityStore<LightEntity>('mcp-hue');
 
 // Govee LAN devices indexed by their synthetic id ("g:1", "g:2", …)
 const goveeById = new Map<string, GoveeClient>();
+const goveeChannel = new Map<string, 'cct' | 'rgb'>(); // per-id channel routing
 
 function isGovee(id: string | number): boolean {
     return typeof id === 'string' && id.startsWith('g:');
@@ -32,17 +39,43 @@ function isGovee(id: string | number): boolean {
 interface GoveeOps {
     on?: boolean;
     brightness?: number;
-    color?: string;
+    color?: string; // hex (#RRGGBB) — interpretation depends on channel
 }
 
-async function applyGovee(g: GoveeClient, opts: GoveeOps): Promise<void> {
+/** Rough hex → kelvin estimate for CCT channels. Warm reds → 2700, cold blues → 6500. */
+function hexToKelvin(hex: string): number {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (!m) return 4000;
+    const r = parseInt(m[1], 16);
+    const b = parseInt(m[3], 16);
+    // Pure white → 4000K, warm bias → 2700K, cool bias → 6500K
+    if (r > b + 40) return 2700;
+    if (b > r + 40) return 6500;
+    if (r > b + 10) return 3200;
+    if (b > r + 10) return 5500;
+    return 4000;
+}
+
+async function applyGovee(
+    g: GoveeClient,
+    opts: GoveeOps,
+    channel: 'cct' | 'rgb',
+): Promise<void> {
     const turnOn = opts.on !== false;
     if (!turnOn) {
+        // Shared physical device — caller is responsible for the trade-off
+        // (turning off one logical light kills the whole lamp).
         await g.on(false);
         return;
     }
-    // Order matters: color first (forces RGB mode), then brightness, then on if nothing else.
-    if (opts.color !== undefined) await g.color(opts.color);
+    // For CCT: color → kelvin, brightness applies globally.
+    // For RGB: color → colorwc, brightness applies globally.
+    if (channel === 'cct') {
+        if (opts.color !== undefined)
+            await g.colorTemperature(hexToKelvin(opts.color));
+    } else {
+        if (opts.color !== undefined) await g.color(opts.color);
+    }
     if (opts.brightness !== undefined) await g.brightness(opts.brightness);
     if (opts.color === undefined && opts.brightness === undefined) {
         await g.on(true);
@@ -98,7 +131,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     for (const gl of matching) {
                         const g = goveeById.get(String(gl.id));
                         if (!g) continue;
-                        await applyGovee(g, { on, brightness, color });
+                        const ch = goveeChannel.get(String(gl.id)) ?? 'rgb';
+                        await applyGovee(g, { on, brightness, color }, ch);
                         store.updateState(gl.id, {
                             on: on !== false,
                             ...(brightness !== undefined && { brightness }),
@@ -133,7 +167,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             throw new Error(
                                 `Govee device "${light.name}" not registered`,
                             );
-                        await applyGovee(g, { on, brightness, color });
+                        const ch = goveeChannel.get(String(light.id)) ?? 'rgb';
+                        await applyGovee(g, { on, brightness, color }, ch);
                         store.updateState(light.id, {
                             on: turnOn,
                             ...(brightness !== undefined && { brightness }),
@@ -257,19 +292,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'turn_off_all_lights': {
-                const lights = store
-                    .getAll()
-                    .filter((l) => !ambianceIds.has(String(l.id)));
+                // Stop any running Govee ambiance loop — otherwise it keeps
+                // sending colorwc packets and visually re-activates the lamp.
+                stopAllAmbiance();
+                // Ambiance IS turned off here (per user requirement) — only excluded from all_on.
+                const lights = store.getAll();
                 const hueIds = lights
                     .filter((l) => !isGovee(l.id))
                     .map((l) => Number(l.id));
-                const goveeLights = lights.filter((l) => isGovee(l.id));
+                // Dedupe Govee by IP — multiple logical lights may share one device.
+                const goveeIps = new Set<string>();
+                const goveeOffs: Promise<void>[] = [];
+                for (const l of lights.filter((x) => isGovee(x.id))) {
+                    const g = goveeById.get(String(l.id));
+                    if (g && !goveeIps.has(g.ip)) {
+                        goveeIps.add(g.ip);
+                        goveeOffs.push(g.on(false).catch(() => {}));
+                    }
+                }
                 await Promise.all([
                     hue.setAllLightsState(hueIds, false),
-                    ...goveeLights.map((l) => {
-                        const g = goveeById.get(String(l.id));
-                        return g ? g.on(false) : Promise.resolve();
-                    }),
+                    ...goveeOffs,
                 ]);
                 lights.forEach((l) => store.updateState(l.id, { on: false }));
                 return {
@@ -287,20 +330,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     (args as any)?.brightness !== undefined
                         ? Number((args as any).brightness)
                         : undefined;
+                // Ambiance is excluded from all_on (only triggered explicitly via scenes/bindings).
                 const lights = store
                     .getAll()
                     .filter((l) => !ambianceIds.has(String(l.id)));
                 const hueIds = lights
                     .filter((l) => !isGovee(l.id))
                     .map((l) => Number(l.id));
-                const goveeLights = lights.filter((l) => isGovee(l.id));
+                // Dedupe Govee by IP — multiple logical lights may share one device.
+                const goveeIps = new Set<string>();
+                const goveeOns: Promise<void>[] = [];
+                for (const l of lights.filter((x) => isGovee(x.id))) {
+                    const g = goveeById.get(String(l.id));
+                    if (g && !goveeIps.has(g.ip)) {
+                        goveeIps.add(g.ip);
+                        const ch = goveeChannel.get(String(l.id)) ?? 'rgb';
+                        goveeOns.push(
+                            applyGovee(g, { on: true, brightness }, ch).catch(
+                                () => {},
+                            ),
+                        );
+                    }
+                }
                 await Promise.all([
                     hue.setAllLightsState(hueIds, true, brightness),
-                    ...goveeLights.map((l) => {
-                        const g = goveeById.get(String(l.id));
-                        if (!g) return Promise.resolve();
-                        return applyGovee(g, { on: true, brightness });
-                    }),
+                    ...goveeOns,
                 ]);
                 lights.forEach((l) =>
                     store.updateState(l.id, {
@@ -335,6 +389,69 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
 
+            case 'govee_ambiance_start': {
+                const targetName = String((args as any).device);
+                const presetId = String((args as any).preset);
+                const lights = store.getAll().filter((l) => isGovee(l.id));
+                const lc = targetName.toLowerCase().trim();
+                const light =
+                    lights.find((l) => l.name.toLowerCase() === lc) ??
+                    lights.find((l) => l.name.toLowerCase().includes(lc));
+                if (!light) {
+                    throw new Error(
+                        `Govee device "${targetName}" introuvable. Dispos : ${lights
+                            .map((l) => l.name)
+                            .join(', ')}`,
+                    );
+                }
+                const g = goveeById.get(String(light.id));
+                if (!g) throw new Error('Govee client not registered');
+                const preset = startAmbiance(String(light.id), presetId, g);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `Ambiance "${preset.name}" lancée sur ${light.name}.`,
+                        },
+                    ],
+                };
+            }
+
+            case 'govee_ambiance_stop': {
+                const targetName = String((args as any).device);
+                const lights = store.getAll().filter((l) => isGovee(l.id));
+                const lc = targetName.toLowerCase().trim();
+                const light =
+                    lights.find((l) => l.name.toLowerCase() === lc) ??
+                    lights.find((l) => l.name.toLowerCase().includes(lc));
+                if (!light)
+                    throw new Error(
+                        `Govee device "${targetName}" introuvable.`,
+                    );
+                const stopped = stopAmbiance(String(light.id));
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: stopped
+                                ? `Ambiance arrêtée sur ${light.name}.`
+                                : `Aucune ambiance active sur ${light.name}.`,
+                        },
+                    ],
+                };
+            }
+
+            case 'govee_ambiance_list': {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(listAmbiance(), null, 2),
+                        },
+                    ],
+                };
+            }
+
             default:
                 throw new McpError(
                     ErrorCode.MethodNotFound,
@@ -356,9 +473,12 @@ interface GoveeDeviceConfig {
     ip: string;
     name: string;
     room?: string;
-    // 'light': integrated as any other lamp (in list_lights, room hooks, all-off).
-    // 'ambiance': hidden from normal aggregations — only addressable by exact name.
+    // 'light': integrated as any other lamp (in list_lights, room hooks, all-on/off).
+    // 'ambiance': hidden from list_lights + all-on. Still affected by all-off.
     mode?: 'light' | 'ambiance';
+    // 'rgb' (default): colorwc with RGB → all currently-active RGB zones.
+    // 'cct': colorwc with kelvin → the white CCT bulb (e.g. H60B0 lower).
+    channel?: 'cct' | 'rgb';
 }
 
 const ambianceIds = new Set<string>();
@@ -383,6 +503,7 @@ function loadGoveeDevices(): GoveeDeviceConfig[] {
             name: process.env.GOVEE_NAME ?? 'Govee',
             room: process.env.GOVEE_ROOM,
             mode: process.env.GOVEE_MODE === 'ambiance' ? 'ambiance' : 'light',
+            channel: process.env.GOVEE_CHANNEL === 'cct' ? 'cct' : 'rgb',
         },
     ];
 }
@@ -395,11 +516,12 @@ function registerGoveeDevices(): void {
     const goveeEntities: LightEntity[] = devices.map((dev, i) => {
         const id = `g:${i + 1}`;
         goveeById.set(id, new GoveeClient(dev.ip, dev.name));
+        goveeChannel.set(id, dev.channel ?? 'rgb');
         if (dev.mode === 'ambiance') ambianceIds.add(id);
         Logger.info(
             `[govee] registered "${dev.name}" @ ${dev.ip}${
                 dev.room ? ` (${dev.room})` : ''
-            } as ${id} [${dev.mode ?? 'light'}]`,
+            } as ${id} [${dev.mode ?? 'light'}/${dev.channel ?? 'rgb'}]`,
         );
         return {
             type: 'light' as const,

@@ -62,8 +62,8 @@ export default class GoveeClient {
     }
 
     /**
-     * Set RGB color. `colorTemInKelvin: 0` forces the lamp into RGB mode
-     * (otherwise some firmwares keep the previous white temperature).
+     * Set RGB color on the currently-active RGB zone(s).
+     * `colorTemInKelvin: 0` tells the lamp to apply RGB (not CCT).
      */
     public color(hex: string): Promise<void> {
         const color = hexToRgb(hex);
@@ -71,6 +71,24 @@ export default class GoveeClient {
             msg: {
                 cmd: 'colorwc',
                 data: { color, colorTemInKelvin: 0 },
+            },
+        });
+    }
+
+    /**
+     * Set color temperature on the CCT bulb (lower / main on H60B0).
+     * Range 2000–9000 K. Non-zero `colorTemInKelvin` makes the lamp ignore
+     * the RGB triplet and apply white temperature instead.
+     */
+    public colorTemperature(kelvin: number): Promise<void> {
+        const clamped = Math.max(2000, Math.min(9000, Math.round(kelvin)));
+        return this.send({
+            msg: {
+                cmd: 'colorwc',
+                data: {
+                    color: { r: 0, g: 0, b: 0 },
+                    colorTemInKelvin: clamped,
+                },
             },
         });
     }
