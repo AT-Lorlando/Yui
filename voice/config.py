@@ -52,11 +52,6 @@ SILERO_THRESHOLD      = float(os.getenv("SILERO_THRESHOLD", "0.5"))
 SILERO_MIN_SILENCE_MS = int(os.getenv("SILERO_MIN_SILENCE_MS", "1200"))
 SILERO_CHUNK          = 512   # samples at 16kHz (Silero requirement)
 
-# ── Picovoice Porcupine ────────────────────────────────────────────────────────
-PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY", "")
-PORCUPINE_MODEL_PATH = os.getenv("PORCUPINE_MODEL_PATH", f"assets/wakeword/{WAKEWORD_NAME}.ppn")
-WAKEWORD_CHUNK       = 512    # Porcupine frame_length (samples at 16kHz); actual value read dynamically after load
-
 # ── TTS / Cast — XTTS v2 via xtts_server.py ──────────────────────────────────
 XTTS_SERVER_URL  = os.getenv("XTTS_SERVER_URL", "http://localhost:18770/tts")
 XTTS_SPEAKER     = os.getenv("XTTS_SPEAKER", "Lilya Stainthorpe")
