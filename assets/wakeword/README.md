@@ -1,7 +1,11 @@
 # Wake word — OpenWakeWord
 
 Détection du mot déclencheur avec un modèle ONNX personnalisé entraîné sur ta voix.
-Le wake word actif est contrôlé par la variable `WAKEWORD_NAME` dans `.env`.
+
+`WAKEWORD_NAME` ne pilote que l'**entraînement** (dossiers d'échantillons +
+nom du `.onnx` produit). Le satellite en production ne lit pas `WAKEWORD_NAME` :
+il pointe vers un fichier modèle via `WAKEWORD_MODEL` (et `WAKEWORD_THRESHOLD`
+pour la sensibilité) — voir `satellite/ecosystem.config.js`.
 
 ---
 

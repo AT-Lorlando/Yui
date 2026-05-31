@@ -236,8 +236,8 @@ def main() -> None:
 
     print(f"""
   Terminé !
-  Redémarre le pipeline pour activer le modèle :
-    pm2 restart yui-voice
+  Redémarre le satellite pour activer le modèle :
+    pm2 restart yui-satellite   # sur le Pi
 """)
 
 
