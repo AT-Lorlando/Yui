@@ -1,12 +1,13 @@
 /**
  * PM2 ecosystem for Yui satellite — Raspberry Pi
- * Start: pm2 start satellite_ecosystem.config.js
+ * Start: pm2 start ecosystem.config.js
  */
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
 const env = {
-    ACCESS_KEY: process.env.ACCESS_KEY,
     SATELLITE_SERVER: process.env.SATELLITE_SERVER || 'ws://10.0.0.101:5050',
+    WAKEWORD_MODEL: process.env.WAKEWORD_MODEL || '../assets/wakeword/yui.onnx',
+    WAKEWORD_THRESHOLD: process.env.WAKEWORD_THRESHOLD || '0.5',
 };
 
 module.exports = {
@@ -18,9 +19,8 @@ module.exports = {
             cwd: __dirname,
             args: [
                 '--server', env.SATELLITE_SERVER,
-                '--access-key', env.ACCESS_KEY,
-                '--keywords', 'jarvis',
-                '--sensitivity', '0.9',
+                '--model', env.WAKEWORD_MODEL,
+                '--threshold', env.WAKEWORD_THRESHOLD,
             ].join(' '),
             autorestart: true,
             max_restarts: 10,
