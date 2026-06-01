@@ -2,6 +2,7 @@ import https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import Logger from '../logger';
+import { hueRequest } from './animation/hueV2';
 
 /**
  * Hue v2 SSE watcher — dispatches remote button/dial events to scenes & tools.
@@ -134,48 +135,6 @@ function loadConfig(): void {
         Logger.warn(`[hue-remotes] failed to load config: ${e}`);
         config = {};
     }
-}
-
-function hueRequest(
-    host: string,
-    key: string,
-    path: string,
-    method: 'GET' | 'PUT' = 'GET',
-    body?: unknown,
-): Promise<any> {
-    return new Promise((resolve, reject) => {
-        const data = body ? JSON.stringify(body) : undefined;
-        const req = https.request(
-            {
-                host,
-                path,
-                method,
-                rejectUnauthorized: false,
-                headers: {
-                    'hue-application-key': key,
-                    Accept: 'application/json',
-                    ...(data && {
-                        'Content-Type': 'application/json',
-                        'Content-Length': Buffer.byteLength(data),
-                    }),
-                },
-            },
-            (res) => {
-                let buf = '';
-                res.on('data', (c) => (buf += c));
-                res.on('end', () => {
-                    try {
-                        resolve(buf ? JSON.parse(buf) : {});
-                    } catch (e) {
-                        reject(e);
-                    }
-                });
-            },
-        );
-        req.on('error', reject);
-        if (data) req.write(data);
-        req.end();
-    });
 }
 
 async function buildResourceMaps(host: string, key: string): Promise<void> {
