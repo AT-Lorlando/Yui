@@ -97,6 +97,7 @@ async function main() {
             runScene(id, deviceHandler, {
                 presenceState: presence.getState(),
                 notify: (msg) => sendNotification(msg),
+                callToolRaw: (t, a) => orchestrator.callToolRaw(t, a ?? {}),
             }),
         create: createScene,
         update: updateScene,
@@ -117,6 +118,7 @@ async function main() {
         runScene(id, deviceHandler, {
             presenceState: presence.getState(),
             notify: (msg) => sendNotification(msg),
+            callToolRaw: (t, a) => orchestrator.callToolRaw(t, a ?? {}),
         }),
     );
     presence.start();
@@ -125,6 +127,7 @@ async function main() {
         runScene(id, deviceHandler, {
             presenceState: presence.getState(),
             notify: (msg) => sendNotification(msg),
+            callToolRaw: (t, a) => orchestrator.callToolRaw(t, a ?? {}),
         });
 
     const automationsHandler = {

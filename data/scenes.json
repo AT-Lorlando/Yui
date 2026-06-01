@@ -82,8 +82,10 @@
     "state": [
       { "tool": "_lights_all_on", "args": {} },
       { "tool": "_lights_palette", "args": { "colors": ["#8B0038", "#CC2B52", "#FF6B6B", "#B8621A"], "brightness": 22 } },
+      { "tool": "set_lights", "args": { "target": "Govee Ambiance", "color": "#FF1744", "brightness": 30 } },
       { "tool": "play_music", "args": { "speakerName": "Salon", "query": "romantic jazz piano evening intimate" } }
-    ]
+    ],
+    "floating": { "engine": "software", "target": "Salon", "palette": ["#8B0038", "#CC2B52", "#FF6B6B", "#B8621A"], "speedSec": 80, "staggerSec": 8, "speedJitter": 0.15, "brightness": 22 }
   },
   {
     "id": "foret",
@@ -98,7 +100,8 @@
     "state": [
       { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#20B2AA", "#4682B4", "#1E90FF", "#2E8B57", "#5F9EA0", "#1976D2"], "brightness": 35 } },
       { "tool": "cast_youtube", "args": { "source": "zhDwjnYZiCo" }, "delayMs": 2000 }
-    ]
+    ],
+    "floating": { "engine": "software", "target": "Salon", "palette": ["#20B2AA", "#4682B4", "#1E90FF", "#2E8B57", "#5F9EA0", "#1976D2"], "speedSec": 70, "staggerSec": 7, "speedJitter": 0.2, "brightness": 35 }
   },
   {
     "id": "lofi",
@@ -113,7 +116,8 @@
     "state": [
       { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#B45309", "#D97706", "#F59E0B", "#92400E", "#FBBF24", "#78350F"], "brightness": 30 } },
       { "tool": "cast_youtube", "args": { "source": "jfKfPfyJRdk" }, "delayMs": 2000 }
-    ]
+    ],
+    "floating": { "engine": "software", "target": "Salon", "palette": ["#B45309", "#D97706", "#F59E0B", "#92400E", "#FBBF24", "#78350F"], "speedSec": 60, "staggerSec": 6, "speedJitter": 0.2, "brightness": 30 }
   },
   {
     "id": "tokyo",
@@ -128,7 +132,8 @@
     "state": [
       { "tool": "set_room_palette", "args": { "room": "Salon", "colors": ["#FF0090", "#00FFFF", "#FFFFFF", "#FF4DC4", "#0088FF", "#FF2D55"], "brightness": 25 } },
       { "tool": "cast_youtube", "args": { "source": "2y2Z06hVmWE" }, "delayMs": 2000 }
-    ]
+    ],
+    "floating": { "engine": "software", "target": "Salon", "palette": ["#FF0090", "#00FFFF", "#FFFFFF", "#FF4DC4", "#0088FF", "#FF2D55"], "speedSec": 45, "staggerSec": 4, "speedJitter": 0.2, "brightness": 25 }
   },
   {
     "id": "musique",
@@ -144,7 +149,12 @@
       { "tool": "_lights_palette", "args": { "colors": ["#1DB954", "#006400", "#004D00", "#00A550", "#145A32"], "brightness": 35 } },
       { "tool": "play_music", "args": { "speakerName": "Salon" } },
       { "tool": "cast_wallpaper", "args": {}, "delayMs": 2000 }
-    ]
+    ],
+    "intro": [
+      { "type": "sweep", "target": "Salon", "colors": ["#1DB954"], "staggerMs": 120, "transitionMs": 350 },
+      { "type": "sweep", "target": "Salon", "colors": ["#1E90FF"], "startAtMs": 450, "staggerMs": 120, "transitionMs": 350 }
+    ],
+    "floating": { "engine": "software", "target": "Salon", "palette": ["#1DB954", "#006400", "#004D00", "#00A550", "#145A32"], "speedSec": 55, "staggerSec": 5, "speedJitter": 0.2, "brightness": 35 }
   },
   {
     "id": "dodo",

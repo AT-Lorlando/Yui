@@ -3,6 +3,8 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import Logger from '../logger';
 import type { PresenceState } from './presence';
+import type { AnimationEffect, FloatingConfig } from './animation/types';
+import { animationManager } from './animation/animationManager';
 
 // ── Scene conditions ───────────────────────────────────────────────────────────
 
@@ -103,6 +105,10 @@ export interface Scene {
     favorite?: boolean;
     /** Free-text category for grouping in the UI (e.g. "Cinéma", "Ambiance", "Routines"). Defaults to "Scènes". */
     label?: string;
+    /** Optional intro animation played before the final state. */
+    intro?: AnimationEffect[];
+    /** Optional continuous floating-colour config started after the state. */
+    floating?: FloatingConfig;
 }
 
 export type CreateSceneInput = Omit<Scene, 'id' | 'createdAt' | 'builtIn'>;
@@ -201,6 +207,8 @@ type NotifyFn = (message: string) => Promise<void>;
 export interface SceneContext {
     presenceState?: PresenceState;
     notify?: NotifyFn;
+    /** Guard-free tool path for animation loops (avoids self-cancel). */
+    callToolRaw?: CallTool;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -399,6 +407,20 @@ export async function runVirtualAction(
             break;
         }
 
+        case '_house_off': {
+            // "Tout éteindre" unifié — lumières + Govee ambiance + TV + cast +
+            // musique + ampli. Tous en parallèle, échecs silencieux pour ne pas
+            // bloquer si un device est offline.
+            await Promise.allSettled([
+                callTool('turn_off_all_lights', {}),
+                callTool('tv_off', {}),
+                callTool('cast_stop', {}),
+                callTool('stop_music', {}),
+                callTool('amp_off', {}),
+            ]);
+            break;
+        }
+
         case '_notify': {
             const message = action.args.message as string;
             if (context.notify) {
@@ -494,13 +516,36 @@ async function runSceneInternal(
     if (!scene)
         return { success: false, error: `Scene "${sceneId}" not found` };
 
+    const animCall = context.callToolRaw ?? callTool;
+
     Logger.info(
         `Running scene "${scene.name}" ` +
-            `(setup: ${scene.setup.length}, state: ${scene.state.length})`,
+            `(setup: ${scene.setup.length}, state: ${scene.state.length}` +
+            `${scene.intro ? `, intro: ${scene.intro.length}` : ''}` +
+            `${scene.floating ? ', floating' : ''})`,
     );
 
-    await runActions('setup', scene.setup, scene.name, callTool, context);
+    // Any new scene cancels a running floating loop before it begins.
+    await animationManager.stopAll();
+
+    // Intro plays on the lights WHILE setup (TV/cast prep) runs — hides latency.
+    const introP = scene.intro?.length
+        ? animationManager.playIntro(scene.intro, animCall)
+        : Promise.resolve();
+    const setupP = runActions(
+        'setup',
+        scene.setup,
+        scene.name,
+        callTool,
+        context,
+    );
+    await Promise.all([introP, setupP]);
+
     await runActions('state', scene.state, scene.name, callTool, context);
+
+    if (scene.floating) {
+        await animationManager.startFloating(scene.floating, animCall);
+    }
 
     Logger.info(`Scene "${scene.name}" complete`);
     return { success: true };

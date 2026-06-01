@@ -27,7 +27,9 @@ export default class HueController {
                 name: String(g.name),
                 lightIds: (g.lights ?? []).map(Number),
             }));
-        Logger.info(`Room cache: ${this.groupCache.map((g) => g.name).join(', ')}`);
+        Logger.info(
+            `Room cache: ${this.groupCache.map((g) => g.name).join(', ')}`,
+        );
     }
 
     public getRoomNames(): string[] {
@@ -64,9 +66,15 @@ export default class HueController {
             const d = max - min;
             s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
             switch (max) {
-                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-                case g: h = (b - r) / d + 2; break;
-                case b: h = (r - g) / d + 4; break;
+                case r:
+                    h = (g - b) / d + (g < b ? 6 : 0);
+                    break;
+                case g:
+                    h = (b - r) / d + 2;
+                    break;
+                case b:
+                    h = (r - g) / d + 4;
+                    break;
             }
             h /= 6;
         }
@@ -86,7 +94,12 @@ export default class HueController {
      */
     public async setRoomLights(
         roomName: string,
-        opts: { on?: boolean; brightness?: number; color?: string },
+        opts: {
+            on?: boolean;
+            brightness?: number;
+            color?: string;
+            transitionMs?: number;
+        },
     ): Promise<string> {
         const group = this.findGroup(roomName);
         if (!group) {
@@ -112,13 +125,17 @@ export default class HueController {
             }
         }
 
+        if (opts.transitionMs !== undefined) {
+            state.transitiontime(Math.round(opts.transitionMs / 100));
+        }
         await this.api.groups.setGroupState(group.id, state);
 
         const parts: string[] = [];
         if (!turnOn) {
             parts.push('éteint');
         } else {
-            if (opts.brightness !== undefined) parts.push(`luminosité ${opts.brightness}%`);
+            if (opts.brightness !== undefined)
+                parts.push(`luminosité ${opts.brightness}%`);
             else parts.push('allumé');
             if (opts.color) parts.push(`couleur ${opts.color}`);
         }
@@ -147,7 +164,8 @@ export default class HueController {
                 `Pièce "${roomName}" introuvable. Pièces disponibles : ${available}`,
             );
         }
-        if (colors.length === 0) throw new Error('Au moins une couleur requise.');
+        if (colors.length === 0)
+            throw new Error('Au moins une couleur requise.');
 
         const bri = brightness;
 
@@ -156,7 +174,10 @@ export default class HueController {
                 const { hue: h, sat: s } = this.hexToHueSat(
                     colors[i % colors.length],
                 );
-                const state = new v3.lightStates.LightState().on().hue(h).sat(s);
+                const state = new v3.lightStates.LightState()
+                    .on()
+                    .hue(h)
+                    .sat(s);
                 if (bri !== undefined) state.brightness(bri);
                 return this.api.lights.setLightState(lightId, state);
             }),
@@ -183,7 +204,11 @@ export default class HueController {
         const lights = await this.api.lights.getAll();
         lights.map((light: any) => {
             Logger.debug(`Light found: ID=${light.id}, Name=${light.name}`);
-            returnLights.push({ id: light.id, name: light.name, state: light.state });
+            returnLights.push({
+                id: light.id,
+                name: light.name,
+                state: light.state,
+            });
         });
         if (returnLights.length === 0) throw new Error('No lights found.');
         return returnLights;
@@ -203,17 +228,32 @@ export default class HueController {
         Logger.info(`Light ${lightId} turned ${on ? 'on' : 'off'}`);
     }
 
-    public async setLightBrightness(lightId: number, brightness: number): Promise<void> {
+    public async setLightBrightness(
+        lightId: number,
+        brightness: number,
+    ): Promise<void> {
         await this.getLightById(lightId);
-        const lightState = new v3.lightStates.LightState().on().brightness(brightness);
+        const lightState = new v3.lightStates.LightState()
+            .on()
+            .brightness(brightness);
         await this.api.lights.setLightState(lightId, lightState);
         Logger.info(`Light ${lightId} brightness set to ${brightness}`);
     }
 
-    public async setLightColor(lightId: number, color: string): Promise<void> {
+    public async setLightColor(
+        lightId: number,
+        color: string,
+        transitionMs?: number,
+    ): Promise<void> {
         await this.getLightById(lightId);
         const { hue, sat } = this.hexToHueSat(color);
-        const lightState = new v3.lightStates.LightState().on().hue(hue).sat(sat);
+        const lightState = new v3.lightStates.LightState()
+            .on()
+            .hue(hue)
+            .sat(sat);
+        if (transitionMs !== undefined) {
+            lightState.transitiontime(Math.round(transitionMs / 100));
+        }
         await this.api.lights.setLightState(lightId, lightState);
         Logger.info(`Light ${lightId} color set to ${color}`);
     }
@@ -234,6 +274,8 @@ export default class HueController {
         await Promise.all(
             lightIds.map((id) => this.api.lights.setLightState(id, lightState)),
         );
-        Logger.info(`All lights (${lightIds.length}) turned ${on ? 'on' : 'off'}`);
+        Logger.info(
+            `All lights (${lightIds.length}) turned ${on ? 'on' : 'off'}`,
+        );
     }
 }

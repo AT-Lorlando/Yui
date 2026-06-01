@@ -40,6 +40,7 @@ import {
     getRemotesSnapshot,
     saveRemotesConfig,
 } from '../orchestrator/hueRemotes';
+import { animationManager } from '../orchestrator/animation/animationManager';
 
 // ── TTS helper ────────────────────────────────────────────────────────────────
 // Calls the XTTS server to synthesise text and returns WAV audio as base64.
@@ -556,6 +557,8 @@ export class HttpSource implements InputSource {
                         setup,
                         state,
                         favorite,
+                        intro,
+                        floating,
                     } = req.body;
                     const scene = scenesHandler.create({
                         name,
@@ -565,6 +568,8 @@ export class HttpSource implements InputSource {
                         setup,
                         state,
                         favorite,
+                        intro,
+                        floating,
                     });
                     res.status(201).json(scene);
                 } catch (e: any) {
@@ -593,6 +598,8 @@ export class HttpSource implements InputSource {
                         setup,
                         state,
                         favorite,
+                        intro,
+                        floating,
                     } = req.body;
                     const scene = scenesHandler.update(req.params.id, {
                         name,
@@ -602,6 +609,8 @@ export class HttpSource implements InputSource {
                         setup,
                         state,
                         favorite,
+                        intro,
+                        floating,
                     });
                     if (!scene)
                         return res
@@ -622,6 +631,52 @@ export class HttpSource implements InputSource {
             });
 
             app.use('/scenes', sc);
+        }
+
+        // ── Animation routes ──────────────────────────────────────────────────
+        if (deviceHandler) {
+            const anim = express.Router();
+            anim.use((req: any, res: any, next: any) => {
+                const bearer = req.headers['authorization']?.split(' ')[1];
+                if (!this.checkPassword(bearer, req.ip)) {
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+                next();
+            });
+
+            // Preview an intro once (no persistence).
+            anim.post('/animations/preview', async (req: any, res: any) => {
+                try {
+                    await animationManager.playIntro(
+                        req.body?.intro ?? [],
+                        deviceHandler,
+                    );
+                    res.json({ success: true });
+                } catch (e: any) {
+                    res.status(400).json({ error: e.message });
+                }
+            });
+
+            // Start a floating preview.
+            anim.post('/floating/start', async (req: any, res: any) => {
+                try {
+                    await animationManager.startFloating(
+                        req.body?.floating,
+                        deviceHandler,
+                    );
+                    res.json({ success: true });
+                } catch (e: any) {
+                    res.status(400).json({ error: e.message });
+                }
+            });
+
+            // Stop all floating animations.
+            anim.post('/floating/stop', async (_req: any, res: any) => {
+                await animationManager.stopAll();
+                res.json({ success: true });
+            });
+
+            app.use('/', anim);
         }
 
         // ── Automations ───────────────────────────────────────────────────────

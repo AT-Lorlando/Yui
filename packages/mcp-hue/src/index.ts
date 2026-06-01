@@ -110,6 +110,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     (args as any).color !== undefined
                         ? String((args as any).color)
                         : undefined;
+                const transitionMs =
+                    (args as any).transitionMs !== undefined
+                        ? Number((args as any).transitionMs)
+                        : undefined;
 
                 // Try room first
                 try {
@@ -117,6 +121,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         on,
                         brightness,
                         color,
+                        transitionMs,
                     });
                     // Also fire any Govee lights mapped to that room
                     const lcRoom = target.toLowerCase().trim();
@@ -186,7 +191,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 );
                             }
                             if (color !== undefined) {
-                                ops.push(hue.setLightColor(lightId, color));
+                                ops.push(
+                                    hue.setLightColor(
+                                        lightId,
+                                        color,
+                                        transitionMs,
+                                    ),
+                                );
                             }
                             if (ops.length === 0) {
                                 ops.push(hue.setLightState(lightId, true));

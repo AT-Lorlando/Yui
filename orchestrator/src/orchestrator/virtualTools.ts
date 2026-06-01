@@ -216,6 +216,17 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
         {
             type: 'function',
             function: {
+                name: 'house_off',
+                description:
+                    "Éteint TOUT en une seule commande : toutes les lumières (Hue + Govee), la TV, le Chromecast, la musique Spotify, et l'ampli Marantz. " +
+                    'À utiliser quand Jérémy dit "éteins tout", "tout off", "j\'éteins" sans précision. ' +
+                    "Idempotent — sûr d'appeler même si certains appareils sont déjà éteints.",
+                parameters: { type: 'object', properties: {} },
+            },
+        },
+        {
+            type: 'function',
+            function: {
                 name: 'scene_list',
                 description:
                     'Lister toutes les scènes disponibles (intégrées et personnalisées)',
@@ -257,6 +268,10 @@ export async function handleVirtualTool(
     toolCall: OpenAI.Chat.ChatCompletionMessageToolCall,
     sceneRunner?: SceneRunner,
     outputChannel: OutputChannel = 'cast',
+    callTool?: (
+        name: string,
+        args: Record<string, unknown>,
+    ) => Promise<unknown>,
 ): Promise<ToolCallResult | null> {
     const name = toolCall.function.name;
     const args = JSON.parse(toolCall.function.arguments || '{}');
@@ -399,6 +414,35 @@ export async function handleVirtualTool(
             return {
                 id: toolCall.id,
                 content: msg ?? `Automation "${args.id}" introuvable.`,
+            };
+        }
+
+        case 'house_off': {
+            if (!callTool) {
+                return {
+                    id: toolCall.id,
+                    content: 'Erreur: callTool indisponible.',
+                };
+            }
+            const results = await Promise.allSettled([
+                callTool('turn_off_all_lights', {}),
+                callTool('tv_off', {}),
+                callTool('cast_stop', {}),
+                callTool('stop_music', {}),
+                callTool('amp_off', {}),
+            ]);
+            const failures = results
+                .map((r, i) => ({
+                    r,
+                    name: ['lights', 'tv', 'cast', 'music', 'amp'][i],
+                }))
+                .filter((x) => x.r.status === 'rejected')
+                .map((x) => x.name);
+            return {
+                id: toolCall.id,
+                content: failures.length
+                    ? `Tout éteint (échecs partiels: ${failures.join(', ')}).`
+                    : 'Tout éteint.',
             };
         }
 
