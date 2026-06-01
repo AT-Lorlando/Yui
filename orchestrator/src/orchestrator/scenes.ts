@@ -399,6 +399,20 @@ export async function runVirtualAction(
             break;
         }
 
+        case '_house_off': {
+            // "Tout éteindre" unifié — lumières + Govee ambiance + TV + cast +
+            // musique + ampli. Tous en parallèle, échecs silencieux pour ne pas
+            // bloquer si un device est offline.
+            await Promise.allSettled([
+                callTool('turn_off_all_lights', {}),
+                callTool('tv_off', {}),
+                callTool('cast_stop', {}),
+                callTool('stop_music', {}),
+                callTool('amp_off', {}),
+            ]);
+            break;
+        }
+
         case '_notify': {
             const message = action.args.message as string;
             if (context.notify) {

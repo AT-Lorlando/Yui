@@ -41,7 +41,7 @@
             {
               "tool": "scene_trigger",
               "args": {
-                "id": "foret"
+                "id": "musique"
               }
             }
           ]
@@ -53,11 +53,25 @@
             {
               "tool": "scene_trigger",
               "args": {
-                "id": "musique"
+                "id": "crunchyroll"
+              }
+            }
+          ],
+          "2": [
+            {
+              "tool": "scene_trigger",
+              "args": {
+                "id": "netflix"
               }
             }
           ]
-        }
+        },
+        "longRelease": [
+          {
+            "tool": "_lights_all_off",
+            "args": {}
+          }
+        ]
       },
       "4": {
         "shortPress": {

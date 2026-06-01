@@ -82,6 +82,7 @@
     "state": [
       { "tool": "_lights_all_on", "args": {} },
       { "tool": "_lights_palette", "args": { "colors": ["#8B0038", "#CC2B52", "#FF6B6B", "#B8621A"], "brightness": 22 } },
+      { "tool": "set_lights", "args": { "target": "Govee Ambiance", "color": "#FF1744", "brightness": 30 } },
       { "tool": "play_music", "args": { "speakerName": "Salon", "query": "romantic jazz piano evening intimate" } }
     ]
   },

@@ -306,6 +306,7 @@ export class Orchestrator {
                     toolCall,
                     sceneRunner,
                     outputChannel,
+                    (tool, args) => this.callTool(tool, args),
                 );
                 const result =
                     virtualResult ?? (await this.executeToolCall(toolCall));
@@ -638,6 +639,8 @@ export class Orchestrator {
                 },
             } as OpenAI.Chat.ChatCompletionMessageToolCall,
             sceneRunner,
+            undefined,
+            (t, a) => this.callTool(t, a),
         );
         if (virtual) {
             try {
