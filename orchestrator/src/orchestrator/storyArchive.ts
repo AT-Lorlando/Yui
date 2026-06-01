@@ -228,6 +228,76 @@ export async function summarizeAndIndex(
     }
 }
 
+/**
+ * Finalise une conversation : écrit la story sur disque, génère un résumé LLM
+ * (10-15 mots), calcule le flag domotics, et met à jour l'index.
+ * Préserve la `source` existante ('voice'/'app') si déjà indexée.
+ */
+export async function finalizeStory(
+    storyId: string,
+    entries: StoryEntry[],
+): Promise<void> {
+    // 1. Write story file to disk
+    try {
+        if (!fs.existsSync(STORIES_DIR)) {
+            fs.mkdirSync(STORIES_DIR, { recursive: true });
+        }
+        const filePath = path.join(STORIES_DIR, `story-${storyId}.json`);
+        fs.writeFileSync(filePath, JSON.stringify(entries, null, 2));
+    } catch (err) {
+        Logger.warn(`finalizeStory: write ${storyId} failed: ${err}`);
+    }
+
+    // 2. Build transcript + summarize via LLM
+    let summary = '';
+    try {
+        const transcript = entries
+            .filter((e) => e.role === 'user' || e.role === 'assistant')
+            .map((e) => `${e.role === 'user' ? 'Jérémy' : 'Yui'}: ${e.content}`)
+            .join('\n');
+
+        if (transcript.trim()) {
+            const response = await makeOpenAI().chat.completions.create({
+                model: env.LLM_MODEL,
+                messages: [
+                    {
+                        role: 'system',
+                        content:
+                            'Tu es un moteur de résumé. Résume la conversation suivante en exactement 10 à 15 mots en français. ' +
+                            'Commence par le sujet principal (lumières, météo, email, musique…). ' +
+                            'Réponds uniquement avec le résumé, sans ponctuation finale.',
+                    },
+                    { role: 'user', content: transcript },
+                ],
+                max_tokens: 40,
+                temperature: 0,
+            });
+            summary = response.choices[0].message.content?.trim() ?? '';
+        }
+    } catch (err) {
+        Logger.warn(`finalizeStory: summarize ${storyId} failed: ${err}`);
+    }
+
+    // 3. domotics flag
+    const domotics = isDomotics(entries);
+
+    // 4. Upsert into index, preserving any existing source ('voice' wins over default 'app')
+    const existing = loadIndex().find((e) => e.id === storyId);
+    upsertIndexEntry({
+        id: storyId,
+        date: new Date(parseInt(storyId)).toISOString().split('T')[0],
+        summary,
+        domotics,
+        source: existing?.source ?? 'app',
+        finished: true,
+    });
+
+    // 5. Debug log
+    Logger.debug(
+        `Story ${storyId} finalized: "${summary}" (domotics=${domotics})`,
+    );
+}
+
 // ── Story retrieval ───────────────────────────────────────────────────────────
 
 export function getStoryTranscript(storyId: string): string {

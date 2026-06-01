@@ -10,7 +10,9 @@ import { buildMemoryContext } from './memory';
 import {
     buildStorySummariesContext,
     indexMissingStories,
+    finalizeStory,
 } from './storyArchive';
+import { ConversationManager, ConversationState } from './conversations';
 import { resolveGroups, filterToolsForOrder } from './serverGroups';
 import {
     getVirtualTools,
@@ -76,14 +78,7 @@ export class Orchestrator {
     private clients: Map<string, Client> = new Map();
     private collectedTools: CollectedTool[] = [];
     private servers: McpServerConfig[];
-    private conversationHistory: OpenAI.Chat.ChatCompletionMessageParam[] = [];
-
-    /**
-     * Persistent story that spans multiple processOrderStream calls within
-     * the same voice conversation session (10 s window). Finalized (saved +
-     * summarized) on reset or server shutdown.
-     */
-    private sessionStory: Story | null = null;
+    private conversations: ConversationManager;
 
     /** Snapshot near-live de l'état des appareils, rafraîchi en fond. */
     private deviceStateSnapshot: string = '';
@@ -95,6 +90,14 @@ export class Orchestrator {
             ...(env.LLM_BASE_URL && { baseURL: env.LLM_BASE_URL }),
         });
         this.servers = servers;
+        this.conversations = new ConversationManager({
+            saveStories: env.SAVE_STORIES,
+            onFinalize: (state: ConversationState) => {
+                finalizeStory(state.story.id, state.story.entries).catch((e) =>
+                    Logger.warn(`finalizeStory failed: ${e}`),
+                );
+            },
+        });
     }
 
     async init(): Promise<void> {
@@ -335,17 +338,6 @@ export class Orchestrator {
         }
     }
 
-    private updateHistory(order: string, response: string): void {
-        this.conversationHistory.push({ role: 'user', content: order });
-        this.conversationHistory.push({ role: 'assistant', content: response });
-        if (this.conversationHistory.length > HISTORY_MAX) {
-            this.conversationHistory.splice(
-                0,
-                this.conversationHistory.length - HISTORY_MAX,
-            );
-        }
-    }
-
     private buildSystemPrompt(activeGroups: string[] = []): string {
         const memCtx = buildMemoryContext();
         return buildSystemPrompt({
@@ -378,28 +370,28 @@ export class Orchestrator {
         order: string,
         reset?: boolean,
         outputChannel: import('./automations').OutputChannel = 'cast',
+        conversationId?: string,
     ): Promise<string> {
-        if (reset) {
-            this.conversationHistory = [];
-            Logger.info('Conversation history reset (new conversation)');
-        }
+        const state = conversationId
+            ? this.conversations.getOrCreateApp(conversationId)
+            : this.conversations.getOrCreateVoice(reset === true);
+        const story = state.story;
 
-        const story = env.SAVE_STORIES ? new Story() : null;
         Logger.info(`Processing order: "${order}"`);
 
         const { tools: allTools, activeGroups } = this.buildContext(order);
         const systemPrompt = this.buildSystemPrompt(activeGroups);
 
-        story?.add({
+        story.add({
             role: 'system',
             content: systemPrompt,
             tools: allTools.map((t) => t.function.name),
         });
-        story?.add({ role: 'user', content: order });
+        story.add({ role: 'user', content: order });
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
             { role: 'system', content: systemPrompt },
-            ...this.conversationHistory,
+            ...state.history,
             { role: 'user', content: order },
         ];
 
@@ -428,7 +420,7 @@ export class Orchestrator {
                 finalResponse = stripMarkdownForTts(
                     assistantMessage.content ?? '',
                 );
-                story?.add({ role: 'assistant', content: finalResponse });
+                story.add({ role: 'assistant', content: finalResponse });
                 break;
             }
 
@@ -448,8 +440,13 @@ export class Orchestrator {
                 : finalResponse;
         Logger.info(`[Response] ${preview}`);
 
-        this.updateHistory(order, finalResponse);
-        story?.save();
+        state.history.push({ role: 'user', content: order });
+        state.history.push({ role: 'assistant', content: finalResponse });
+        if (state.history.length > HISTORY_MAX) {
+            state.history.splice(0, state.history.length - HISTORY_MAX);
+        }
+        story.flush();
+        this.conversations.touch(state.id);
         return finalResponse;
     }
 
@@ -466,36 +463,23 @@ export class Orchestrator {
         reset?: boolean,
         outputChannel: import('./automations').OutputChannel = 'cast',
     ): AsyncGenerator<string, void, unknown> {
-        if (reset) {
-            // Finalize the previous session story (triggers summarization)
-            if (this.sessionStory) {
-                this.sessionStory.save();
-                this.sessionStory = null;
-                Logger.info('Previous session story finalized');
-            }
-            this.conversationHistory = [];
-            Logger.info(
-                'Conversation history reset (new conversation, stream)',
-            );
-        }
-
-        // Reuse or create the session story for this conversation window
-        if (env.SAVE_STORIES && !this.sessionStory) {
-            this.sessionStory = new Story();
-            Logger.info(`Session story started: story-${this.sessionStory.id}`);
-        }
-        const story = this.sessionStory;
+        const state = options?.conversationId
+            ? this.conversations.getOrCreateApp(options.conversationId)
+            : options?.appConversation
+            ? this.conversations.getOrCreateApp()
+            : this.conversations.getOrCreateVoice(reset === true);
+        options?.onConversationId?.(state.id);
+        const story = state.story;
 
         Logger.info(`Processing order (stream): "${order}"`);
 
         // Build filter context: current order + all previous user messages in the
         // session so follow-up phrases like "laisse tomber" or "annule" still have
         // access to the same tools as the earlier exchange they refer to.
-        const sessionContext =
-            this.sessionStory?.entries
-                .filter((e) => e.role === 'user')
-                .map((e) => e.content)
-                .join(' ') ?? '';
+        const sessionContext = story.entries
+            .filter((e) => e.role === 'user')
+            .map((e) => e.content)
+            .join(' ');
         const filterInput = sessionContext
             ? `${sessionContext} ${order}`
             : order;
@@ -504,16 +488,16 @@ export class Orchestrator {
             this.buildContext(filterInput);
         const systemPrompt = this.buildSystemPrompt(activeGroups);
 
-        story?.add({
+        story.add({
             role: 'system',
             content: systemPrompt,
             tools: allTools.map((t) => t.function.name),
         });
-        story?.add({ role: 'user', content: order });
+        story.add({ role: 'user', content: order });
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
             { role: 'system', content: systemPrompt },
-            ...this.conversationHistory,
+            ...state.history,
             { role: 'user', content: order },
         ];
 
@@ -601,7 +585,7 @@ export class Orchestrator {
                 // Final text response — strip markdown then yield
                 finalResponse = stripMarkdownForTts(contentAcc);
                 yield finalResponse;
-                story?.add({ role: 'assistant', content: finalResponse });
+                story.add({ role: 'assistant', content: finalResponse });
                 break;
             }
         }
@@ -617,11 +601,16 @@ export class Orchestrator {
                 : finalResponse;
         Logger.info(`[Response] ${preview}`);
 
-        this.updateHistory(order, finalResponse);
+        state.history.push({ role: 'user', content: order });
+        state.history.push({ role: 'assistant', content: finalResponse });
+        if (state.history.length > HISTORY_MAX) {
+            state.history.splice(0, state.history.length - HISTORY_MAX);
+        }
 
         // Flush to disk after every exchange — session stays open for continuation.
-        // The story is finalized (summarized) when the next reset arrives or on shutdown.
-        story?.flush();
+        // The story is finalized (summarized) on idle-finalize or shutdown.
+        story.flush();
+        this.conversations.touch(state.id);
     }
 
     /** Public tool entry. Cancels a floating loop on explicit light commands. */
@@ -737,11 +726,7 @@ export class Orchestrator {
     }
 
     async shutdown(): Promise<void> {
-        if (this.sessionStory) {
-            this.sessionStory.save();
-            this.sessionStory = null;
-            Logger.info('Session story finalized on shutdown');
-        }
+        this.conversations.finalizeAll();
 
         for (const [name, client] of this.clients.entries()) {
             try {
