@@ -207,6 +207,8 @@ type NotifyFn = (message: string) => Promise<void>;
 export interface SceneContext {
     presenceState?: PresenceState;
     notify?: NotifyFn;
+    /** Guard-free tool path for animation loops (avoids self-cancel). */
+    callToolRaw?: CallTool;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -514,6 +516,8 @@ async function runSceneInternal(
     if (!scene)
         return { success: false, error: `Scene "${sceneId}" not found` };
 
+    const animCall = context.callToolRaw ?? callTool;
+
     Logger.info(
         `Running scene "${scene.name}" ` +
             `(setup: ${scene.setup.length}, state: ${scene.state.length}` +
@@ -526,7 +530,7 @@ async function runSceneInternal(
 
     // Intro plays on the lights WHILE setup (TV/cast prep) runs — hides latency.
     const introP = scene.intro?.length
-        ? animationManager.playIntro(scene.intro, callTool)
+        ? animationManager.playIntro(scene.intro, animCall)
         : Promise.resolve();
     const setupP = runActions(
         'setup',
@@ -540,7 +544,7 @@ async function runSceneInternal(
     await runActions('state', scene.state, scene.name, callTool, context);
 
     if (scene.floating) {
-        await animationManager.startFloating(scene.floating, callTool);
+        await animationManager.startFloating(scene.floating, animCall);
     }
 
     Logger.info(`Scene "${scene.name}" complete`);

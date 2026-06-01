@@ -18,6 +18,7 @@ import {
     ToolCallResult,
 } from './virtualTools';
 import { runScene, runVirtualAction, isVirtualSceneTool } from './scenes';
+import { animationManager } from './animation/animationManager';
 import type { McpServerConfig, CollectedTool } from './types';
 import {
     formatLights,
@@ -298,7 +299,9 @@ export class Orchestrator {
         outputChannel: import('./automations').OutputChannel = 'cast',
     ): Promise<void> {
         const sceneRunner = (id: string) =>
-            runScene(id, (tool, args) => this.callTool(tool, args));
+            runScene(id, (tool, args) => this.callTool(tool, args), {
+                callToolRaw: (tool, args) => this.callToolRaw(tool, args),
+            });
 
         const toolResults = await Promise.all(
             toolCalls.map(async (toolCall) => {
@@ -621,14 +624,33 @@ export class Orchestrator {
         story?.flush();
     }
 
-    /** Directly calls an MCP tool by name, bypassing the LLM. Used by the /devices REST API. */
+    /** Public tool entry. Cancels a floating loop on explicit light commands. */
     async callTool(
+        toolName: string,
+        args: Record<string, unknown> = {},
+    ): Promise<unknown> {
+        await animationManager.cancelIfAffected(toolName);
+        return this.callToolInner(toolName, args);
+    }
+
+    /** Guard-free path for AnimationManager loops (avoids self-cancel). */
+    async callToolRaw(
+        toolName: string,
+        args: Record<string, unknown> = {},
+    ): Promise<unknown> {
+        return this.callToolInner(toolName, args);
+    }
+
+    /** Directly calls an MCP tool by name, bypassing the LLM. Used by the /devices REST API. */
+    private async callToolInner(
         toolName: string,
         args: Record<string, unknown> = {},
     ): Promise<unknown> {
         // Route to in-process virtual tools first (scene_trigger, _lights_*, …)
         const sceneRunner = (id: string) =>
-            runScene(id, (tool, a) => this.callTool(tool, a));
+            runScene(id, (tool, a) => this.callTool(tool, a), {
+                callToolRaw: (tool, a) => this.callToolRaw(tool, a),
+            });
         const virtual = await handleVirtualTool(
             {
                 id: `direct-${Date.now()}`,
