@@ -75,7 +75,8 @@ async function main() {
         order: string,
         reset?: boolean,
         outputChannel?: import('./orchestrator/automations').OutputChannel,
-    ) => orchestrator.processOrder(order, reset, outputChannel);
+        conversationId?: string,
+    ) => orchestrator.processOrder(order, reset, outputChannel, conversationId);
     const streamHandler: import('./input/InputSource').StreamHandler = (
         order,
         options,

@@ -84,6 +84,7 @@ export interface InputSource {
             order: string,
             reset?: boolean,
             outputChannel?: import('../orchestrator/automations').OutputChannel,
+            conversationId?: string,
         ) => Promise<string>,
         streamHandler?: StreamHandler,
         statusHandler?: StatusHandler,

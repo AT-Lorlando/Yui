@@ -92,6 +92,7 @@ export class HttpSource implements InputSource {
             order: string,
             reset?: boolean,
             outputChannel?: import('../orchestrator/automations').OutputChannel,
+            conversationId?: string,
         ) => Promise<string>,
         streamHandler?: StreamHandler,
         statusHandler?: StatusHandler,
@@ -228,9 +229,18 @@ export class HttpSource implements InputSource {
             const wantsAudio = req.body?.audio === true;
             const reset = req.body?.reset === true;
             const outputChannel = req.body?.voice === true ? 'cast' : 'none';
+            const conversationId =
+                typeof req.body?.conversationId === 'string'
+                    ? req.body.conversationId
+                    : undefined;
 
             try {
-                const result = await handler(order, reset, outputChannel);
+                const result = await handler(
+                    order,
+                    reset,
+                    outputChannel,
+                    conversationId,
+                );
                 const response: Record<string, unknown> = { response: result };
 
                 if (wantsAudio) {
@@ -269,6 +279,10 @@ export class HttpSource implements InputSource {
                 // Voice pipeline sends "voice: true" → cap response length
                 const isVoice = req.body?.voice === true;
                 const reset = req.body?.reset === true;
+                const conversationId =
+                    typeof req.body?.conversationId === 'string'
+                        ? req.body.conversationId
+                        : undefined;
 
                 res.setHeader('Content-Type', 'text/event-stream');
                 res.setHeader('Cache-Control', 'no-cache');
@@ -277,9 +291,24 @@ export class HttpSource implements InputSource {
 
                 const streamOutputChannel = isVoice ? 'cast' : 'none';
                 try {
+                    let idSent = false;
                     for await (const token of streamHandler(
                         order,
-                        { outputChannel: streamOutputChannel },
+                        {
+                            outputChannel: streamOutputChannel,
+                            conversationId,
+                            appConversation: !isVoice,
+                            onConversationId: (id: string) => {
+                                if (!idSent) {
+                                    res.write(
+                                        `data: ${JSON.stringify({
+                                            conversationId: id,
+                                        })}\n\n`,
+                                    );
+                                    idSent = true;
+                                }
+                            },
+                        },
                         reset,
                     )) {
                         res.write(`data: ${JSON.stringify({ token })}\n\n`);
