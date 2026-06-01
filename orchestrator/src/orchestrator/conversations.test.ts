@@ -29,6 +29,13 @@ function run(): void {
     mgr.finalize(a1.id); // pas de throw au second appel
     assert.strictEqual(mgr.get(a1.id), undefined);
 
+    // branche : nouvelle conversation app avec parentId
+    const parent = mgr.getOrCreateApp();
+    const branch = mgr.createBranch(parent.id);
+    assert.notStrictEqual(branch.id, parent.id);
+    assert.strictEqual(branch.story.parentId, parent.id);
+    assert.strictEqual(branch.source, 'app');
+
     console.log('All conversations tests passed');
 }
 

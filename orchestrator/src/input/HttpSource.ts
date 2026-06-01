@@ -811,6 +811,45 @@ export class HttpSource implements InputSource {
                 res.json(conversationsHandler.get(req.params.id));
             });
 
+            conv.post('/:id/simulate', async (req: any, res: any) => {
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                res.flushHeaders();
+                let idSent = false;
+                try {
+                    for await (const token of conversationsHandler.simulate(
+                        req.params.id,
+                        {
+                            fromMessageIndex: req.body?.fromMessageIndex,
+                            systemPrompt: req.body?.systemPrompt,
+                            temperature: req.body?.temperature,
+                        },
+                        {
+                            onConversationId: (id: string) => {
+                                if (!idSent) {
+                                    res.write(
+                                        `data: ${JSON.stringify({
+                                            conversationId: id,
+                                        })}\n\n`,
+                                    );
+                                    idSent = true;
+                                }
+                            },
+                        },
+                    )) {
+                        res.write(`data: ${JSON.stringify({ token })}\n\n`);
+                    }
+                } catch (error) {
+                    res.write(
+                        `data: ${JSON.stringify({ error: String(error) })}\n\n`,
+                    );
+                } finally {
+                    res.write('data: [DONE]\n\n');
+                    res.end();
+                }
+            });
+
             app.use('/conversations', conv);
         }
 

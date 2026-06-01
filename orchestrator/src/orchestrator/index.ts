@@ -11,6 +11,8 @@ import {
     buildStorySummariesContext,
     indexMissingStories,
     finalizeStory,
+    readStoryEntries,
+    upsertIndexEntry,
 } from './storyArchive';
 import { ConversationManager, ConversationState } from './conversations';
 import { resolveGroups, filterToolsForOrder } from './serverGroups';
@@ -730,15 +732,117 @@ export class Orchestrator {
     }
 
     async *simulate(
-        _id: string,
-        _body: {
+        id: string,
+        body: {
             fromMessageIndex?: number;
             systemPrompt?: string;
             temperature?: number;
         },
-        _options: { onConversationId?: (id: string) => void },
+        options: { onConversationId?: (id: string) => void },
     ): AsyncGenerator<string, void, unknown> {
-        yield 'simulation non implémentée';
+        const parentEntries = readStoryEntries(id);
+        if (parentEntries.length === 0) {
+            yield `Conversation "${id}" introuvable.`;
+            return;
+        }
+
+        const cut =
+            typeof body.fromMessageIndex === 'number'
+                ? body.fromMessageIndex
+                : parentEntries.length;
+        const priorHistory: OpenAI.Chat.ChatCompletionMessageParam[] =
+            parentEntries
+                .slice(0, cut)
+                .filter((e) => e.role === 'user' || e.role === 'assistant')
+                .map((e) => ({
+                    role: e.role as 'user' | 'assistant',
+                    content: e.content,
+                }));
+
+        const lastUser = [...parentEntries.slice(0, cut)]
+            .reverse()
+            .find((e) => e.role === 'user');
+        const order = lastUser?.content ?? '';
+        if (
+            priorHistory.length &&
+            priorHistory[priorHistory.length - 1].role === 'user'
+        ) {
+            priorHistory.pop();
+        }
+
+        const state = this.conversations.createBranch(id);
+        options.onConversationId?.(state.id);
+        const story = state.story;
+
+        const { tools: allTools, activeGroups } = this.buildContext(order);
+        const systemPrompt =
+            body.systemPrompt ?? this.buildSystemPrompt(activeGroups);
+        const temperature = body.temperature ?? 0;
+
+        story.add({
+            role: 'system',
+            content: systemPrompt,
+            tools: allTools.map((t) => t.function.name),
+        });
+        story.add({ role: 'user', content: order });
+
+        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+            { role: 'system', content: systemPrompt },
+            ...priorHistory,
+            { role: 'user', content: order },
+        ];
+
+        const MAX_TURNS = 10;
+        let finalResponse = '';
+        for (let turn = 0; turn < MAX_TURNS; turn++) {
+            const response = await this.openai.chat.completions.create({
+                model: env.LLM_MODEL,
+                messages,
+                tools: allTools.length > 0 ? allTools : undefined,
+                tool_choice: allTools.length > 0 ? 'auto' : undefined,
+                temperature,
+            });
+            const choice = response.choices[0];
+            const assistantMessage = choice.message;
+            messages.push(assistantMessage);
+            if (
+                choice.finish_reason === 'stop' ||
+                !assistantMessage.tool_calls
+            ) {
+                finalResponse = stripMarkdownForTts(
+                    assistantMessage.content ?? '',
+                );
+                story.add({ role: 'assistant', content: finalResponse });
+                yield finalResponse;
+                break;
+            }
+            await this.runToolCalls(
+                assistantMessage.tool_calls,
+                story,
+                messages,
+                'none',
+            );
+        }
+        if (!finalResponse) {
+            finalResponse = 'Tâche effectuée.';
+            yield finalResponse;
+        }
+
+        upsertIndexEntry({
+            id: story.id,
+            date: new Date(parseInt(story.id)).toISOString().split('T')[0],
+            summary: '',
+            domotics: false,
+            source: 'app',
+            finished: false,
+            parentId: id,
+            sim: {
+                temperature,
+                systemPromptOverridden: body.systemPrompt !== undefined,
+            },
+        });
+
+        this.conversations.finalize(story.id);
     }
 
     async shutdown(): Promise<void> {
