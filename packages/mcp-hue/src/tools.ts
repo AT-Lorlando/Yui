@@ -73,6 +73,11 @@ export function buildHueTools(roomNames: string[], lightNames: string[] = []) {
                         description:
                             'Couleur hex pour une lampe individuelle, ex : "#FF5500". Pour une pièce, utiliser set_room_palette.',
                     },
+                    transitionMs: {
+                        type: 'number',
+                        description:
+                            'Durée du fondu en ms (transition lente côté bridge). Ex: 4000 = fondu sur 4s.',
+                    },
                 },
                 required: ['target'],
             },
