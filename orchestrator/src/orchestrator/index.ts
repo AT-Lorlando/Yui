@@ -729,6 +729,18 @@ export class Orchestrator {
         }));
     }
 
+    async *simulate(
+        _id: string,
+        _body: {
+            fromMessageIndex?: number;
+            systemPrompt?: string;
+            temperature?: number;
+        },
+        _options: { onConversationId?: (id: string) => void },
+    ): AsyncGenerator<string, void, unknown> {
+        yield 'simulation non implémentée';
+    }
+
     async shutdown(): Promise<void> {
         this.conversations.finalizeAll();
 

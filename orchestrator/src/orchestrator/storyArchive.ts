@@ -280,6 +280,24 @@ export async function finalizeStory(
 
 // ── Story retrieval ───────────────────────────────────────────────────────────
 
+export function readStoryEntries(id: string): StoryEntry[] {
+    const file = path.join(STORIES_DIR, `story-${id}.json`);
+    try {
+        if (!fs.existsSync(file)) return [];
+        return JSON.parse(fs.readFileSync(file, 'utf-8')) as StoryEntry[];
+    } catch {
+        return [];
+    }
+}
+
+export function getIndexEntry(id: string): StoryIndexEntry | undefined {
+    return loadIndex().find((e) => e.id === id);
+}
+
+export function getBranches(id: string): StoryIndexEntry[] {
+    return loadIndex().filter((e) => e.parentId === id);
+}
+
 export function getStoryTranscript(storyId: string): string {
     const filePath = path.join(STORIES_DIR, `story-${storyId}.json`);
     try {

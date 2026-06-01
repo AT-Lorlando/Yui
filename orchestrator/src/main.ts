@@ -25,6 +25,13 @@ import {
     toggleFavorite,
 } from './orchestrator/scenes';
 import Logger from './logger';
+import {
+    listConversations,
+    readStoryEntries,
+    getIndexEntry,
+    getBranches,
+} from './orchestrator/storyArchive';
+import type { ConversationsHandler } from './input/InputSource';
 
 // voice/tts.py exposes a /speak endpoint on this port
 const SPEAK_PIPELINE_URL =
@@ -140,6 +147,17 @@ async function main() {
         run: (id: string) => runAutomation(id),
     };
 
+    const conversationsHandler: ConversationsHandler = {
+        list: (scope) => listConversations(scope),
+        get: (id) => ({
+            entries: readStoryEntries(id),
+            meta: getIndexEntry(id),
+            branches: getBranches(id),
+        }),
+        simulate: (id, body, options) =>
+            orchestrator.simulate(id, body, options),
+    };
+
     // Automations: fires cron/delay jobs, dispatches response to the configured channel
     async function dispatchOutput(
         text: string,
@@ -184,6 +202,7 @@ async function main() {
             locationHandler,
             automationsHandler,
             presenceHandler,
+            conversationsHandler,
         );
     }
 

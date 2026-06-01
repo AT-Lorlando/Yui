@@ -78,6 +78,26 @@ export type LocationHandler = (
     accuracy: number,
 ) => import('../orchestrator/presence').LocationResponse;
 
+export interface ConversationsHandler {
+    list: (
+        scope: 'resumable' | 'all',
+    ) => import('../orchestrator/storyArchive').StoryIndexEntry[];
+    get: (id: string) => {
+        entries: import('../orchestrator/story').StoryEntry[];
+        meta?: import('../orchestrator/storyArchive').StoryIndexEntry;
+        branches: import('../orchestrator/storyArchive').StoryIndexEntry[];
+    };
+    simulate: (
+        id: string,
+        body: {
+            fromMessageIndex?: number;
+            systemPrompt?: string;
+            temperature?: number;
+        },
+        options: { onConversationId?: (id: string) => void },
+    ) => AsyncGenerator<string, void, unknown>;
+}
+
 export interface InputSource {
     start(
         handler: (
@@ -94,6 +114,7 @@ export interface InputSource {
         locationHandler?: LocationHandler,
         automationsHandler?: AutomationsHandler,
         presenceHandler?: PresenceHandler,
+        conversationsHandler?: ConversationsHandler,
     ): Promise<void>;
     stop(): Promise<void>;
 }

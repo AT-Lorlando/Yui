@@ -16,6 +16,7 @@ import {
     LocationHandler,
     AutomationsHandler,
     PresenceHandler,
+    ConversationsHandler,
 } from './InputSource';
 import {
     loadStore,
@@ -102,6 +103,7 @@ export class HttpSource implements InputSource {
         locationHandler?: LocationHandler,
         automationsHandler?: AutomationsHandler,
         presenceHandler?: PresenceHandler,
+        conversationsHandler?: ConversationsHandler,
     ): Promise<void> {
         const port = Number(process.env.PORT ?? 3000);
         const app = express();
@@ -787,6 +789,29 @@ export class HttpSource implements InputSource {
             });
 
             app.use('/automations', auto);
+        }
+
+        // ── Conversations ─────────────────────────────────────────────────────
+        if (conversationsHandler) {
+            const conv = express.Router();
+            conv.use((req: any, res: any, next: any) => {
+                const bearer = req.headers['authorization']?.split(' ')[1];
+                if (!this.checkPassword(bearer, req.ip)) {
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+                next();
+            });
+
+            conv.get('/', (req: any, res: any) => {
+                const scope = req.query?.scope === 'all' ? 'all' : 'resumable';
+                res.json(conversationsHandler.list(scope));
+            });
+
+            conv.get('/:id', (req: any, res: any) => {
+                res.json(conversationsHandler.get(req.params.id));
+            });
+
+            app.use('/conversations', conv);
         }
 
         // ── Memory (read-only) ────────────────────────────────────────────────
