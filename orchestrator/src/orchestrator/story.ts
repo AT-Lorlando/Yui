@@ -16,10 +16,18 @@ export interface StoryEntry {
 
 export class Story {
     public readonly id: string;
+    public readonly source: 'voice' | 'app';
+    public readonly parentId?: string;
     public readonly entries: StoryEntry[] = [];
 
-    constructor() {
-        this.id = Date.now().toString();
+    constructor(opts?: {
+        source?: 'voice' | 'app';
+        id?: string;
+        parentId?: string;
+    }) {
+        this.id = opts?.id ?? Date.now().toString();
+        this.source = opts?.source ?? 'app';
+        this.parentId = opts?.parentId;
     }
 
     add(entry: Omit<StoryEntry, 'timestamp'>): void {
