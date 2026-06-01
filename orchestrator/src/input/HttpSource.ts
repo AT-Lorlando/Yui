@@ -16,6 +16,7 @@ import {
     LocationHandler,
     AutomationsHandler,
     PresenceHandler,
+    ConversationsHandler,
 } from './InputSource';
 import {
     loadStore,
@@ -92,6 +93,7 @@ export class HttpSource implements InputSource {
             order: string,
             reset?: boolean,
             outputChannel?: import('../orchestrator/automations').OutputChannel,
+            conversationId?: string,
         ) => Promise<string>,
         streamHandler?: StreamHandler,
         statusHandler?: StatusHandler,
@@ -101,6 +103,7 @@ export class HttpSource implements InputSource {
         locationHandler?: LocationHandler,
         automationsHandler?: AutomationsHandler,
         presenceHandler?: PresenceHandler,
+        conversationsHandler?: ConversationsHandler,
     ): Promise<void> {
         const port = Number(process.env.PORT ?? 3000);
         const app = express();
@@ -228,9 +231,18 @@ export class HttpSource implements InputSource {
             const wantsAudio = req.body?.audio === true;
             const reset = req.body?.reset === true;
             const outputChannel = req.body?.voice === true ? 'cast' : 'none';
+            const conversationId =
+                typeof req.body?.conversationId === 'string'
+                    ? req.body.conversationId
+                    : undefined;
 
             try {
-                const result = await handler(order, reset, outputChannel);
+                const result = await handler(
+                    order,
+                    reset,
+                    outputChannel,
+                    conversationId,
+                );
                 const response: Record<string, unknown> = { response: result };
 
                 if (wantsAudio) {
@@ -269,6 +281,10 @@ export class HttpSource implements InputSource {
                 // Voice pipeline sends "voice: true" → cap response length
                 const isVoice = req.body?.voice === true;
                 const reset = req.body?.reset === true;
+                const conversationId =
+                    typeof req.body?.conversationId === 'string'
+                        ? req.body.conversationId
+                        : undefined;
 
                 res.setHeader('Content-Type', 'text/event-stream');
                 res.setHeader('Cache-Control', 'no-cache');
@@ -277,9 +293,24 @@ export class HttpSource implements InputSource {
 
                 const streamOutputChannel = isVoice ? 'cast' : 'none';
                 try {
+                    let idSent = false;
                     for await (const token of streamHandler(
                         order,
-                        { outputChannel: streamOutputChannel },
+                        {
+                            outputChannel: streamOutputChannel,
+                            conversationId,
+                            appConversation: !isVoice,
+                            onConversationId: (id: string) => {
+                                if (!idSent) {
+                                    res.write(
+                                        `data: ${JSON.stringify({
+                                            conversationId: id,
+                                        })}\n\n`,
+                                    );
+                                    idSent = true;
+                                }
+                            },
+                        },
                         reset,
                     )) {
                         res.write(`data: ${JSON.stringify({ token })}\n\n`);
@@ -758,6 +789,68 @@ export class HttpSource implements InputSource {
             });
 
             app.use('/automations', auto);
+        }
+
+        // ── Conversations ─────────────────────────────────────────────────────
+        if (conversationsHandler) {
+            const conv = express.Router();
+            conv.use((req: any, res: any, next: any) => {
+                const bearer = req.headers['authorization']?.split(' ')[1];
+                if (!this.checkPassword(bearer, req.ip)) {
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+                next();
+            });
+
+            conv.get('/', (req: any, res: any) => {
+                const scope = req.query?.scope === 'all' ? 'all' : 'resumable';
+                res.json(conversationsHandler.list(scope));
+            });
+
+            conv.get('/:id', (req: any, res: any) => {
+                res.json(conversationsHandler.get(req.params.id));
+            });
+
+            conv.post('/:id/simulate', async (req: any, res: any) => {
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                res.flushHeaders();
+                let idSent = false;
+                try {
+                    for await (const token of conversationsHandler.simulate(
+                        req.params.id,
+                        {
+                            fromMessageIndex: req.body?.fromMessageIndex,
+                            systemPrompt: req.body?.systemPrompt,
+                            temperature: req.body?.temperature,
+                        },
+                        {
+                            onConversationId: (id: string) => {
+                                if (!idSent) {
+                                    res.write(
+                                        `data: ${JSON.stringify({
+                                            conversationId: id,
+                                        })}\n\n`,
+                                    );
+                                    idSent = true;
+                                }
+                            },
+                        },
+                    )) {
+                        res.write(`data: ${JSON.stringify({ token })}\n\n`);
+                    }
+                } catch (error) {
+                    res.write(
+                        `data: ${JSON.stringify({ error: String(error) })}\n\n`,
+                    );
+                } finally {
+                    res.write('data: [DONE]\n\n');
+                    res.end();
+                }
+            });
+
+            app.use('/conversations', conv);
         }
 
         // ── Memory (read-only) ────────────────────────────────────────────────

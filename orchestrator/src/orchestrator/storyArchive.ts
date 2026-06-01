@@ -5,7 +5,12 @@ import { env } from '../env';
 import Logger from '../logger';
 import { StoryEntry } from './story';
 
-const INDEX_FILE = path.resolve(process.cwd(), 'data/story-index.json');
+let INDEX_FILE = path.resolve(process.cwd(), 'data/story-index.json');
+
+/** Test-only: redirige l'index vers un fichier temporaire. */
+export function _setIndexFileForTests(file: string): void {
+    INDEX_FILE = file;
+}
 const STORIES_DIR = path.resolve(process.cwd(), 'stories');
 const MAX_INDEX_SIZE = 200;
 
@@ -75,8 +80,14 @@ export interface StoryIndexEntry {
     id: string;
     date: string;
     summary: string;
-    /** True when the story mainly involved home-automation tool calls. */
-    domotics?: boolean;
+    domotics: boolean;
+    source: 'voice' | 'app';
+    finished: boolean;
+    parentId?: string;
+    sim?: {
+        temperature?: number;
+        systemPromptOverridden: boolean;
+    };
 }
 
 function ensureDataDir(): void {
@@ -100,6 +111,57 @@ function saveIndex(index: StoryIndexEntry[]): void {
     fs.writeFileSync(INDEX_FILE, JSON.stringify(index, null, 2));
 }
 
+/** Crée ou met à jour une entrée d'index (écriture eager dès la création). */
+export function upsertIndexEntry(entry: StoryIndexEntry): void {
+    const index = loadIndex();
+    const i = index.findIndex((e) => e.id === entry.id);
+    if (i >= 0) index[i] = { ...index[i], ...entry };
+    else index.push(entry);
+
+    // purge au-delà de MAX_INDEX_SIZE, mais jamais une story ayant des branches
+    if (index.length > MAX_INDEX_SIZE) {
+        const parentsWithBranches = new Set(
+            index.map((e) => e.parentId).filter((p): p is string => !!p),
+        );
+        let removable = index.length - MAX_INDEX_SIZE;
+        for (let k = 0; k < index.length && removable > 0; ) {
+            if (!parentsWithBranches.has(index[k].id)) {
+                index.splice(k, 1);
+                removable--;
+            } else {
+                k++;
+            }
+        }
+        if (removable > 0) {
+            Logger.warn(
+                `story-index above MAX_INDEX_SIZE (${index.length}) — ${removable} entrée(s) protégée(s) non purgée(s)`,
+            );
+        }
+    }
+    saveIndex(index);
+}
+
+/** Marque une conversation finie + enregistre son résumé. */
+export function markFinished(id: string, summary: string): void {
+    const index = loadIndex();
+    const i = index.findIndex((e) => e.id === id);
+    if (i < 0) {
+        Logger.warn(`markFinished: conversation ${id} absente de l'index`);
+        return;
+    }
+    index[i] = { ...index[i], finished: true, summary };
+    saveIndex(index);
+}
+
+export type ConversationScope = 'resumable' | 'all';
+
+/** Liste les conversations (récent d'abord). 'resumable' = finie, non-domotique, sans parent. */
+export function listConversations(scope: ConversationScope): StoryIndexEntry[] {
+    const index = [...loadIndex()].reverse();
+    if (scope === 'all') return index;
+    return index.filter((e) => e.finished && !e.domotics && !e.parentId);
+}
+
 function makeOpenAI(): OpenAI {
     return new OpenAI({
         apiKey: env.LLM_API_KEY,
@@ -109,23 +171,14 @@ function makeOpenAI(): OpenAI {
 
 // ── Summarization ─────────────────────────────────────────────────────────────
 
-/**
- * Called after a story is saved. Generates a short (10-15 word) summary via
- * LLM and stores it in data/story-index.json.
- * Also flags the story as `domotics` if any home-automation tool was called.
- */
-export async function summarizeAndIndex(
-    storyId: string,
-    entries: StoryEntry[],
-): Promise<void> {
+/** Construit le transcript user/assistant et renvoie un résumé LLM (10-15 mots) ou ''. */
+async function summarizeTranscript(entries: StoryEntry[]): Promise<string> {
+    const transcript = entries
+        .filter((e) => e.role === 'user' || e.role === 'assistant')
+        .map((e) => `${e.role === 'user' ? 'Jérémy' : 'Yui'}: ${e.content}`)
+        .join('\n');
+    if (!transcript.trim()) return '';
     try {
-        const transcript = entries
-            .filter((e) => e.role === 'user' || e.role === 'assistant')
-            .map((e) => `${e.role === 'user' ? 'Jérémy' : 'Yui'}: ${e.content}`)
-            .join('\n');
-
-        if (!transcript.trim()) return;
-
         const response = await makeOpenAI().chat.completions.create({
             model: env.LLM_MODEL,
             messages: [
@@ -141,32 +194,39 @@ export async function summarizeAndIndex(
             max_tokens: 40,
             temperature: 0,
         });
+        return response.choices[0].message.content?.trim() ?? '';
+    } catch (e) {
+        Logger.warn(`summarizeTranscript failed: ${e}`);
+        return '';
+    }
+}
 
-        const summary = response.choices[0].message.content?.trim() ?? '';
+/**
+ * Called after a story is saved. Generates a short (10-15 word) summary via
+ * LLM and stores it in data/story-index.json.
+ * Also flags the story as `domotics` if any home-automation tool was called.
+ */
+export async function summarizeAndIndex(
+    storyId: string,
+    entries: StoryEntry[],
+): Promise<void> {
+    try {
+        const summary = await summarizeTranscript(entries);
         if (!summary) return;
 
         const domotics = isDomotics(entries);
 
-        const index = loadIndex();
-        const entry: StoryIndexEntry = {
+        // Preserve existing source/parentId if already in index; default source='app', finished=true
+        const existing = loadIndex().find((e) => e.id === storyId);
+        upsertIndexEntry({
+            source: 'app',
+            ...existing,
             id: storyId,
             date: new Date(parseInt(storyId)).toISOString().split('T')[0],
             summary,
             domotics,
-        };
-
-        const existing = index.findIndex((e) => e.id === storyId);
-        if (existing >= 0) {
-            index[existing] = entry;
-        } else {
-            index.push(entry);
-        }
-
-        if (index.length > MAX_INDEX_SIZE) {
-            index.splice(0, index.length - MAX_INDEX_SIZE);
-        }
-
-        saveIndex(index);
+            finished: true,
+        });
         Logger.debug(
             `Story ${storyId} indexed: "${summary}" (domotics=${domotics})`,
         );
@@ -175,7 +235,68 @@ export async function summarizeAndIndex(
     }
 }
 
+/**
+ * Finalise une conversation : écrit la story sur disque, génère un résumé LLM
+ * (10-15 mots), calcule le flag domotics, et met à jour l'index.
+ * Préserve la `source` existante ('voice'/'app') si déjà indexée.
+ */
+export async function finalizeStory(
+    storyId: string,
+    entries: StoryEntry[],
+): Promise<void> {
+    // 1. Write story file to disk
+    try {
+        if (!fs.existsSync(STORIES_DIR)) {
+            fs.mkdirSync(STORIES_DIR, { recursive: true });
+        }
+        const filePath = path.join(STORIES_DIR, `story-${storyId}.json`);
+        fs.writeFileSync(filePath, JSON.stringify(entries, null, 2));
+    } catch (err) {
+        Logger.warn(`finalizeStory: write ${storyId} failed: ${err}`);
+    }
+
+    // 2. Build transcript + summarize via LLM
+    const summary = await summarizeTranscript(entries);
+
+    // 3. domotics flag
+    const domotics = isDomotics(entries);
+
+    // 4. Upsert into index, preserving any existing source ('voice' wins over default 'app')
+    const existing = loadIndex().find((e) => e.id === storyId);
+    upsertIndexEntry({
+        id: storyId,
+        date: new Date(parseInt(storyId)).toISOString().split('T')[0],
+        summary,
+        domotics,
+        source: existing?.source ?? 'app',
+        finished: true,
+    });
+
+    // 5. Debug log
+    Logger.debug(
+        `Story ${storyId} finalized: "${summary}" (domotics=${domotics})`,
+    );
+}
+
 // ── Story retrieval ───────────────────────────────────────────────────────────
+
+export function readStoryEntries(id: string): StoryEntry[] {
+    const file = path.join(STORIES_DIR, `story-${id}.json`);
+    try {
+        if (!fs.existsSync(file)) return [];
+        return JSON.parse(fs.readFileSync(file, 'utf-8')) as StoryEntry[];
+    } catch {
+        return [];
+    }
+}
+
+export function getIndexEntry(id: string): StoryIndexEntry | undefined {
+    return loadIndex().find((e) => e.id === id);
+}
+
+export function getBranches(id: string): StoryIndexEntry[] {
+    return loadIndex().filter((e) => e.parentId === id);
+}
 
 export function getStoryTranscript(storyId: string): string {
     const filePath = path.join(STORIES_DIR, `story-${storyId}.json`);

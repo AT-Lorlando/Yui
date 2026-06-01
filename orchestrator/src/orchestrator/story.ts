@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Logger from '../logger';
-import { summarizeAndIndex } from './storyArchive';
 
 export interface StoryEntry {
     role: 'user' | 'assistant' | 'tool' | 'system';
@@ -14,12 +13,34 @@ export interface StoryEntry {
     timestamp: number;
 }
 
+/**
+ * Identifiant monotone basé sur l'horloge : garantit l'unicité même quand
+ * plusieurs stories sont créées dans la même milliseconde (ex. createBranch
+ * enchaîné, clics « Relancer » rapides). Reste compatible avec le parsing de
+ * date via `new Date(parseInt(id))`.
+ */
+let lastStoryTs = 0;
+function nextStoryId(): string {
+    let ts = Date.now();
+    if (ts <= lastStoryTs) ts = lastStoryTs + 1;
+    lastStoryTs = ts;
+    return ts.toString();
+}
+
 export class Story {
     public readonly id: string;
+    public readonly source: 'voice' | 'app';
+    public readonly parentId?: string;
     public readonly entries: StoryEntry[] = [];
 
-    constructor() {
-        this.id = Date.now().toString();
+    constructor(opts?: {
+        source?: 'voice' | 'app';
+        id?: string;
+        parentId?: string;
+    }) {
+        this.id = opts?.id ?? nextStoryId();
+        this.source = opts?.source ?? 'app';
+        this.parentId = opts?.parentId;
     }
 
     add(entry: Omit<StoryEntry, 'timestamp'>): void {
@@ -41,21 +62,5 @@ export class Story {
         } catch (error) {
             Logger.error(`Failed to flush story: ${error}`);
         }
-    }
-
-    /**
-     * Flush to disk and trigger async LLM summarization. Call this once at
-     * the end of a session (on reset or shutdown).
-     */
-    save(): void {
-        this.flush();
-        Logger.debug(
-            `Story saved: story-${this.id}.json (${this.entries.length} entries)`,
-        );
-
-        // Async summarization — fire and forget, does not block the response
-        summarizeAndIndex(this.id, this.entries).catch((err) =>
-            Logger.warn(`Story summarization failed: ${err}`),
-        );
     }
 }
