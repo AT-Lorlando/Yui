@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Logger from '../logger';
-import { summarizeAndIndex } from './storyArchive';
 
 export interface StoryEntry {
     role: 'user' | 'assistant' | 'tool' | 'system';
@@ -49,21 +48,5 @@ export class Story {
         } catch (error) {
             Logger.error(`Failed to flush story: ${error}`);
         }
-    }
-
-    /**
-     * Flush to disk and trigger async LLM summarization. Call this once at
-     * the end of a session (on reset or shutdown).
-     */
-    save(): void {
-        this.flush();
-        Logger.debug(
-            `Story saved: story-${this.id}.json (${this.entries.length} entries)`,
-        );
-
-        // Async summarization — fire and forget, does not block the response
-        summarizeAndIndex(this.id, this.entries).catch((err) =>
-            Logger.warn(`Story summarization failed: ${err}`),
-        );
     }
 }

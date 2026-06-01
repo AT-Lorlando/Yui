@@ -171,23 +171,14 @@ function makeOpenAI(): OpenAI {
 
 // ── Summarization ─────────────────────────────────────────────────────────────
 
-/**
- * Called after a story is saved. Generates a short (10-15 word) summary via
- * LLM and stores it in data/story-index.json.
- * Also flags the story as `domotics` if any home-automation tool was called.
- */
-export async function summarizeAndIndex(
-    storyId: string,
-    entries: StoryEntry[],
-): Promise<void> {
+/** Construit le transcript user/assistant et renvoie un résumé LLM (10-15 mots) ou ''. */
+async function summarizeTranscript(entries: StoryEntry[]): Promise<string> {
+    const transcript = entries
+        .filter((e) => e.role === 'user' || e.role === 'assistant')
+        .map((e) => `${e.role === 'user' ? 'Jérémy' : 'Yui'}: ${e.content}`)
+        .join('\n');
+    if (!transcript.trim()) return '';
     try {
-        const transcript = entries
-            .filter((e) => e.role === 'user' || e.role === 'assistant')
-            .map((e) => `${e.role === 'user' ? 'Jérémy' : 'Yui'}: ${e.content}`)
-            .join('\n');
-
-        if (!transcript.trim()) return;
-
         const response = await makeOpenAI().chat.completions.create({
             model: env.LLM_MODEL,
             messages: [
@@ -203,8 +194,24 @@ export async function summarizeAndIndex(
             max_tokens: 40,
             temperature: 0,
         });
+        return response.choices[0].message.content?.trim() ?? '';
+    } catch (e) {
+        Logger.warn(`summarizeTranscript failed: ${e}`);
+        return '';
+    }
+}
 
-        const summary = response.choices[0].message.content?.trim() ?? '';
+/**
+ * Called after a story is saved. Generates a short (10-15 word) summary via
+ * LLM and stores it in data/story-index.json.
+ * Also flags the story as `domotics` if any home-automation tool was called.
+ */
+export async function summarizeAndIndex(
+    storyId: string,
+    entries: StoryEntry[],
+): Promise<void> {
+    try {
+        const summary = await summarizeTranscript(entries);
         if (!summary) return;
 
         const domotics = isDomotics(entries);
@@ -249,34 +256,7 @@ export async function finalizeStory(
     }
 
     // 2. Build transcript + summarize via LLM
-    let summary = '';
-    try {
-        const transcript = entries
-            .filter((e) => e.role === 'user' || e.role === 'assistant')
-            .map((e) => `${e.role === 'user' ? 'Jérémy' : 'Yui'}: ${e.content}`)
-            .join('\n');
-
-        if (transcript.trim()) {
-            const response = await makeOpenAI().chat.completions.create({
-                model: env.LLM_MODEL,
-                messages: [
-                    {
-                        role: 'system',
-                        content:
-                            'Tu es un moteur de résumé. Résume la conversation suivante en exactement 10 à 15 mots en français. ' +
-                            'Commence par le sujet principal (lumières, météo, email, musique…). ' +
-                            'Réponds uniquement avec le résumé, sans ponctuation finale.',
-                    },
-                    { role: 'user', content: transcript },
-                ],
-                max_tokens: 40,
-                temperature: 0,
-            });
-            summary = response.choices[0].message.content?.trim() ?? '';
-        }
-    } catch (err) {
-        Logger.warn(`finalizeStory: summarize ${storyId} failed: ${err}`);
-    }
+    const summary = await summarizeTranscript(entries);
 
     // 3. domotics flag
     const domotics = isDomotics(entries);

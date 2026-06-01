@@ -440,12 +440,8 @@ export class Orchestrator {
                 : finalResponse;
         Logger.info(`[Response] ${preview}`);
 
-        state.history.push({ role: 'user', content: order });
-        state.history.push({ role: 'assistant', content: finalResponse });
-        if (state.history.length > HISTORY_MAX) {
-            state.history.splice(0, state.history.length - HISTORY_MAX);
-        }
-        story.flush();
+        this.pushExchange(state, order, finalResponse);
+        if (env.SAVE_STORIES) story.flush();
         this.conversations.touch(state.id);
         return finalResponse;
     }
@@ -601,16 +597,24 @@ export class Orchestrator {
                 : finalResponse;
         Logger.info(`[Response] ${preview}`);
 
-        state.history.push({ role: 'user', content: order });
-        state.history.push({ role: 'assistant', content: finalResponse });
-        if (state.history.length > HISTORY_MAX) {
-            state.history.splice(0, state.history.length - HISTORY_MAX);
-        }
+        this.pushExchange(state, order, finalResponse);
 
         // Flush to disk after every exchange — session stays open for continuation.
         // The story is finalized (summarized) on idle-finalize or shutdown.
-        story.flush();
+        if (env.SAVE_STORIES) story.flush();
         this.conversations.touch(state.id);
+    }
+
+    private pushExchange(
+        state: ConversationState,
+        order: string,
+        response: string,
+    ): void {
+        state.history.push({ role: 'user', content: order });
+        state.history.push({ role: 'assistant', content: response });
+        if (state.history.length > HISTORY_MAX) {
+            state.history.splice(0, state.history.length - HISTORY_MAX);
+        }
     }
 
     /** Public tool entry. Cancels a floating loop on explicit light commands. */

@@ -48,15 +48,17 @@ export class ConversationManager {
             lastActivity: Date.now(),
         };
         this.map.set(state.id, state);
-        upsertIndexEntry({
-            id: state.id,
-            date: new Date(parseInt(state.id)).toISOString().split('T')[0],
-            summary: '',
-            domotics: false,
-            source,
-            finished: false,
-            ...(parentId ? { parentId } : {}),
-        });
+        if (this.opts.saveStories) {
+            upsertIndexEntry({
+                id: state.id,
+                date: new Date(parseInt(state.id)).toISOString().split('T')[0],
+                summary: '',
+                domotics: false,
+                source,
+                finished: false,
+                ...(parentId ? { parentId } : {}),
+            });
+        }
         Logger.info(`Conversation created: ${state.id} (${source})`);
         return state;
     }
@@ -120,16 +122,18 @@ export class ConversationManager {
             lastActivity: Date.now(),
         };
         this.map.set(conversationId, state);
-        upsertIndexEntry({
-            id: conversationId,
-            date: new Date(parseInt(conversationId))
-                .toISOString()
-                .split('T')[0],
-            summary: '',
-            domotics: false,
-            source: 'app',
-            finished: false,
-        });
+        if (this.opts.saveStories) {
+            upsertIndexEntry({
+                id: conversationId,
+                date: new Date(parseInt(conversationId))
+                    .toISOString()
+                    .split('T')[0],
+                summary: '',
+                domotics: false,
+                source: 'app',
+                finished: false,
+            });
+        }
         Logger.info(`Conversation resumed: ${conversationId}`);
         return state;
     }
