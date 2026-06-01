@@ -5,7 +5,12 @@ import { env } from '../env';
 import Logger from '../logger';
 import { StoryEntry } from './story';
 
-const INDEX_FILE = path.resolve(process.cwd(), 'data/story-index.json');
+let INDEX_FILE = path.resolve(process.cwd(), 'data/story-index.json');
+
+/** Test-only: redirige l'index vers un fichier temporaire. */
+export function _setIndexFileForTests(file: string): void {
+    INDEX_FILE = file;
+}
 const STORIES_DIR = path.resolve(process.cwd(), 'stories');
 const MAX_INDEX_SIZE = 200;
 
@@ -75,8 +80,14 @@ export interface StoryIndexEntry {
     id: string;
     date: string;
     summary: string;
-    /** True when the story mainly involved home-automation tool calls. */
-    domotics?: boolean;
+    domotics: boolean;
+    source: 'voice' | 'app';
+    finished: boolean;
+    parentId?: string;
+    sim?: {
+        temperature?: number;
+        systemPromptOverridden: boolean;
+    };
 }
 
 function ensureDataDir(): void {
@@ -98,6 +109,49 @@ function loadIndex(): StoryIndexEntry[] {
 function saveIndex(index: StoryIndexEntry[]): void {
     ensureDataDir();
     fs.writeFileSync(INDEX_FILE, JSON.stringify(index, null, 2));
+}
+
+/** Crée ou met à jour une entrée d'index (écriture eager dès la création). */
+export function upsertIndexEntry(entry: StoryIndexEntry): void {
+    const index = loadIndex();
+    const i = index.findIndex((e) => e.id === entry.id);
+    if (i >= 0) index[i] = { ...index[i], ...entry };
+    else index.push(entry);
+
+    // purge au-delà de MAX_INDEX_SIZE, mais jamais une story ayant des branches
+    if (index.length > MAX_INDEX_SIZE) {
+        const parentsWithBranches = new Set(
+            index.map((e) => e.parentId).filter((p): p is string => !!p),
+        );
+        let removable = index.length - MAX_INDEX_SIZE;
+        for (let k = 0; k < index.length && removable > 0; ) {
+            if (!parentsWithBranches.has(index[k].id)) {
+                index.splice(k, 1);
+                removable--;
+            } else {
+                k++;
+            }
+        }
+    }
+    saveIndex(index);
+}
+
+/** Marque une conversation finie + enregistre son résumé. */
+export function markFinished(id: string, summary: string): void {
+    const index = loadIndex();
+    const i = index.findIndex((e) => e.id === id);
+    if (i < 0) return;
+    index[i] = { ...index[i], finished: true, summary };
+    saveIndex(index);
+}
+
+export type ConversationScope = 'resumable' | 'all';
+
+/** Liste les conversations (récent d'abord). 'resumable' = finie, non-domotique, sans parent. */
+export function listConversations(scope: ConversationScope): StoryIndexEntry[] {
+    const index = [...loadIndex()].reverse();
+    if (scope === 'all') return index;
+    return index.filter((e) => e.finished && !e.domotics && !e.parentId);
 }
 
 function makeOpenAI(): OpenAI {
@@ -147,26 +201,18 @@ export async function summarizeAndIndex(
 
         const domotics = isDomotics(entries);
 
-        const index = loadIndex();
-        const entry: StoryIndexEntry = {
+        // Preserve existing source/parentId if already in index; default source='app', finished=true
+        const existing = loadIndex().find((e) => e.id === storyId);
+        upsertIndexEntry({
+            source: existing?.source ?? 'app',
+            parentId: existing?.parentId,
+            ...existing,
             id: storyId,
             date: new Date(parseInt(storyId)).toISOString().split('T')[0],
             summary,
             domotics,
-        };
-
-        const existing = index.findIndex((e) => e.id === storyId);
-        if (existing >= 0) {
-            index[existing] = entry;
-        } else {
-            index.push(entry);
-        }
-
-        if (index.length > MAX_INDEX_SIZE) {
-            index.splice(0, index.length - MAX_INDEX_SIZE);
-        }
-
-        saveIndex(index);
+            finished: true,
+        });
         Logger.debug(
             `Story ${storyId} indexed: "${summary}" (domotics=${domotics})`,
         );
