@@ -3,7 +3,7 @@ import Logger from '../../logger';
 import type { AnimationEffect, FloatingConfig, Keyframe } from './types';
 import { expandIntro } from './effects';
 import { sampleGradient } from './gradient';
-import { startNativeDynamic, stopNativeDynamic } from './dynamicScene';
+import { stopNativeDynamic } from './dynamicScene';
 
 export type CallTool = (
     tool: string,
@@ -215,6 +215,3 @@ class AnimationManager {
 
 /** Process-wide singleton. */
 export const animationManager = new AnimationManager();
-
-// Suppress unused import warning for startNativeDynamic (used in future native engine path)
-void startNativeDynamic;
