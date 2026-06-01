@@ -1,7 +1,15 @@
 import assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ConversationManager } from './conversations';
+import { _setIndexFileForTests } from './storyArchive';
 
 function run(): void {
+    // Redirige l'index vers un fichier temporaire : ne jamais polluer le vrai
+    // data/story-index.json (create()/resume() font des upsertIndexEntry).
+    const tmp = path.join('/tmp', `conv-index-test-${Date.now()}.json`);
+    _setIndexFileForTests(tmp);
+
     const mgr = new ConversationManager({ saveStories: true });
 
     // voix : reset crée une nouvelle conversation
@@ -36,6 +44,7 @@ function run(): void {
     assert.strictEqual(branch.story.parentId, parent.id);
     assert.strictEqual(branch.source, 'app');
 
+    fs.rmSync(tmp, { force: true });
     console.log('All conversations tests passed');
 }
 

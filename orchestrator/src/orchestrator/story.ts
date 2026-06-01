@@ -13,6 +13,20 @@ export interface StoryEntry {
     timestamp: number;
 }
 
+/**
+ * Identifiant monotone basé sur l'horloge : garantit l'unicité même quand
+ * plusieurs stories sont créées dans la même milliseconde (ex. createBranch
+ * enchaîné, clics « Relancer » rapides). Reste compatible avec le parsing de
+ * date via `new Date(parseInt(id))`.
+ */
+let lastStoryTs = 0;
+function nextStoryId(): string {
+    let ts = Date.now();
+    if (ts <= lastStoryTs) ts = lastStoryTs + 1;
+    lastStoryTs = ts;
+    return ts.toString();
+}
+
 export class Story {
     public readonly id: string;
     public readonly source: 'voice' | 'app';
@@ -24,7 +38,7 @@ export class Story {
         id?: string;
         parentId?: string;
     }) {
-        this.id = opts?.id ?? Date.now().toString();
+        this.id = opts?.id ?? nextStoryId();
         this.source = opts?.source ?? 'app';
         this.parentId = opts?.parentId;
     }
