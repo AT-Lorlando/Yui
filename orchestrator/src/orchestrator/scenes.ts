@@ -3,6 +3,8 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import Logger from '../logger';
 import type { PresenceState } from './presence';
+import type { AnimationEffect, FloatingConfig } from './animation/types';
+import { animationManager } from './animation/animationManager';
 
 // ── Scene conditions ───────────────────────────────────────────────────────────
 
@@ -103,6 +105,10 @@ export interface Scene {
     favorite?: boolean;
     /** Free-text category for grouping in the UI (e.g. "Cinéma", "Ambiance", "Routines"). Defaults to "Scènes". */
     label?: string;
+    /** Optional intro animation played before the final state. */
+    intro?: AnimationEffect[];
+    /** Optional continuous floating-colour config started after the state. */
+    floating?: FloatingConfig;
 }
 
 export type CreateSceneInput = Omit<Scene, 'id' | 'createdAt' | 'builtIn'>;
@@ -510,11 +516,32 @@ async function runSceneInternal(
 
     Logger.info(
         `Running scene "${scene.name}" ` +
-            `(setup: ${scene.setup.length}, state: ${scene.state.length})`,
+            `(setup: ${scene.setup.length}, state: ${scene.state.length}` +
+            `${scene.intro ? `, intro: ${scene.intro.length}` : ''}` +
+            `${scene.floating ? ', floating' : ''})`,
     );
 
-    await runActions('setup', scene.setup, scene.name, callTool, context);
+    // Any new scene cancels a running floating loop before it begins.
+    await animationManager.stopAll();
+
+    // Intro plays on the lights WHILE setup (TV/cast prep) runs — hides latency.
+    const introP = scene.intro?.length
+        ? animationManager.playIntro(scene.intro, callTool)
+        : Promise.resolve();
+    const setupP = runActions(
+        'setup',
+        scene.setup,
+        scene.name,
+        callTool,
+        context,
+    );
+    await Promise.all([introP, setupP]);
+
     await runActions('state', scene.state, scene.name, callTool, context);
+
+    if (scene.floating) {
+        await animationManager.startFloating(scene.floating, callTool);
+    }
 
     Logger.info(`Scene "${scene.name}" complete`);
     return { success: true };
