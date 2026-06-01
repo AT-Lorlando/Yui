@@ -132,6 +132,11 @@ export function upsertIndexEntry(entry: StoryIndexEntry): void {
                 k++;
             }
         }
+        if (removable > 0) {
+            Logger.warn(
+                `story-index above MAX_INDEX_SIZE (${index.length}) — ${removable} entrée(s) protégée(s) non purgée(s)`,
+            );
+        }
     }
     saveIndex(index);
 }
@@ -140,7 +145,10 @@ export function upsertIndexEntry(entry: StoryIndexEntry): void {
 export function markFinished(id: string, summary: string): void {
     const index = loadIndex();
     const i = index.findIndex((e) => e.id === id);
-    if (i < 0) return;
+    if (i < 0) {
+        Logger.warn(`markFinished: conversation ${id} absente de l'index`);
+        return;
+    }
     index[i] = { ...index[i], finished: true, summary };
     saveIndex(index);
 }
@@ -204,8 +212,7 @@ export async function summarizeAndIndex(
         // Preserve existing source/parentId if already in index; default source='app', finished=true
         const existing = loadIndex().find((e) => e.id === storyId);
         upsertIndexEntry({
-            source: existing?.source ?? 'app',
-            parentId: existing?.parentId,
+            source: 'app',
             ...existing,
             id: storyId,
             date: new Date(parseInt(storyId)).toISOString().split('T')[0],
