@@ -42,7 +42,10 @@ module.exports = {
       interpreter: 'bash',
       env: {
         ...env,
-        SATELLITE_WS_PORT: env.SATELLITE_WS_PORT ?? '5050',
+        AUDIO_UDP_PORT: env.AUDIO_UDP_PORT ?? '5002',
+        DEBUG_WS_PORT: env.DEBUG_WS_PORT ?? '5051',
+        WAKEWORD_MODEL: env.WAKEWORD_MODEL ?? 'assets/wakeword/yui.onnx',
+        WAKEWORD_THRESHOLD: env.WAKEWORD_THRESHOLD ?? '0.5',
         WHISPER_MODEL: env.WHISPER_MODEL ?? 'distil-large-v3-fr',
         WHISPER_DEVICE: env.WHISPER_DEVICE ?? 'cuda',
         WHISPER_COMPUTE_TYPE: env.WHISPER_COMPUTE_TYPE ?? 'float16',
