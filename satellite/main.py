@@ -226,14 +226,22 @@ class YuiSatellite:
 
     def _open_arecord(self) -> subprocess.Popen:
         """
-        Capture mono 16kHz s16le raw PCM via arecord (ALSA/PipeWire).
-        Uses 'default' device which PipeWire exposes via its ALSA plugin.
-        hw:X,Y is not used because PipeWire holds the exclusive ALSA lock.
-        Mono lets PipeWire downmix all ReSpeaker beams automatically.
+        Capture mono 16kHz s16le raw PCM via arecord, reading the ReSpeaker
+        ALSA device directly (plughw) rather than the PipeWire 'default' node.
+
+        The PipeWire 'default' path was found to mangle the signal (resampling /
+        downmix artifacts), collapsing wake-word scores to ~0 even on loud,
+        clean speech. Reading the card directly at its native 16 kHz yields
+        clean audio (verified: same utterance scores 0.98+ vs ~0.1 via default).
+        plughw downmixes the card's stereo capture (the XVF3800 exposes a 2nd,
+        silent channel) to the mono the wake-word engine expects.
         """
+        dev = self.alsa_device
+        if dev.startswith("hw:"):
+            dev = "plug" + dev          # hw:1,0 -> plughw:1,0 (enables downmix)
         cmd = [
             "arecord",
-            "-D", "default",
+            "-D", dev,
             "-f", "S16_LE",
             f"-r", str(SAMPLE_RATE),
             f"-c", str(CHANNELS),
@@ -269,6 +277,9 @@ class YuiSatellite:
                     if self.wake_engine.process(frame):
                         log.info("🎤 Wake word detected!")
                         self._handle_utterance(proc)
+                        # Flush buffers so the just-handled audio can't re-fire.
+                        self.wake_engine.reset()
+                        wake_buf = np.zeros(0, dtype=np.int16)
                         log.info("Listening for wake word…")
         finally:
             proc.terminate()
