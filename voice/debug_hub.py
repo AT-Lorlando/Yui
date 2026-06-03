@@ -80,6 +80,7 @@ class DebugHub:
                         threshold=msg.get("threshold"),
                         vad_aggressiveness=msg.get("vad_aggressiveness"),
                         gain=msg.get("gain"),
+                        send_to_ai=msg.get("send_to_ai"),
                     )
                     self._on_tuning_change()
                     await self._broadcast_json({"type": "tuning", **self._tuning.to_dict()})

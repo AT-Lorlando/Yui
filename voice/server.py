@@ -320,6 +320,9 @@ class VoicePipeline:
             log.info(f"stop-word utterance: {text!r}")
             return
         clean = strip_trigger(text)
+        if not self.tuning.send_to_ai:
+            log.info(f"send_to_ai OFF — dry-run, not forwarding: {clean!r}")
+            return
         _post_order(clean, reset_convo=not conversation)
 
     def _save_wake_wav(self, pcm: np.ndarray) -> str:

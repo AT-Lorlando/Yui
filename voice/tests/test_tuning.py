@@ -23,3 +23,13 @@ def test_update_clamps(tmp_path):
     assert t.threshold == 1.0
     assert t.vad_aggressiveness == 3
     assert t.gain == 0.0
+
+
+def test_send_to_ai_default_and_toggle(tmp_path):
+    t = VoiceTuning()
+    assert t.send_to_ai is True
+    t.update(send_to_ai=False)
+    assert t.send_to_ai is False
+    p = tmp_path / "voice-tuning.json"
+    save_tuning(t, str(p))
+    assert load_tuning(str(p)).send_to_ai is False
