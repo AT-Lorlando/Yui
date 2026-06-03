@@ -12,6 +12,13 @@ log = logging.getLogger("voice")
 OWW_CHUNK = 1280          # 80 ms @ 16 kHz
 FLUSH_CHUNKS = 32         # ~2.5 s of silence to age out a just-fired wake word
 
+# Gate wake scoring behind Silero VAD: when there's no human speech, the wake
+# score is forced to 0. Kills false positives on non-speech (birds, hum,
+# transients) and silence. 0 disables the gate. Tune via WAKE_VAD_THRESHOLD.
+WAKE_VAD_THRESHOLD = float(os.getenv("WAKE_VAD_THRESHOLD", "0.5"))
+# Speex noise suppression on the wake-detector audio (needs speexdsp_ns).
+WAKE_NOISE_SUPPRESSION = os.getenv("WAKE_NOISE_SUPPRESSION", "1").lower() not in ("0", "false", "no")
+
 
 def _resolve_model(model: str) -> str:
     if os.path.isfile(model):
@@ -29,9 +36,23 @@ class WakeDetector:
     def __init__(self, model_path: str):
         from openwakeword.model import Model
         path = _resolve_model(model_path)
-        self._model = Model(wakeword_model_paths=[path])
+        kwargs: dict = {"wakeword_model_paths": [path]}
+        if WAKE_VAD_THRESHOLD > 0:
+            kwargs["vad_threshold"] = WAKE_VAD_THRESHOLD
+        speex_on = False
+        if WAKE_NOISE_SUPPRESSION:
+            try:
+                import speexdsp_ns  # noqa: F401
+                kwargs["enable_speex_noise_suppression"] = True
+                speex_on = True
+            except ImportError:
+                log.warning("speexdsp_ns unavailable — wake noise suppression off")
+        self._model = Model(**kwargs)
         self._key = list(self._model.models.keys())[0]
-        log.info(f"WakeDetector ready (model={path}, key={self._key})")
+        log.info(
+            f"WakeDetector ready (model={path}, key={self._key}, "
+            f"vad_threshold={WAKE_VAD_THRESHOLD}, speex_ns={speex_on})"
+        )
 
     def score(self, chunk_int16: np.ndarray) -> float:
         return float(self._model.predict(chunk_int16)[self._key])

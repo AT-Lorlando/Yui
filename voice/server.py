@@ -281,6 +281,10 @@ from config import AUDIO_UDP_PORT, DEBUG_WS_PORT, WAKEWORD_NAME
 _TUNING_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "voice-tuning.json")
 _WAKE_WAV_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "voice-debug", "wakes")
 
+# Require the wake score to stay >= threshold for this many consecutive 80 ms
+# chunks before firing — suppresses single-chunk transient spikes.
+WAKE_PATIENCE = int(os.getenv("WAKE_PATIENCE", "2"))
+
 
 class VoicePipeline:
     def __init__(self, stt: "WhisperSTT", hub: DebugHub, tuning):
@@ -337,6 +341,7 @@ class VoicePipeline:
     def run(self) -> None:
         self.running = True
         self.source.start()
+        hot = 0
         log.info("Voice pipeline listening (UDP audio -> OWW -> VAD -> Whisper)")
         while self.running:
             chunk = self.source.read(OWW_CHUNK)
@@ -344,7 +349,9 @@ class VoicePipeline:
             in_convo = time.time() < _conversation_mode_until
             score = self.wake.score(chunk)
             self.hub.publish_score(score)
-            if score >= self.tuning.threshold or in_convo:
+            hot = hot + 1 if score >= self.tuning.threshold else 0
+            if hot >= WAKE_PATIENCE or in_convo:
+                hot = 0
                 if not in_convo:
                     play_chime()
                     log.info(f"wake fired (score={score:.3f})")
