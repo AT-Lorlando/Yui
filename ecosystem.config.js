@@ -42,6 +42,8 @@ module.exports = {
       interpreter: 'bash',
       env: {
         ...env,
+        // Pin Whisper to GPU1 — GPU0 is saturated by llama-server + XTTS.
+        CUDA_VISIBLE_DEVICES: env.CUDA_VISIBLE_DEVICES ?? '1',
         AUDIO_UDP_PORT: env.AUDIO_UDP_PORT ?? '5002',
         DEBUG_WS_PORT: env.DEBUG_WS_PORT ?? '5051',
         WAKEWORD_MODEL: env.WAKEWORD_MODEL ?? 'assets/wakeword/yui.onnx',
