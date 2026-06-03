@@ -130,6 +130,16 @@ export class HttpSource implements InputSource {
         const mediaDir = path.join(process.cwd(), 'assets', 'media');
         app.use('/media', express.static(mediaDir));
 
+        // ── Static voice-debug wakes ───────────────────────────────────────────
+        // Served at /voice-debug/wakes/<file>.wav — recorded wake-word WAVs for
+        // replay in the voice debug panel (written by the voice server).
+        app.use(
+            '/voice-debug/wakes',
+            express.static(
+                path.join(process.cwd(), 'data', 'voice-debug', 'wakes'),
+            ),
+        );
+
         // ── Image → infinite MP4 loop ─────────────────────────────────────────
         // GET /media/loop/<subdir>/<file> streams an image as an infinite MP4.
         // Used by cast_wallpaper so the Chromecast keeps displaying it.
