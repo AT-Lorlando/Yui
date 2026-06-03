@@ -112,13 +112,10 @@ class WhisperSTT:
             no_speech_threshold=0.6,
             log_prob_threshold=-1.0,
             compression_ratio_threshold=2.4,
-            vad_filter=True,
-            vad_parameters=dict(
-                threshold=0.5,
-                min_speech_duration_ms=250,
-                min_silence_duration_ms=1000,
-                speech_pad_ms=400,
-            ),
+            # Upstream UtteranceCapture already segments speech with webrtcvad;
+            # faster-whisper's internal Silero VAD was rejecting 100% of the
+            # (mono, downmixed) utterance audio, so disable it here.
+            vad_filter=False,
             hallucination_silence_threshold=1.0,
             word_timestamps=False,
             suppress_blank=True,
