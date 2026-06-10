@@ -1,14 +1,10 @@
-// ecosystem.config.js
-// Chaque service a son propre cwd et lit son propre .env :
-//   - yui-orchestrator : cwd=racine, lit .env via orchestrator/src/env.ts
-//   - yui-tts / yui-voice : cwd=voice/, sourcent voice/.env dans leur wrapper bash
 module.exports = {
   apps: [
     // ── Orchestrateur (LLM + MCP servers) ──────────────────────────────────
     {
       name: 'yui-orchestrator',
       script: 'orchestrator/dist/main.js',
-      cwd: __dirname,
+      cwd: './',
       autorestart: true,
       max_restarts: 10,
       restart_delay: 5000,
@@ -19,7 +15,7 @@ module.exports = {
     {
       name: 'yui-tts',
       script: 'start-tts.sh',
-      cwd: __dirname + '/voice',
+      cwd: './voice',
       interpreter: 'bash',
       listen_timeout: 60000,
       autorestart: true,
@@ -32,7 +28,7 @@ module.exports = {
     {
       name: 'yui-voice',
       script: 'start.sh',
-      cwd: __dirname + '/voice',
+      cwd: './voice',
       interpreter: 'bash',
       autorestart: true,
       max_restarts: 5,
