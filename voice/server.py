@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-Yui Voice Server — WebSocket STT endpoint
-==========================================
-Receives audio from the Pi satellite via WebSocket (port 5050),
-transcribes with faster-whisper, streams to the orchestrator via SSE,
-synthesises the response with XTTS v2, and plays it via Chromecast.
-
-Replaces the old UDP + Porcupine pipeline (voice_pipeline.py).
-The satellite (satellite.py on the Pi) handles wake word + VAD.
+Yui Voice Server — server-side continuous pipeline
+==================================================
+Runs the full voice pipeline on the server: UDP audio in → OpenWakeWord →
+webrtcvad utterance capture → faster-whisper STT → orchestrator (SSE) →
+XTTS v2 → Chromecast. A DebugHub exposes live audio/score and tuning over
+a WebSocket for the debug page.
 
 Dependencies (server-side):
-    pip install websockets faster-whisper requests numpy pychromecast
+    pip install websockets faster-whisper requests numpy pychromecast \\
+        openwakeword webrtcvad
 """
 
 import asyncio
@@ -32,7 +31,6 @@ logging.basicConfig(
 
 import numpy as np
 import requests
-import websockets
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,6 +39,7 @@ from config import (
     BEARER_TOKEN,
     CONVERSATION_WINDOW_S,
     SAVE_AUDIO_DEBUG,
+    STOP_WORDS,
     YUI_STREAM_URL,
     YUI_URL,
 )
@@ -49,7 +48,6 @@ from tts import generate_tts, play_audio_blocking, play_chime
 
 log = logging.getLogger("yui-voice-server")
 
-SATELLITE_WS_PORT = int(os.getenv("SATELLITE_WS_PORT", "5050"))
 WHISPER_MIN_RMS = float(os.getenv("WHISPER_MIN_RMS", "400"))
 
 
@@ -114,13 +112,10 @@ class WhisperSTT:
             no_speech_threshold=0.6,
             log_prob_threshold=-1.0,
             compression_ratio_threshold=2.4,
-            vad_filter=True,
-            vad_parameters=dict(
-                threshold=0.5,
-                min_speech_duration_ms=250,
-                min_silence_duration_ms=1000,
-                speech_pad_ms=400,
-            ),
+            # Upstream UtteranceCapture already segments speech with webrtcvad;
+            # faster-whisper's internal Silero VAD was rejecting 100% of the
+            # (mono, downmixed) utterance audio, so disable it here.
+            vad_filter=False,
             hallucination_silence_threshold=1.0,
             word_timestamps=False,
             suppress_blank=True,
@@ -272,140 +267,125 @@ def _post_order(text: str, reset_convo: bool = False) -> None:
 
 
 # ---------------------------------------------------------------------------
-# WebSocket server
+# Server-side continuous pipeline
 # ---------------------------------------------------------------------------
 
-class VoiceServer:
-    def __init__(self, model: str, device: str, compute_type: str):
-        self.stt = WhisperSTT(model, device, compute_type)
-        # Serialise utterances — only one at a time (Whisper + TTS are not re-entrant)
-        self._processing_lock = asyncio.Lock()
+import threading
+from audio_source import AudioSource
+from wake import WakeDetector, OWW_CHUNK
+from vad_capture import UtteranceCapture
+from tuning import load_tuning, save_tuning
+from debug_hub import DebugHub
+from config import AUDIO_UDP_PORT, DEBUG_WS_PORT, WAKEWORD_NAME
 
-    async def handle_client(self, websocket) -> None:
-        client = websocket.remote_address
-        log.info(f"Satellite connected: {client}")
+_TUNING_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "voice-tuning.json")
+_WAKE_WAV_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "voice-debug", "wakes")
 
-        audio_buffer = bytearray()
-        state = "idle"  # idle | recording | processing
-
-        try:
-            async for message in websocket:
-                if isinstance(message, str):
-                    data = json.loads(message)
-                    msg_type = data.get("type")
-
-                    if msg_type == "wake":
-                        log.info("🎤 Wake signal — recording")
-                        audio_buffer.clear()
-                        state = "recording"
-
-                    elif msg_type == "end":
-                        if state != "recording":
-                            continue
-                        state = "processing"
-                        duration_s = len(audio_buffer) / 2 / 16000
-                        log.info(
-                            f"Recording complete: {duration_s:.1f}s "
-                            f"({len(audio_buffer)} bytes)"
-                        )
-                        result = await self._process_utterance(bytes(audio_buffer))
-                        await websocket.send(json.dumps(result))
-                        audio_buffer.clear()
-                        state = "idle"
-
-                elif isinstance(message, bytes):
-                    if state == "recording":
-                        audio_buffer.extend(message)
-
-        except websockets.ConnectionClosed:
-            log.info(f"Satellite disconnected: {client}")
-        except Exception as e:
-            log.error(f"Handler error: {e}", exc_info=True)
-
-    async def _process_utterance(self, audio_bytes: bytes) -> dict:
-        global _conversation_mode_until
-
-        if len(audio_bytes) < 3200:  # < 0.1 s
-            return {"status": "too_short"}
-
-        pcm = np.frombuffer(audio_bytes, dtype=np.int16)
-        loop = asyncio.get_event_loop()
-
-        # Always save audio for STT quality inspection
-        await loop.run_in_executor(None, _save_debug_audio, pcm, "utterance")
-
-        # STT (in thread — Whisper is CPU/GPU bound)
-        t0 = time.perf_counter()
-        text = await loop.run_in_executor(None, self.stt.transcribe, pcm)
-        stt_ms = (time.perf_counter() - t0) * 1000
-
-        if not text:
-            log.info(f"STT returned empty ({stt_ms:.0f}ms)")
-            return {"status": "empty"}
-
-        log.info(f'STT: "{text}" ({stt_ms:.0f}ms)')
-
-        # Strip trigger word if Whisper caught it (satellite already handled wake word)
-        order = strip_trigger(text) if contains_trigger(text) else text
-        if not order:
-            log.info(f"Wake word only, no command: {text!r}")
-            return {"status": "no_command"}
-
-        in_convo = time.time() < _conversation_mode_until
-        reset_convo = not in_convo
-
-        # Chime + orchestrator + TTS (serialised, blocking, in thread)
-        async with self._processing_lock:
-            play_chime()
-            await loop.run_in_executor(None, _post_order, order, reset_convo)
-
-        _conversation_mode_until = time.time() + CONVERSATION_WINDOW_S
-        log.info(f"Conversation window open for {CONVERSATION_WINDOW_S:.0f}s")
-
-        return {"status": "done", "text": order}
-
-    async def start(self, host: str = "0.0.0.0", port: int = SATELLITE_WS_PORT) -> None:
-        log.info(f"Voice server starting on ws://{host}:{port}")
-        async with websockets.serve(
-            self.handle_client,
-            host,
-            port,
-            max_size=10 * 1024 * 1024,  # 10 MB — enough for ~5 min of audio
-            ping_interval=None,  # satellite uses websocket-client (sync) which doesn't auto-pong
-        ):
-            log.info("Voice server ready — waiting for satellite connections")
-            await asyncio.Future()  # run forever
+# Require the wake score to stay >= threshold for this many consecutive 80 ms
+# chunks before firing — suppresses single-chunk transient spikes.
+WAKE_PATIENCE = int(os.getenv("WAKE_PATIENCE", "2"))
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+class VoicePipeline:
+    def __init__(self, stt: "WhisperSTT", hub: DebugHub, tuning):
+        self.stt = stt
+        self.hub = hub
+        self.tuning = tuning
+        self.model_path = os.getenv("WAKEWORD_MODEL",
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "wakeword", f"{WAKEWORD_NAME}.onnx"))
+        self.source = AudioSource(AUDIO_UDP_PORT, get_gain=lambda: self.tuning.gain)
+        self.wake = WakeDetector(self.model_path)
+        self.running = False
+
+    def _new_capture(self) -> UtteranceCapture:
+        import webrtcvad
+        vad = webrtcvad.Vad(self.tuning.vad_aggressiveness)
+        return UtteranceCapture(vad)
+
+    def _capture_and_handle(self, conversation: bool) -> None:
+        cap = self._new_capture()
+        cap.reset()
+        utterance = None
+        while self.running and utterance is None:
+            chunk = self.source.read(OWW_CHUNK)
+            self.hub.publish_audio(chunk)
+            utterance = cap.feed(chunk)
+        if utterance is None or len(utterance) < 16000 // 2:    # < 0.5s -> ignore
+            return
+        text = self.stt.transcribe(utterance)
+        _save_debug_audio(utterance, "utterance")
+        if not text.strip():
+            log.info("empty transcription - ignored")
+            return
+        wav_url = self._save_wake_wav(utterance)
+        self.hub.record_wake(self.tuning.threshold, text, wav_url)
+        lowered = text.strip().lower()
+        if any(lowered == w or lowered.startswith(w) for w in STOP_WORDS):
+            log.info(f"stop-word utterance: {text!r}")
+            return
+        clean = strip_trigger(text)
+        if not self.tuning.send_to_ai:
+            log.info(f"send_to_ai OFF — dry-run, not forwarding: {clean!r}")
+            return
+        _post_order(clean, reset_convo=not conversation)
+
+    def _save_wake_wav(self, pcm: np.ndarray) -> str:
+        import wave, time
+        os.makedirs(_WAKE_WAV_DIR, exist_ok=True)
+        name = f"wake-{int(time.time()*1000)}.wav"
+        with wave.open(os.path.join(_WAKE_WAV_DIR, name), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+            w.writeframes(pcm.tobytes())
+        return f"/voice-debug/wakes/{name}"
+
+    def run(self) -> None:
+        self.running = True
+        self.source.start()
+        hot = 0
+        log.info("Voice pipeline listening (UDP audio -> OWW -> VAD -> Whisper)")
+        while self.running:
+            chunk = self.source.read(OWW_CHUNK)
+            self.hub.publish_audio(chunk)
+            in_convo = time.time() < _conversation_mode_until
+            score = self.wake.score(chunk)
+            self.hub.publish_score(score)
+            hot = hot + 1 if score >= self.tuning.threshold else 0
+            if hot >= WAKE_PATIENCE or in_convo:
+                hot = 0
+                if not in_convo:
+                    play_chime()
+                    log.info(f"wake fired (score={score:.3f})")
+                self._capture_and_handle(conversation=in_convo)
+                self.wake.reset()
+
+    def stop(self) -> None:
+        self.running = False
+        self.source.stop()
+
 
 def main() -> None:
     import argparse
-
-    parser = argparse.ArgumentParser(description="Yui Voice Server (satellite mode)")
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=SATELLITE_WS_PORT)
-    parser.add_argument(
-        "--model",
-        default=os.getenv("WHISPER_MODEL", "distil-large-v3-fr"),
-        help="faster-whisper model name or local path",
-    )
-    parser.add_argument(
-        "--device",
-        default=os.getenv("WHISPER_DEVICE", "cuda"),
-        help="cuda | cpu",
-    )
-    parser.add_argument(
-        "--compute-type",
-        default=os.getenv("WHISPER_COMPUTE_TYPE", "float16"),
-        help="float16 | int8 | int8_float16",
-    )
+    parser = argparse.ArgumentParser(description="Yui Voice Server (server-side pipeline)")
+    parser.add_argument("--whisper-model", default=os.getenv("WHISPER_MODEL", "distil-large-v3-fr"))
+    parser.add_argument("--whisper-device", default=os.getenv("WHISPER_DEVICE", "cuda"))
+    parser.add_argument("--whisper-compute", default=os.getenv("WHISPER_COMPUTE_TYPE", "float16"))
     args = parser.parse_args()
 
-    server = VoiceServer(args.model, args.device, args.compute_type)
-    asyncio.run(server.start(args.host, args.port))
+    tuning = load_tuning(_TUNING_PATH)
+
+    def on_tuning_change() -> None:
+        save_tuning(tuning, _TUNING_PATH)
+
+    hub = DebugHub(tuning, on_tuning_change, DEBUG_WS_PORT)
+    stt = WhisperSTT(args.whisper_model, args.whisper_device, args.whisper_compute)
+    pipeline = VoicePipeline(stt, hub, tuning)
+
+    t = threading.Thread(target=pipeline.run, daemon=True)
+    t.start()
+    try:
+        asyncio.run(hub.serve())
+    except KeyboardInterrupt:
+        pipeline.stop()
 
 
 if __name__ == "__main__":

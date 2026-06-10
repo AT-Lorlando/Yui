@@ -105,7 +105,9 @@ export class HttpSource implements InputSource {
         presenceHandler?: PresenceHandler,
         conversationsHandler?: ConversationsHandler,
     ): Promise<void> {
-        const port = Number(process.env.PORT ?? 3000);
+        const port = Number(
+            process.env.ORCHESTRATOR_PORT ?? process.env.PORT ?? 4000,
+        );
         const app = express();
         app.use(cors({ origin: '*' }));
         app.use(bodyParser.json());
@@ -129,6 +131,16 @@ export class HttpSource implements InputSource {
         // Served at /media/<wallpapers|videos>/<filename> — used by mcp-media.
         const mediaDir = path.join(process.cwd(), 'assets', 'media');
         app.use('/media', express.static(mediaDir));
+
+        // ── Static voice-debug wakes ───────────────────────────────────────────
+        // Served at /voice-debug/wakes/<file>.wav — recorded wake-word WAVs for
+        // replay in the voice debug panel (written by the voice server).
+        app.use(
+            '/voice-debug/wakes',
+            express.static(
+                path.join(process.cwd(), 'data', 'voice-debug', 'wakes'),
+            ),
+        );
 
         // ── Image → infinite MP4 loop ─────────────────────────────────────────
         // GET /media/loop/<subdir>/<file> streams an image as an infinite MP4.

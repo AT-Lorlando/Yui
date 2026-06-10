@@ -3,7 +3,7 @@ Text helpers: trigger word, stop words, sentence boundary detection.
 """
 import re
 
-from .config import STOP_WORDS, TRIGGER_WORD
+from config import STOP_WORDS, TRIGGER_WORD
 
 # ── Trigger word ──────────────────────────────────────────────────────────────
 

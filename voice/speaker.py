@@ -9,7 +9,7 @@ import os
 
 import numpy as np
 
-from .config import SPEAKER_REF_WAV, SPEAKER_SIMILARITY_THRESH
+from config import SPEAKER_REF_WAV, SPEAKER_SIMILARITY_THRESH
 
 log = logging.getLogger("voice")
 

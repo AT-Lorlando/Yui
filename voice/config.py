@@ -65,6 +65,8 @@ TTS_SPEAKER = os.getenv("TTS_SPEAKER", "Salon")
 LOCAL_IP    = os.getenv("LOCAL_IP", "10.0.0.101")
 TTS_PORT    = int(os.getenv("TTS_PORT", "18765"))
 SPEAK_PORT  = int(os.getenv("SPEAK_PORT", "3001"))
+AUDIO_UDP_PORT = int(os.getenv("AUDIO_UDP_PORT", "5002"))
+DEBUG_WS_PORT  = int(os.getenv("DEBUG_WS_PORT", "5051"))
 
 # ── Conversation / stop words ─────────────────────────────────────────────────
 CONVERSATION_WINDOW_S = float(os.getenv("CONVERSATION_WINDOW_S", "20"))

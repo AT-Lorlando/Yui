@@ -26,7 +26,7 @@ import pychromecast
 import requests
 import soundfile as sf
 
-from .config import (
+from config import (
     LOCAL_IP,
     SPEAK_PORT,
     TTS_PORT,
