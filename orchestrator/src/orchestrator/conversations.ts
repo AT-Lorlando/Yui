@@ -3,7 +3,6 @@ import * as path from 'path';
 import OpenAI from 'openai';
 import Logger from '../logger';
 import { Story, StoryEntry } from './story';
-import { upsertIndexEntry } from './storyArchive';
 
 const STORIES_DIR = path.resolve(process.cwd(), 'stories');
 const VOICE_IDLE_MS = Number(process.env.CONVERSATION_WINDOW_S ?? 20) * 1000;
@@ -48,17 +47,9 @@ export class ConversationManager {
             lastActivity: Date.now(),
         };
         this.map.set(state.id, state);
-        if (this.opts.saveStories) {
-            upsertIndexEntry({
-                id: state.id,
-                date: new Date(parseInt(state.id)).toISOString().split('T')[0],
-                summary: '',
-                domotics: false,
-                source,
-                finished: false,
-                ...(parentId ? { parentId } : {}),
-            });
-        }
+        // Pas d'indexation eager : une conversation n'entre dans l'index qu'à la
+        // finalisation, et seulement si elle a un vrai échange (cf. finalizeStory).
+        // Évite les entrées fantômes (faux réveils vocaux, conversations vides).
         Logger.info(`Conversation created: ${state.id} (${source})`);
         return state;
     }
@@ -122,18 +113,8 @@ export class ConversationManager {
             lastActivity: Date.now(),
         };
         this.map.set(conversationId, state);
-        if (this.opts.saveStories) {
-            upsertIndexEntry({
-                id: conversationId,
-                date: new Date(parseInt(conversationId))
-                    .toISOString()
-                    .split('T')[0],
-                summary: '',
-                domotics: false,
-                source: 'app',
-                finished: false,
-            });
-        }
+        // L'entrée d'index existe déjà (la conversation a été finalisée avant
+        // d'être reprise) ; elle sera ré-écrite à la prochaine finalisation.
         Logger.info(`Conversation resumed: ${conversationId}`);
         return state;
     }

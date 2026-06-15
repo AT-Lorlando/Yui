@@ -240,10 +240,28 @@ export async function summarizeAndIndex(
  * (10-15 mots), calcule le flag domotics, et met à jour l'index.
  * Préserve la `source` existante ('voice'/'app') si déjà indexée.
  */
+/**
+ * Une conversation n'est persistée/indexée que si elle a un vrai échange :
+ * au moins un message utilisateur ET une réponse assistant. Évite d'indexer
+ * les conversations vides (faux réveils vocaux, requêtes avortées, stop-words).
+ */
+function hasRealExchange(entries: StoryEntry[]): boolean {
+    return (
+        entries.some((e) => e.role === 'user') &&
+        entries.some((e) => e.role === 'assistant')
+    );
+}
+
 export async function finalizeStory(
     storyId: string,
     entries: StoryEntry[],
 ): Promise<void> {
+    // 0. Skip empty/contentless conversations entirely (no file, no index entry)
+    if (!hasRealExchange(entries)) {
+        Logger.debug(`Story ${storyId} ignorée à la finalisation (vide)`);
+        return;
+    }
+
     // 1. Write story file to disk
     try {
         if (!fs.existsSync(STORIES_DIR)) {
@@ -292,6 +310,11 @@ export function readStoryEntries(id: string): StoryEntry[] {
 
 export function getIndexEntry(id: string): StoryIndexEntry | undefined {
     return loadIndex().find((e) => e.id === id);
+}
+
+/** True si le fichier de story existe sur disque (robustesse anti-fantôme). */
+export function storyFileExists(id: string): boolean {
+    return fs.existsSync(path.join(STORIES_DIR, `story-${id}.json`));
 }
 
 export function getBranches(id: string): StoryIndexEntry[] {

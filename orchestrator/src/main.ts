@@ -31,6 +31,7 @@ import {
     readStoryEntries,
     getIndexEntry,
     getBranches,
+    storyFileExists,
 } from './orchestrator/storyArchive';
 import type { ConversationsHandler } from './input/InputSource';
 
@@ -149,7 +150,8 @@ async function main() {
     };
 
     const conversationsHandler: ConversationsHandler = {
-        list: (scope) => listConversations(scope),
+        list: (scope) =>
+            listConversations(scope).filter((e) => storyFileExists(e.id)),
         get: (id) => ({
             entries: readStoryEntries(id),
             meta: getIndexEntry(id),
