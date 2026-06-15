@@ -12,6 +12,9 @@ export type CallTool = (
 
 const MAX_CMD_PER_SEC = 8;
 const MIN_TICK_MS = 800;
+// Cap on how long stopAll() waits for in-flight tick commands to settle, so a
+// hung bridge request can never block the off/colour command that follows.
+const DRAIN_TIMEOUT_MS = 1500;
 
 /** Light-affecting tools whose invocation must cancel an active floating loop. */
 const LIGHT_TOOLS = new Set([
@@ -78,6 +81,8 @@ interface ActiveFloating {
     kind: 'software' | 'native';
     timer?: NodeJS.Timeout;
     nativeRid?: string;
+    /** The latest tick's in-flight set_lights promises (fire-and-forget). */
+    inflight?: Promise<unknown>[];
 }
 
 class AnimationManager {
@@ -162,14 +167,18 @@ class AnimationManager {
             MIN_TICK_MS,
         );
         const startedAt = Date.now();
+        // Register the loop before the first tick so its commands are tracked
+        // as in-flight and can be drained by stopAll().
+        const loop: ActiveFloating = { kind: 'software' };
+        this.floating = loop;
         const runTick = () => {
             const colors = floatingFrameColors(
                 cfg,
                 names,
                 Date.now() - startedAt,
             );
-            for (const [name, c] of Object.entries(colors)) {
-                void callTool('set_lights', {
+            loop.inflight = Object.entries(colors).map(([name, c]) =>
+                callTool('set_lights', {
                     target: name,
                     on: true,
                     color: c.color,
@@ -177,12 +186,11 @@ class AnimationManager {
                         ? { brightness: c.brightness }
                         : {}),
                     transitionMs: tick,
-                }).catch(() => {});
-            }
+                }).catch(() => {}),
+            );
         };
         runTick();
-        const timer = setInterval(runTick, tick);
-        this.floating = { kind: 'software', timer };
+        loop.timer = setInterval(runTick, tick);
         Logger.info(
             `[animation] floating started on ${names.length} light(s), tick ${tick}ms`,
         );
@@ -200,6 +208,18 @@ class AnimationManager {
         const f = this.floating;
         this.floating = null;
         if (f.timer) clearInterval(f.timer);
+        // Drain the last tick's in-flight commands so a following off/colour
+        // command reaches the bridge last — otherwise late-arriving "on" frames
+        // re-light the room. Capped so a hung request can't block the caller.
+        if (f.inflight?.length) {
+            await Promise.race([
+                Promise.allSettled(f.inflight),
+                new Promise((r) => {
+                    const t = setTimeout(r, DRAIN_TIMEOUT_MS);
+                    t.unref?.();
+                }),
+            ]);
+        }
         if (f.kind === 'native' && f.nativeRid) {
             const host = process.env.HUE_BRIDGE_IP;
             const key = process.env.HUE_USERNAME;

@@ -173,6 +173,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 `Govee device "${light.name}" not registered`,
                             );
                         const ch = goveeChannel.get(String(light.id)) ?? 'rgb';
+                        // Explicit manual control wins over a running ambiance
+                        // loop — otherwise it keeps overriding this state (e.g.
+                        // the lamp never turns off).
+                        stopAmbiance(String(light.id));
                         await applyGovee(g, { on, brightness, color }, ch);
                         store.updateState(light.id, {
                             on: turnOn,

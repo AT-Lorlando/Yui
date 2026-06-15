@@ -364,6 +364,10 @@ export class HttpSource implements InputSource {
 
             // ── Lights ────────────────────────────────────────────────────────
             dev.get('/lights', call('list_lights'));
+            // Atomic "turn everything off" — also cancels any floating loop
+            // (via callTool → cancelIfAffected), unlike N per-light requests.
+            dev.post('/lights/off-all', call('turn_off_all_lights'));
+            dev.post('/lights/on-all', call('turn_on_all_lights'));
             dev.post('/lights/:id/on', async (req: any, res: any) => {
                 try {
                     res.json(
