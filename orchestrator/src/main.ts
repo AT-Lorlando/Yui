@@ -16,7 +16,15 @@ import {
     type OutputChannel,
 } from './orchestrator/automations';
 import { sendNotification } from './orchestrator/notify';
-import { PresenceManager, type PresenceState } from './orchestrator/presence';
+import {
+    PresenceManager,
+    getHomeCoords,
+    type PresenceState,
+} from './orchestrator/presence';
+import {
+    loadGeofenceConfig,
+    saveGeofenceConfig,
+} from './orchestrator/presenceConfig';
 import {
     listScenes,
     createScene,
@@ -191,7 +199,25 @@ async function main() {
     const locationHandler = (lat: number, lng: number, accuracy: number) =>
         presence.handleLocation(lat, lng, accuracy);
 
-    const presenceHandler = () => presence.getState();
+    const buildConfigDto = () => {
+        const { lat, lng } = getHomeCoords();
+        const g = loadGeofenceConfig();
+        return {
+            homeLat: lat,
+            homeLng: lng,
+            radiusM: g.radiusM,
+            enabled: g.enabled,
+        };
+    };
+    const presenceHandler = {
+        getState: () => presence.getState(),
+        handleGeofence: (t: string) => presence.handleGeofence(t),
+        getConfig: buildConfigDto,
+        setConfig: (patch: { radiusM?: number; enabled?: boolean }) => {
+            saveGeofenceConfig(patch);
+            return buildConfigDto();
+        },
+    };
 
     const sources: InputSource[] = [new StdinSource(), new HttpSource()];
     for (const source of sources) {
