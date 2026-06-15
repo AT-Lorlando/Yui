@@ -1,4 +1,5 @@
-import './env'; // load env first
+import './bootstrap'; // load .env + settings.json and patch process.env — must be first
+import './env';
 import http from 'http';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
 import { initProactive } from './orchestrator/proactive';

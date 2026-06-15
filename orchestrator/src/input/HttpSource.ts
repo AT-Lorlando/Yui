@@ -6,6 +6,7 @@ import cors from 'cors';
 import * as http from 'http';
 import Logger from '../logger';
 import env from '../env';
+import { getSettings, updateSettings, applyToEnv } from '../settings';
 import {
     InputSource,
     StreamHandler,
@@ -1060,6 +1061,34 @@ export class HttpSource implements InputSource {
         // ── Location & presence ───────────────────────────────────────────────
         // POST /location  — called by the mobile app with GPS coordinates.
         // Returns next_ping_ms so the app knows when to send the next update.
+        app.get('/settings', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            res.json(getSettings());
+        });
+
+        app.put('/settings', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            try {
+                const saved = updateSettings(req.body ?? {});
+                // Apply live: patch process.env + adjust the logger level.
+                // Per-request consumers (LLM model, TTS) pick it up immediately;
+                // module-level constants (presence) take effect on next restart.
+                applyToEnv(saved);
+                (Logger as any).level = saved.logging.level;
+                res.json(saved);
+            } catch (err) {
+                res.status(400).json({
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+        });
+
         app.get('/irrigation/config', (req: any, res: any) => {
             const bearer = req.headers['authorization']?.split(' ')[1];
             if (!this.checkPassword(bearer, req.ip)) {
