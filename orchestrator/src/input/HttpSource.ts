@@ -1032,8 +1032,65 @@ export class HttpSource implements InputSource {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
             res.json({
-                state: presenceHandler ? presenceHandler() : 'unknown',
+                state: presenceHandler ? presenceHandler.getState() : 'unknown',
+                config: presenceHandler ? presenceHandler.getConfig() : null,
             });
+        });
+
+        // ── Presence geofence (arrival from native Android geofence) ──────────
+        app.post('/presence/geofence', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const transition = String(req.body?.transition ?? '');
+            if (transition !== 'enter') {
+                return res
+                    .status(400)
+                    .json({ error: "transition must be 'enter'" });
+            }
+            if (!presenceHandler) {
+                return res.status(503).json({ error: 'presence unavailable' });
+            }
+            const cfg = presenceHandler.getConfig();
+            if (!cfg.enabled) {
+                return res.json({
+                    state: presenceHandler.getState(),
+                    ignored: true,
+                });
+            }
+            const state = presenceHandler.handleGeofence(transition);
+            res.json({ state });
+        });
+
+        app.get('/presence/config', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            res.json(presenceHandler ? presenceHandler.getConfig() : null);
+        });
+
+        app.put('/presence/config', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            if (!presenceHandler) {
+                return res.status(503).json({ error: 'presence unavailable' });
+            }
+            const patch: { radiusM?: number; enabled?: boolean } = {};
+            if (req.body?.radiusM !== undefined) {
+                const r = Number(req.body.radiusM);
+                if (!Number.isFinite(r)) {
+                    return res.status(400).json({ error: 'radiusM invalid' });
+                }
+                patch.radiusM = r;
+            }
+            if (req.body?.enabled !== undefined) {
+                patch.enabled = Boolean(req.body.enabled);
+            }
+            res.json(presenceHandler.setConfig(patch));
         });
 
         // ── Prompts (markdown files in prompts/ + data/prompts.json manifest) ──

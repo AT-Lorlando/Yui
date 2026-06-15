@@ -69,8 +69,24 @@ export interface AutomationsHandler {
     run: (id: string) => Promise<{ success: boolean; error?: string }>;
 }
 
-export type PresenceHandler =
-    () => import('../orchestrator/presence').PresenceState;
+export interface PresenceConfigDto {
+    homeLat: number;
+    homeLng: number;
+    radiusM: number;
+    enabled: boolean;
+}
+
+export interface PresenceHandler {
+    getState: () => import('../orchestrator/presence').PresenceState;
+    handleGeofence: (
+        transition: string,
+    ) => import('../orchestrator/presence').PresenceState;
+    getConfig: () => PresenceConfigDto;
+    setConfig: (patch: {
+        radiusM?: number;
+        enabled?: boolean;
+    }) => PresenceConfigDto;
+}
 
 /** Respawns an MCP server to pick up data/integrations.json edits. */
 export interface IntegrationsHandler {
