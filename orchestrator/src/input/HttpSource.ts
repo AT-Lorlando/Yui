@@ -31,6 +31,10 @@ import {
     writeDataFile,
 } from '../orchestrator/dataFiles';
 import {
+    INTEGRATIONS_CATALOG,
+    expectedDomains,
+} from '../orchestrator/configCatalog';
+import {
     loadStore,
     saveMemory,
     deleteMemory,
@@ -1042,7 +1046,13 @@ export class HttpSource implements InputSource {
         // List files + their manifest policy (layer/enabled/order/domain).
         app.get('/prompts', (req: any, res: any) => {
             if (!promptAuth(req, res)) return;
-            res.json({ files: listPrompts(), manifest: loadManifest() });
+            // domains = the domain prompt slots the orchestrator can load, so
+            // the front can show expected (possibly missing) domain files.
+            res.json({
+                files: listPrompts(),
+                manifest: loadManifest(),
+                domains: expectedDomains(),
+            });
         });
 
         // Create a new prompt file (+ manifest entry).
@@ -1227,8 +1237,12 @@ export class HttpSource implements InputSource {
             if (!this.checkPassword(bearer, req.ip)) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            // Mask any sensitive value that may have been placed here.
-            res.json({ servers: maskIntegrations(loadIntegrations()) });
+            // servers = current values (masked) ; catalog = expected keys per
+            // server so the front can render placeholders for unset infra.
+            res.json({
+                servers: maskIntegrations(loadIntegrations()),
+                catalog: INTEGRATIONS_CATALOG,
+            });
         });
 
         app.put('/integrations', async (req: any, res: any) => {
