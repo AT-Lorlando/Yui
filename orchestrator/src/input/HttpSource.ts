@@ -34,7 +34,15 @@ import {
 } from '../orchestrator/memory';
 import { saveFcmToken } from '../orchestrator/notify';
 import { loadHistory } from '../orchestrator/history';
-import { listPrompts, writePrompt } from '../orchestrator/prompts';
+import {
+    listPrompts,
+    writePrompt,
+    loadManifest,
+    createPrompt,
+    deletePrompt,
+    updatePromptEntry,
+    importPromptFromUrl,
+} from '../orchestrator/prompts';
 import {
     listPresets,
     addPreset,
@@ -1016,21 +1024,94 @@ export class HttpSource implements InputSource {
             });
         });
 
-        // ── Prompts (read markdown files from prompts/) ───────────────────────
-        app.get('/prompts', (req: any, res: any) => {
+        // ── Prompts (markdown files in prompts/ + data/prompts.json manifest) ──
+        const promptAuth = (req: any, res: any): boolean => {
             const bearer = req.headers['authorization']?.split(' ')[1];
             if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
+                res.status(401).json({ error: 'Unauthorized' });
+                return false;
             }
-            res.json(listPrompts());
+            return true;
+        };
+
+        // List files + their manifest policy (layer/enabled/order/domain).
+        app.get('/prompts', (req: any, res: any) => {
+            if (!promptAuth(req, res)) return;
+            res.json({ files: listPrompts(), manifest: loadManifest() });
         });
 
-        // :file may contain slashes (sub-folders) → wildcard param
-        app.put('/prompts/*', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
+        // Create a new prompt file (+ manifest entry).
+        app.post('/prompts', (req: any, res: any) => {
+            if (!promptAuth(req, res)) return;
+            const { file, content, layer, domain, enabled } = req.body ?? {};
+            if (typeof file !== 'string' || typeof content !== 'string') {
+                return res
+                    .status(400)
+                    .json({ error: 'file and content must be strings' });
             }
+            try {
+                const manifest = createPrompt(file, content, {
+                    layer,
+                    domain,
+                    enabled,
+                });
+                res.json({ success: true, manifest });
+            } catch (e: any) {
+                res.status(400).json({ error: e.message });
+            }
+        });
+
+        // Import a prompt from a URL (created or overwritten, disabled by
+        // default so a heavy prompt never silently inflates every request).
+        app.post('/prompts/import', async (req: any, res: any) => {
+            if (!promptAuth(req, res)) return;
+            const { file, url, layer, domain, enabled } = req.body ?? {};
+            if (typeof file !== 'string' || typeof url !== 'string') {
+                return res
+                    .status(400)
+                    .json({ error: 'file and url must be strings' });
+            }
+            try {
+                const manifest = await importPromptFromUrl(file, url, {
+                    layer,
+                    domain,
+                    enabled,
+                });
+                res.json({ success: true, manifest });
+            } catch (e: any) {
+                res.status(400).json({ error: e.message });
+            }
+        });
+
+        // Patch a manifest entry (enabled / order / domain / layer).
+        app.patch('/prompts/manifest/*', (req: any, res: any) => {
+            if (!promptAuth(req, res)) return;
+            try {
+                const manifest = updatePromptEntry(
+                    req.params[0],
+                    req.body ?? {},
+                );
+                res.json({ success: true, manifest });
+            } catch (e: any) {
+                res.status(400).json({ error: e.message });
+            }
+        });
+
+        // Delete a prompt file (+ manifest entry).
+        app.delete('/prompts/*', (req: any, res: any) => {
+            if (!promptAuth(req, res)) return;
+            try {
+                const manifest = deletePrompt(req.params[0]);
+                res.json({ success: true, manifest });
+            } catch (e: any) {
+                res.status(400).json({ error: e.message });
+            }
+        });
+
+        // Overwrite an existing prompt file's content. :file may contain
+        // slashes (sub-folders) → wildcard param.
+        app.put('/prompts/*', (req: any, res: any) => {
+            if (!promptAuth(req, res)) return;
             const file = req.params[0];
             const { content } = req.body ?? {};
             if (typeof content !== 'string') {

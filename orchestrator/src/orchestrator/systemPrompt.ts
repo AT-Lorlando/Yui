@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Logger from '../logger';
+import { loadManifest, resolveCoreFiles, resolveDomainFile } from './prompts';
 
 export interface SystemPromptContext {
     alwaysMemory: string;
@@ -46,61 +47,47 @@ function formatDatetime(): string {
     return `${day} ${date} ${month} ${year}, ${hours}h${minutes}`;
 }
 
-/**
- * Reads all .md files from prompts/ root (alphabetical order).
- * These are always loaded regardless of domain.
- */
-function loadCoreDocs(): string {
-    const promptsDir = path.resolve(process.cwd(), 'prompts');
-    if (!fs.existsSync(promptsDir)) {
-        Logger.warn('prompts/ directory not found — using empty base prompt');
+const PROMPTS_DIR = path.resolve(process.cwd(), 'prompts');
+
+function readPromptFile(file: string): string {
+    try {
+        return fs.readFileSync(path.join(PROMPTS_DIR, file), 'utf-8').trim();
+    } catch (err) {
+        Logger.warn(`Could not read prompt file "${file}": ${err}`);
         return '';
     }
+}
 
-    const files = fs
-        .readdirSync(promptsDir)
-        .filter((f) => f.endsWith('.md'))
-        .sort();
-
-    const parts: string[] = [];
-    for (const file of files) {
-        try {
-            const content = fs
-                .readFileSync(path.join(promptsDir, file), 'utf-8')
-                .trim();
-            if (content) parts.push(content);
-        } catch (err) {
-            Logger.warn(`Could not read prompt file "${file}": ${err}`);
-        }
-    }
-
+/**
+ * Enabled core prompts, in manifest order. These are always loaded regardless
+ * of domain. The manifest (data/prompts.json) decides which files + ordering.
+ */
+function loadCoreDocs(): string {
+    const files = resolveCoreFiles(loadManifest());
+    const parts = files.map(readPromptFile).filter(Boolean);
     if (files.length > 0) Logger.debug(`Core prompts: ${files.join(', ')}`);
     return parts.join('\n\n---\n\n');
 }
 
 /**
- * Reads domain-specific .md files from prompts/domains/ for the active groups.
+ * Domain prompts for the active groups, resolved through the manifest (an
+ * enabled domain entry whose `domain` matches the group name).
  */
 function loadDomainDocs(activeGroups: string[]): string {
     if (activeGroups.length === 0) return '';
-    const domainsDir = path.resolve(process.cwd(), 'prompts', 'domains');
-    if (!fs.existsSync(domainsDir)) return '';
-
+    const entries = loadManifest();
     const parts: string[] = [];
+    const loaded: string[] = [];
     for (const group of activeGroups) {
-        const filePath = path.join(domainsDir, `${group}.md`);
-        try {
-            if (fs.existsSync(filePath)) {
-                const content = fs.readFileSync(filePath, 'utf-8').trim();
-                if (content) parts.push(content);
-            }
-        } catch (err) {
-            Logger.warn(`Could not read domain prompt "${group}.md": ${err}`);
+        const file = resolveDomainFile(entries, group);
+        if (!file) continue;
+        const content = readPromptFile(file);
+        if (content) {
+            parts.push(content);
+            loaded.push(group);
         }
     }
-
-    if (parts.length > 0)
-        Logger.debug(`Domain prompts: ${activeGroups.join(', ')}`);
+    if (loaded.length > 0) Logger.debug(`Domain prompts: ${loaded.join(', ')}`);
     return parts.join('\n\n---\n\n');
 }
 
