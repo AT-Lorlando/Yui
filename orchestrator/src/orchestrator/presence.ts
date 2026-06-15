@@ -74,6 +74,19 @@ function nextPingMs(distanceM: number): number {
     return 15_000; // <300 m  → 15 s
 }
 
+/** Pure decision : un ENTER ne déclenche l'arrivée que si on était parti. */
+export function geofenceShouldTriggerArrival(
+    state: PresenceState,
+    transition: string,
+): boolean {
+    return transition === 'enter' && state === 'away';
+}
+
+/** Coords du domicile (depuis .env) — exposées pour l'endpoint /presence/config. */
+export function getHomeCoords(): { lat: number; lng: number } {
+    return { lat: HOME_LAT, lng: HOME_LNG };
+}
+
 // ── Mikrotik REST API ─────────────────────────────────────────────────────────
 
 /**
@@ -284,6 +297,22 @@ export class PresenceManager {
             distance_m: distanceM,
             next_ping_ms: nextPingMs(distanceM),
         };
+    }
+
+    /**
+     * Appelé sur POST /presence/geofence depuis l'app (geofence natif Android).
+     * ENTER + state === 'away' → arrival. Sinon no-op.
+     */
+    handleGeofence(transition: string): PresenceState {
+        if (geofenceShouldTriggerArrival(this.state, transition)) {
+            Logger.info('[presence] geofence ENTER → triggering arrival');
+            this.triggerArrival();
+        } else {
+            Logger.info(
+                `[presence] geofence ${transition} ignored (state=${this.state})`,
+            );
+        }
+        return this.state;
     }
 
     start(): void {
