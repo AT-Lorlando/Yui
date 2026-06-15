@@ -36,6 +36,18 @@ function run(): void {
     assert.ok(validateConfig({ defaultCooldownMin: -1 }).length > 0);
     assert.ok(validateConfig({ whitelist: 'nope' as any }).length > 0);
 
+    // editable formulation prompts
+    assert.ok(
+        DEFAULT_CONFIG.prompts && DEFAULT_CONFIG.prompts.phrase,
+        'default prompts present',
+    );
+    assert.deepStrictEqual(
+        validateConfig({ prompts: { phrase: 'Reformule.' } }),
+        [],
+    );
+    assert.ok(validateConfig({ prompts: { phrase: 42 as any } }).length > 0);
+    assert.ok(validateConfig({ prompts: 'nope' as any }).length > 0);
+
     // ── saveConfig: merge onto existing + persist + validate ──────────────────
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-proactive-'));
     const file = path.join(dir, 'proactive.json');

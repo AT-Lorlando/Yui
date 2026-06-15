@@ -5,6 +5,13 @@ import Logger from '../../logger';
 
 const CONFIG_FILE = path.resolve(process.cwd(), 'data/proactive.json');
 
+/** System prompt used to turn a watcher's facts into one short spoken line. */
+export const DEFAULT_PHRASE_PROMPT =
+    "Tu es Yui, l'assistante de Jérémy. Reformule ce fait en une phrase orale courte et naturelle, en français, sans aucun markdown. Si ce n'est pas digne d'être signalé, réponds exactement RIEN.";
+/** System prompt used to summarise the daily digest. */
+export const DEFAULT_DIGEST_PROMPT =
+    'Tu es Yui. Résume ces points en un court message oral en français, sans markdown, en une ou deux phrases.';
+
 export const DEFAULT_CONFIG: ProactiveConfig = {
     enabled: false,
     chattiness: 'normal',
@@ -13,6 +20,7 @@ export const DEFAULT_CONFIG: ProactiveConfig = {
     defaultCooldownMin: 30,
     automationGuardWindowMin: 60,
     whitelist: [],
+    prompts: { phrase: DEFAULT_PHRASE_PROMPT, digest: DEFAULT_DIGEST_PROMPT },
 };
 
 export function mergeConfig(raw: unknown): ProactiveConfig {
@@ -63,6 +71,17 @@ export function validateConfig(raw: Partial<ProactiveConfig>): string[] {
     nonNeg(o.automationGuardWindowMin, 'automationGuardWindowMin');
     if (o.whitelist !== undefined && !Array.isArray(o.whitelist))
         e.push('whitelist doit être une liste');
+    if (o.prompts !== undefined) {
+        if (typeof o.prompts !== 'object' || o.prompts === null) {
+            e.push('prompts doit être un objet');
+        } else {
+            for (const k of ['phrase', 'digest'] as const) {
+                const v = (o.prompts as Record<string, unknown>)[k];
+                if (v !== undefined && typeof v !== 'string')
+                    e.push(`prompts.${k} doit être une chaîne`);
+            }
+        }
+    }
     return e;
 }
 

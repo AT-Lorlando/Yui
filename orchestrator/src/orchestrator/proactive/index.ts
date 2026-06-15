@@ -6,7 +6,11 @@ import { DigestBuffer, isDigestDue } from './digest';
 import { isActionBlocked } from './guard';
 import { loadHistory } from '../history';
 import { loadAutomations } from '../automations';
-import { loadConfig } from './config';
+import {
+    loadConfig,
+    DEFAULT_PHRASE_PROMPT,
+    DEFAULT_DIGEST_PROMPT,
+} from './config';
 import { createWeatherWatcher } from './watchers/weather';
 import { createPresenceWatcher } from './watchers/presence';
 import { createCalendarWatcher } from './watchers/calendar';
@@ -90,8 +94,7 @@ export class ProactiveEngine {
     private async phrase(ev: CandidateEvent): Promise<string | null> {
         if (ev.template) return ev.template;
         try {
-            const sys =
-                "Tu es Yui, l'assistante de Jérémy. Reformule ce fait en une phrase orale courte et naturelle, en français, sans aucun markdown. Si ce n'est pas digne d'être signalé, réponds exactement RIEN.";
+            const sys = this.cfg.prompts?.phrase ?? DEFAULT_PHRASE_PROMPT;
             const out = (await this.deps.complete(sys, ev.facts)).trim();
             if (!out || out.toUpperCase() === 'RIEN') return null;
             return out;
@@ -168,8 +171,7 @@ export class ProactiveEngine {
         const facts = events.map((e) => `- ${e.facts}`).join('\n');
         let message: string;
         try {
-            const sys =
-                'Tu es Yui. Résume ces points en un court message oral en français, sans markdown, en une ou deux phrases.';
+            const sys = this.cfg.prompts?.digest ?? DEFAULT_DIGEST_PROMPT;
             message = (await this.deps.complete(sys, facts)).trim() || facts;
         } catch {
             message = facts;

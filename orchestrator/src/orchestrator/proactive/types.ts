@@ -60,6 +60,8 @@ export interface ProactiveConfig {
     defaultCooldownMin: number;
     automationGuardWindowMin: number;
     whitelist: WhitelistAction[];
+    /** Editable system prompts for proactive message formulation. */
+    prompts?: { phrase?: string; digest?: string };
     weather?: WeatherWatcherConfig;
     calendar?: CalendarWatcherConfig;
     mail?: MailWatcherConfig;
