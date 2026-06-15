@@ -142,6 +142,16 @@ export class ProactiveEngine {
         if (this.digestTimer) clearInterval(this.digestTimer);
     }
 
+    /** Re-read config from disk, rebuild watchers, and restart. Used by
+     *  PUT /proactive to apply changes without a full orchestrator restart. */
+    reload(): ProactiveConfig {
+        this.stop();
+        this.cfg = loadConfig();
+        this.setWatchers(buildWatchers(this.cfg, this.deps));
+        this.start();
+        return this.cfg;
+    }
+
     async maybeFlushDigest(): Promise<void> {
         const nowMs = this.now();
         if (
@@ -207,15 +217,19 @@ export class ProactiveEngine {
     }
 }
 
-export function initProactive(deps: ProactiveDeps): ProactiveEngine {
-    const cfg = loadConfig();
-    const engine = new ProactiveEngine(cfg, deps);
+function buildWatchers(cfg: ProactiveConfig, deps: ProactiveDeps): Watcher[] {
     const watchers: Watcher[] = [];
     if (cfg.weather) watchers.push(createWeatherWatcher(cfg.weather, deps));
     watchers.push(createPresenceWatcher(deps));
     if (cfg.calendar) watchers.push(createCalendarWatcher(cfg.calendar, deps));
     if (cfg.mail) watchers.push(createMailWatcher(cfg.mail, deps));
-    engine.setWatchers(watchers);
+    return watchers;
+}
+
+export function initProactive(deps: ProactiveDeps): ProactiveEngine {
+    const cfg = loadConfig();
+    const engine = new ProactiveEngine(cfg, deps);
+    engine.setWatchers(buildWatchers(cfg, deps));
     engine.start();
     return engine;
 }

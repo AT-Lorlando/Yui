@@ -205,6 +205,7 @@ async function main() {
             presenceHandler,
             conversationsHandler,
             { reconnect: (name: string) => orchestrator.reconnectServer(name) },
+            { reload: () => proactive.reload() },
         );
     }
 

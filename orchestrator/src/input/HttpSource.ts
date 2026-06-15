@@ -19,7 +19,9 @@ import {
     PresenceHandler,
     ConversationsHandler,
     IntegrationsHandler,
+    ProactiveHandler,
 } from './InputSource';
+import { loadConfig, saveConfig } from '../orchestrator/proactive/config';
 import {
     loadIntegrations,
     saveIntegrations,
@@ -129,6 +131,7 @@ export class HttpSource implements InputSource {
         presenceHandler?: PresenceHandler,
         conversationsHandler?: ConversationsHandler,
         integrationsHandler?: IntegrationsHandler,
+        proactiveHandler?: ProactiveHandler,
     ): Promise<void> {
         const port = Number(
             process.env.ORCHESTRATOR_PORT ?? process.env.PORT ?? 4000,
@@ -1184,6 +1187,32 @@ export class HttpSource implements InputSource {
                 // module-level constants (presence) take effect on next restart.
                 applyToEnv(saved);
                 (Logger as any).level = saved.logging.level;
+                res.json(saved);
+            } catch (err) {
+                res.status(400).json({
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+        });
+
+        // ── Proactivité (data/proactive.json) ─────────────────────────────────
+        app.get('/proactive', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            res.json(loadConfig());
+        });
+
+        app.put('/proactive', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            try {
+                const saved = saveConfig(req.body ?? {});
+                // Apply live: restart watchers with the new config.
+                proactiveHandler?.reload();
                 res.json(saved);
             } catch (err) {
                 res.status(400).json({

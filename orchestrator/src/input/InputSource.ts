@@ -77,6 +77,11 @@ export interface IntegrationsHandler {
     reconnect: (serverName: string) => Promise<boolean>;
 }
 
+/** Reloads the proactive engine to apply data/proactive.json edits. */
+export interface ProactiveHandler {
+    reload: () => void;
+}
+
 export type LocationHandler = (
     lat: number,
     lng: number,
@@ -121,6 +126,7 @@ export interface InputSource {
         presenceHandler?: PresenceHandler,
         conversationsHandler?: ConversationsHandler,
         integrationsHandler?: IntegrationsHandler,
+        proactiveHandler?: ProactiveHandler,
     ): Promise<void>;
     stop(): Promise<void>;
 }
