@@ -1,5 +1,6 @@
 import * as path from 'path';
 import type { McpServerConfig } from './types';
+import { applyIntegrations, loadIntegrations } from './integrations';
 
 /**
  * Tools that are callable via the HTTP API (e.g. mobile app) but must NOT
@@ -24,7 +25,8 @@ export const LLM_HIDDEN_TOOLS = new Set([
  */
 export function buildServerConfigs(): McpServerConfig[] {
     const cwd = process.cwd();
-    const root = path.basename(cwd) === 'dashboard' ? path.resolve(cwd, '..') : cwd;
+    const root =
+        path.basename(cwd) === 'dashboard' ? path.resolve(cwd, '..') : cwd;
     // MCP servers always run compiled JS — ts-node overhead (~1.5 Go/process) is not acceptable
     // Run `npm run build:packages` once before starting the orchestrator in dev mode
     const mcp = (pkg: string): McpServerConfig => ({
@@ -33,7 +35,7 @@ export function buildServerConfigs(): McpServerConfig[] {
         args: [path.join(root, `packages/${pkg}/dist/index.js`)],
     });
 
-    return [
+    const servers: McpServerConfig[] = [
         mcp('mcp-hue'),
         mcp('mcp-nuki'),
         mcp('mcp-somfy'),
@@ -53,4 +55,7 @@ export function buildServerConfigs(): McpServerConfig[] {
         },
         mcp('mcp-irrigation'),
     ];
+
+    // Inject per-server env overrides from data/integrations.json (family B).
+    return applyIntegrations(servers, loadIntegrations());
 }

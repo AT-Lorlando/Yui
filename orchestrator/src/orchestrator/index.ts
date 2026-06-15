@@ -35,7 +35,7 @@ import {
 
 export type { McpServerConfig, CollectedTool };
 export { buildServerConfigs, LLM_HIDDEN_TOOLS } from './serverConfigs';
-import { LLM_HIDDEN_TOOLS } from './serverConfigs';
+import { LLM_HIDDEN_TOOLS, buildServerConfigs } from './serverConfigs';
 
 /** Max messages kept in the rolling conversation buffer (user + assistant pairs). */
 const HISTORY_MAX = 10;
@@ -184,6 +184,14 @@ export class Orchestrator {
         const transport = new StdioClientTransport({
             command: config.command,
             args: config.args,
+            // Inject integrations.json overrides; they win over the package's
+            // own dotenv load (dotenv never overrides an already-set var).
+            ...(config.env && {
+                env: {
+                    ...(process.env as Record<string, string>),
+                    ...config.env,
+                },
+            }),
         });
 
         const client = new Client(
@@ -213,6 +221,35 @@ export class Orchestrator {
         Logger.info(
             `Connected to "${config.name}" — ${tools.length} tool(s) loaded`,
         );
+    }
+
+    /**
+     * Tear down a single MCP server and respawn it with fresh config (picks up
+     * data/integrations.json edits). Used by PUT /integrations — avoids a full
+     * orchestrator restart. Unknown server name → no-op (returns false).
+     */
+    async reconnectServer(name: string): Promise<boolean> {
+        const fresh = buildServerConfigs().find((s) => s.name === name);
+        if (!fresh) return false;
+
+        const existing = this.clients.get(name);
+        if (existing) {
+            try {
+                await existing.close();
+            } catch (e) {
+                Logger.warn(`reconnectServer: close "${name}" failed — ${e}`);
+            }
+            this.clients.delete(name);
+        }
+        // Drop this server's tools before re-registering them.
+        this.collectedTools = this.collectedTools.filter(
+            (ct) => ct.serverName !== name,
+        );
+        // Keep the in-memory server list in sync for future reconnects.
+        this.servers = this.servers.map((s) => (s.name === name ? fresh : s));
+
+        await this.connectServer(fresh);
+        return true;
     }
 
     // ── MCP tool execution ───────────────────────────────────────────────────

@@ -18,7 +18,13 @@ import {
     AutomationsHandler,
     PresenceHandler,
     ConversationsHandler,
+    IntegrationsHandler,
 } from './InputSource';
+import {
+    loadIntegrations,
+    saveIntegrations,
+    maskIntegrations,
+} from '../orchestrator/integrations';
 import {
     loadStore,
     saveMemory,
@@ -105,6 +111,7 @@ export class HttpSource implements InputSource {
         automationsHandler?: AutomationsHandler,
         presenceHandler?: PresenceHandler,
         conversationsHandler?: ConversationsHandler,
+        integrationsHandler?: IntegrationsHandler,
     ): Promise<void> {
         const port = Number(
             process.env.ORCHESTRATOR_PORT ?? process.env.PORT ?? 4000,
@@ -1082,6 +1089,43 @@ export class HttpSource implements InputSource {
                 applyToEnv(saved);
                 (Logger as any).level = saved.logging.level;
                 res.json(saved);
+            } catch (err) {
+                res.status(400).json({
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+        });
+
+        app.get('/integrations', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            // Mask any sensitive value that may have been placed here.
+            res.json({ servers: maskIntegrations(loadIntegrations()) });
+        });
+
+        app.put('/integrations', async (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            try {
+                const patch = req.body?.servers ?? req.body ?? {};
+                saveIntegrations(patch);
+                // Respawn only the servers touched by this patch.
+                const affected = Object.keys(patch);
+                const reconnected: string[] = [];
+                if (integrationsHandler) {
+                    for (const name of affected) {
+                        if (await integrationsHandler.reconnect(name))
+                            reconnected.push(name);
+                    }
+                }
+                res.json({
+                    servers: maskIntegrations(loadIntegrations()),
+                    reconnected,
+                });
             } catch (err) {
                 res.status(400).json({
                     error: err instanceof Error ? err.message : String(err),

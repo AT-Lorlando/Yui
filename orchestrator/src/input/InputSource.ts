@@ -72,6 +72,11 @@ export interface AutomationsHandler {
 export type PresenceHandler =
     () => import('../orchestrator/presence').PresenceState;
 
+/** Respawns an MCP server to pick up data/integrations.json edits. */
+export interface IntegrationsHandler {
+    reconnect: (serverName: string) => Promise<boolean>;
+}
+
 export type LocationHandler = (
     lat: number,
     lng: number,
@@ -115,6 +120,7 @@ export interface InputSource {
         automationsHandler?: AutomationsHandler,
         presenceHandler?: PresenceHandler,
         conversationsHandler?: ConversationsHandler,
+        integrationsHandler?: IntegrationsHandler,
     ): Promise<void>;
     stop(): Promise<void>;
 }

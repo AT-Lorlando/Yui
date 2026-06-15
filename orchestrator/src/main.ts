@@ -204,6 +204,7 @@ async function main() {
             automationsHandler,
             presenceHandler,
             conversationsHandler,
+            { reconnect: (name: string) => orchestrator.reconnectServer(name) },
         );
     }
 
