@@ -26,6 +26,11 @@ import {
     maskIntegrations,
 } from '../orchestrator/integrations';
 import {
+    listDataFiles,
+    readDataFile,
+    writeDataFile,
+} from '../orchestrator/dataFiles';
+import {
     loadStore,
     saveMemory,
     deleteMemory,
@@ -1174,6 +1179,46 @@ export class HttpSource implements InputSource {
                 res.status(400).json({
                     error: err instanceof Error ? err.message : String(err),
                 });
+            }
+        });
+
+        // ── Raw data/*.json editor (guardrailed) ──────────────────────────────
+        app.get('/data', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            res.json({ files: listDataFiles() });
+        });
+
+        app.get('/data/*', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            try {
+                res.json({ content: readDataFile(req.params[0]) });
+            } catch (e: any) {
+                res.status(400).json({ error: e.message });
+            }
+        });
+
+        app.put('/data/*', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const { content } = req.body ?? {};
+            if (typeof content !== 'string') {
+                return res
+                    .status(400)
+                    .json({ error: 'content must be a string' });
+            }
+            try {
+                writeDataFile(req.params[0], content);
+                res.json({ success: true });
+            } catch (e: any) {
+                res.status(400).json({ error: e.message });
             }
         });
 
