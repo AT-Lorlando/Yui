@@ -10,6 +10,7 @@
 // is enough to repoint a device — no .env edit, no full restart.
 import * as fs from 'fs';
 import * as path from 'path';
+import { dataRoot } from '@yui/shared';
 import type { McpServerConfig } from './types';
 
 export type IntegrationsMap = Record<string, Record<string, string>>;
@@ -72,7 +73,7 @@ function fileFor(dir: string): string {
 
 /** Read integrations.json (missing/invalid → {}). */
 export function loadIntegrations(opts?: { dir?: string }): IntegrationsMap {
-    const file = fileFor(opts?.dir ?? 'data');
+    const file = fileFor(opts?.dir ?? path.join(dataRoot(), 'config'));
     if (!fs.existsSync(file)) return {};
     try {
         const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -105,7 +106,7 @@ export function saveIntegrations(
     const errors = validateIntegrations(patch);
     if (errors.length) throw new Error(errors.join('; '));
 
-    const dir = opts?.dir ?? 'data';
+    const dir = opts?.dir ?? path.join(dataRoot(), 'config');
     const current = loadIntegrations({ dir });
     const next: IntegrationsMap = { ...current };
     for (const [server, entry] of Object.entries(patch)) {
