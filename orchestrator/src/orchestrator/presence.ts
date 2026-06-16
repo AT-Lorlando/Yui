@@ -246,6 +246,26 @@ export class PresenceManager {
 
     start(): void {
         Logger.info('[presence] manager started (geofence-authoritative)');
+        void this.seedState();
+    }
+
+    /**
+     * Détermine l'état courant UNE fois au démarrage via le réseau (le geofence
+     * est edge-triggered et ne donne pas l'état initial). N'émet pas d'event de
+     * règle : seed purement informatif, les transitions restent pilotées par le
+     * geofence.
+     */
+    private async seedState(): Promise<void> {
+        const { present } = await checkPhoneOnNetwork();
+        if (present === null) {
+            Logger.info(
+                '[presence] startup seed skipped (router unreachable) — state=unknown',
+            );
+            return;
+        }
+        const next: PresenceState = present ? 'home' : 'away';
+        Logger.info(`[presence] startup seed → state=${next}`);
+        this.setState(next);
     }
 
     stop(): void {
