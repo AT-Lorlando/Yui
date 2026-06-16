@@ -9,7 +9,12 @@
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env' });
 
+import { migrateDataLayout } from './orchestrator/dataMigration';
 import { initSettings, getSettings, applyToEnv } from './settings';
+
+// Relocate any flat data/ files into shared/ config/ state/ before anything
+// reads them (settings.json now lives in data/config/).
+migrateDataLayout();
 
 initSettings();
 applyToEnv(getSettings());
