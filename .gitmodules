@@ -1,0 +1,4 @@
+[submodule "mobile"]
+	path = mobile
+	url = git@github.com:AT-Lorlando/YuiApp.git
+	branch = main
