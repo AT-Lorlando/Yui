@@ -197,7 +197,7 @@ export function toggleFavorite(id: string): Scene | null {
 
 // ── Runner ────────────────────────────────────────────────────────────────────
 
-type CallTool = (
+export type CallTool = (
     tool: string,
     args: Record<string, unknown>,
 ) => Promise<unknown>;
@@ -505,6 +505,20 @@ async function runActions(
             // Non-fatal: keep running remaining actions
         }
     }
+}
+
+/**
+ * Exécute une liste d'actions de scène hors d'une scène (pour le moteur de règles
+ * présence, bindings, etc.). Réutilise le runner interne : conditions + delays +
+ * dispatch virtuel/MCP, non-fatal par action.
+ */
+export async function runActionList(
+    actions: SceneAction[],
+    label: string,
+    callTool: CallTool,
+    context: SceneContext = {},
+): Promise<void> {
+    await runActions('state', actions, label, callTool, context);
 }
 
 async function runSceneInternal(
