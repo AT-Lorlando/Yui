@@ -4,15 +4,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 import WebSocket from 'ws';
 import Logger from './logger';
+import { dataPath } from '@yui/shared';
 
-const TOKEN_FILE = path.resolve(process.cwd(), 'data/samsung-tv-token.json');
+const TOKEN_FILE = dataPath('samsung-tv-token.json');
 
 // ── WoL ───────────────────────────────────────────────────────────────────────
 
 function sendWol(mac: string, tvIp: string): Promise<void> {
     return new Promise((resolve, reject) => {
         const hex = mac.replace(/[:\-]/g, '');
-        if (hex.length !== 12) { reject(new Error(`Invalid MAC: ${mac}`)); return; }
+        if (hex.length !== 12) {
+            reject(new Error(`Invalid MAC: ${mac}`));
+            return;
+        }
         const macBytes = Buffer.from(hex, 'hex');
         const magic = Buffer.alloc(6 + 16 * 6);
         magic.fill(0xff, 0, 6);
@@ -24,7 +28,8 @@ function sendWol(mac: string, tvIp: string): Promise<void> {
             sock.setBroadcast(true);
             sock.send(magic, 9, broadcast, (err) => {
                 sock.close();
-                if (err) reject(err); else resolve();
+                if (err) reject(err);
+                else resolve();
             });
         });
     });
@@ -35,8 +40,12 @@ function sendWol(mac: string, tvIp: string): Promise<void> {
 function loadToken(): string | null {
     try {
         if (fs.existsSync(TOKEN_FILE))
-            return JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf-8')).token ?? null;
-    } catch { /* ignore */ }
+            return (
+                JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf-8')).token ?? null
+            );
+    } catch {
+        /* ignore */
+    }
     return null;
 }
 
@@ -64,12 +73,19 @@ export class TvController {
                 `http://${this.tvIp}:8001/api/v2/`,
                 { timeout: 2500 },
                 (res) => {
-                    if (res.statusCode !== 200) { res.resume(); resolve(false); return; }
+                    if (res.statusCode !== 200) {
+                        res.resume();
+                        resolve(false);
+                        return;
+                    }
                     let body = '';
-                    res.on('data', (chunk) => { body += chunk; });
+                    res.on('data', (chunk) => {
+                        body += chunk;
+                    });
                     res.on('end', () => {
                         try {
-                            const state = JSON.parse(body)?.device?.PowerState ?? 'on';
+                            const state =
+                                JSON.parse(body)?.device?.PowerState ?? 'on';
                             resolve(state === 'on');
                         } catch {
                             resolve(false);
@@ -78,7 +94,10 @@ export class TvController {
                 },
             );
             req.on('error', () => resolve(false));
-            req.on('timeout', () => { req.destroy(); resolve(false); });
+            req.on('timeout', () => {
+                req.destroy();
+                resolve(false);
+            });
         });
     }
 
@@ -86,25 +105,39 @@ export class TvController {
         if (keys.length === 0) return Promise.resolve();
         return new Promise((resolve, reject) => {
             const appName = Buffer.from('Yui').toString('base64');
-            const token   = loadToken();
-            const url     = `wss://${this.tvIp}:8002/api/v2/channels/samsung.remote.control`
-                          + `?name=${appName}${token ? `&token=${token}` : ''}`;
+            const token = loadToken();
+            const url =
+                `wss://${this.tvIp}:8002/api/v2/channels/samsung.remote.control` +
+                `?name=${appName}${token ? `&token=${token}` : ''}`;
 
             const ws = new WebSocket(url, { rejectUnauthorized: false });
             let done = false;
 
             ws.on('open', async () => {
                 for (const key of keys) {
-                    ws.send(JSON.stringify({
-                        method: 'ms.remote.control',
-                        params: { Cmd: 'Click', DataOfCmd: key, TypeOfRemote: 'SendRemoteKey' },
-                    }));
-                    await new Promise(r => setTimeout(r, msPerKey));
+                    ws.send(
+                        JSON.stringify({
+                            method: 'ms.remote.control',
+                            params: {
+                                Cmd: 'Click',
+                                DataOfCmd: key,
+                                TypeOfRemote: 'SendRemoteKey',
+                            },
+                        }),
+                    );
+                    await new Promise((r) => setTimeout(r, msPerKey));
                 }
                 // Wait for TV to process the last key before closing
-                await new Promise(r => setTimeout(r, 300));
-                if (!done) { done = true; resolve(); }
-                try { ws.close(); } catch { /* ignore */ }
+                await new Promise((r) => setTimeout(r, 300));
+                if (!done) {
+                    done = true;
+                    resolve();
+                }
+                try {
+                    ws.close();
+                } catch {
+                    /* ignore */
+                }
             });
 
             ws.on('message', (data: Buffer) => {
@@ -112,23 +145,37 @@ export class TvController {
                     const d = JSON.parse(data.toString());
                     const t = d?.data?.token;
                     if (t) saveToken(String(t));
-                } catch { /* ignore */ }
+                } catch {
+                    /* ignore */
+                }
             });
 
             ws.on('error', () => {
                 // If we already resolved (keys were sent), ignore connection drops
-                if (!done) { done = true; reject(new Error('TV WebSocket connection failed')); }
+                if (!done) {
+                    done = true;
+                    reject(new Error('TV WebSocket connection failed'));
+                }
             });
 
             // Safety timeout
             setTimeout(() => {
-                if (!done) { done = true; resolve(); try { ws.close(); } catch { /* ignore */ } }
+                if (!done) {
+                    done = true;
+                    resolve();
+                    try {
+                        ws.close();
+                    } catch {
+                        /* ignore */
+                    }
+                }
             }, 8000);
         });
     }
 
     async powerOn(): Promise<string> {
-        if (!this.mac) throw new Error('No MAC address configured — cannot power on TV');
+        if (!this.mac)
+            throw new Error('No MAC address configured — cannot power on TV');
         if (await this.isOn()) {
             await this.sendKeys(['KEY_HDMI3']);
             return 'TV already on — switched to HDMI3.';
@@ -138,9 +185,9 @@ export class TvController {
         // Wait for TV to boot
         const deadline = Date.now() + 30_000;
         while (Date.now() < deadline) {
-            await new Promise(r => setTimeout(r, 3000));
+            await new Promise((r) => setTimeout(r, 3000));
             if (await this.isOn()) {
-                await new Promise(r => setTimeout(r, 1500));
+                await new Promise((r) => setTimeout(r, 1500));
                 await this.sendKeys(['KEY_HDMI3']);
                 return 'TV powered on and set to HDMI3.';
             }
@@ -167,5 +214,7 @@ export class TvController {
         await this.sendKeys(keys);
     }
 
-    async mute(): Promise<void> { await this.sendKeys(['KEY_MUTE']); }
+    async mute(): Promise<void> {
+        await this.sendKeys(['KEY_MUTE']);
+    }
 }

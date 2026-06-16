@@ -2,9 +2,10 @@ import * as broadlink from 'node-broadlink';
 import * as fs from 'fs';
 import * as path from 'path';
 import Logger from './logger';
+import { dataPath } from '@yui/shared';
 
-const CODES_FILE = path.resolve(__dirname, '../../../data/broadlink-codes.json');
-const STATE_FILE = path.resolve(__dirname, '../../../data/amp-state.json');
+const CODES_FILE = dataPath('broadlink-codes.json');
+const STATE_FILE = dataPath('amp-state.json');
 
 type AmpCodes = Record<string, string>;
 
@@ -39,12 +40,17 @@ export class AmpController {
 
         this.connecting = (async () => {
             const devices = await broadlink.discover(3000);
-            const found = devices.find((d: any) => d.host?.address === this.host);
-            if (!found) throw new Error(`Broadlink RM4 Pro not found at ${this.host}`);
+            const found = devices.find(
+                (d: any) => d.host?.address === this.host,
+            );
+            if (!found)
+                throw new Error(`Broadlink RM4 Pro not found at ${this.host}`);
             await found.auth();
             this.device = found;
             Logger.info(`Broadlink connected to ${this.host}`);
-        })().finally(() => { this.connecting = null; });
+        })().finally(() => {
+            this.connecting = null;
+        });
 
         return this.connecting;
     }
