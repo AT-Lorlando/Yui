@@ -2,8 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { ProactiveConfig } from './types';
 import Logger from '../../logger';
+import { dataPath } from '@yui/shared';
 
-const CONFIG_FILE = path.resolve(process.cwd(), 'data/proactive.json');
+const CONFIG_FILE = dataPath('proactive.json');
 
 /** System prompt used to turn a watcher's facts into one short spoken line. */
 export const DEFAULT_PHRASE_PROMPT =

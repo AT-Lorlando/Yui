@@ -2,8 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { CandidateEvent } from './types';
 import { hmToMinutes } from './gates';
+import { dataPath } from '@yui/shared';
 
-const DIGEST_FILE = path.resolve(process.cwd(), 'data/proactive-digest.json');
+const DIGEST_FILE = dataPath('proactive-digest.json');
 
 export class DigestBuffer {
     private events: CandidateEvent[] = [];

@@ -4,8 +4,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { dataPath } from '@yui/shared';
 
-const CONFIG_FILE = path.resolve(process.cwd(), 'data', 'irrigation.json');
+const CONFIG_FILE = dataPath('irrigation.json');
 
 export type Pump = 'A' | 'B';
 export type AmountKey = 'petit' | 'normal' | 'grand';

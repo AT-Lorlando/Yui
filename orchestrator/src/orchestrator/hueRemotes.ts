@@ -2,6 +2,7 @@ import https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import Logger from '../logger';
+import { dataPath } from '@yui/shared';
 import { hueRequest } from './animation/hueV2';
 
 /**
@@ -106,7 +107,7 @@ export interface HueRemotesDeps {
     callTool: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
-const CONFIG_PATH = path.resolve(process.cwd(), 'data/hue-remotes.json');
+const CONFIG_PATH = dataPath('hue-remotes.json');
 
 const buttons = new Map<string, ButtonInfo>();
 const rotaries = new Map<string, RotaryInfo>();

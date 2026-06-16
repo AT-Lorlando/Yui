@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Logger from '../logger';
 import { loadManifest, resolveCoreFiles, resolveDomainFile } from './prompts';
+import { dataPath } from '@yui/shared';
 
 export interface SystemPromptContext {
     alwaysMemory: string;
@@ -96,11 +97,7 @@ function loadDomainDocs(activeGroups: string[]): string {
  * pour les providers de streaming connus. Vide si fichier absent/illisible.
  */
 function loadMediaCatalog(): string {
-    const cacheFile = path.resolve(
-        process.cwd(),
-        'data',
-        'chromecast-content.json',
-    );
+    const cacheFile = dataPath('chromecast-content.json');
     if (!fs.existsSync(cacheFile)) return '';
 
     let cache: Record<string, Record<string, { title: string }>>;

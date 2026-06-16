@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import Logger from '../logger';
+import { dataPath } from '@yui/shared';
 import type { PresenceState } from './presence';
 import type { AnimationEffect, FloatingConfig } from './animation/types';
 import { animationManager } from './animation/animationManager';
@@ -115,7 +116,7 @@ export type CreateSceneInput = Omit<Scene, 'id' | 'createdAt' | 'builtIn'>;
 
 // ── Storage ───────────────────────────────────────────────────────────────────
 
-const SCENES_FILE = path.resolve(process.cwd(), 'data/scenes.json');
+const SCENES_FILE = dataPath('scenes.json');
 
 function ensureDataDir(): void {
     const dir = path.dirname(SCENES_FILE);

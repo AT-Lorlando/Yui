@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AutomationAction } from './automations';
 import Logger from '../logger';
+import { dataPath } from '@yui/shared';
 
 export interface AutomationHistoryEntry {
     id: string;
@@ -11,10 +12,7 @@ export interface AutomationHistoryEntry {
     firedAt: number;
 }
 
-const HISTORY_FILE = path.resolve(
-    process.cwd(),
-    'data/automation-history.json',
-);
+const HISTORY_FILE = dataPath('automation-history.json');
 const MAX_ENTRIES = 100;
 
 export function loadHistory(): AutomationHistoryEntry[] {

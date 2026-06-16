@@ -6,6 +6,7 @@ import { DigestBuffer } from './digest';
 import { Dedup } from './dedup';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
 import type { PresenceState } from '../presence';
+import { dataPath } from '@yui/shared';
 
 const WL = [
     {
@@ -39,11 +40,8 @@ function evt(): CandidateEvent {
 }
 
 async function run(): Promise<void> {
-    const histFile = path.resolve(
-        process.cwd(),
-        'data/automation-history.json',
-    );
-    const autoFile = path.resolve(process.cwd(), 'data/automations.json');
+    const histFile = dataPath('automation-history.json');
+    const autoFile = dataPath('automations.json');
     const histBak = fs.existsSync(histFile)
         ? fs.readFileSync(histFile, 'utf-8')
         : null;
@@ -69,6 +67,8 @@ async function run(): Promise<void> {
 
     try {
         // a. aucune automation conflictuelle → action exécutée
+        fs.mkdirSync(path.dirname(histFile), { recursive: true });
+        fs.mkdirSync(path.dirname(autoFile), { recursive: true });
         fs.writeFileSync(histFile, '[]');
         fs.writeFileSync(autoFile, '[]');
         {
