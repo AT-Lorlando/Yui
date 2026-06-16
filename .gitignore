@@ -11,11 +11,6 @@ stories/*
 # checkout; only the files explicitly re-included below are tracked (these were
 # already versioned before the split). See docs/.../2026-06-16-data-dir-split-design.md
 data/*
-!data/config/
-data/config/*
-!data/config/scenes.json
-!data/config/proactive.json
-!data/config/hue-remotes.json
 assets/my_voice.wav
 **/dist/
 prompts/*
