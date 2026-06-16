@@ -14,6 +14,7 @@ import { SpotifyAuth } from './SpotifyAuth';
 import { SpotifyController } from './SpotifyController';
 import { AmpController } from './AmpController';
 import { SPOTIFY_TOOLS } from './tools';
+import { resolveSpeakerDevice } from './resolveDevice';
 import Logger from './logger';
 
 const DEFAULT_SPEAKER =
@@ -60,20 +61,7 @@ async function playOnSpeaker(
     }
 
     const devices = await spotify.getDevices();
-    const device =
-        // Exact name match (case-insensitive)
-        devices.find(
-            (d) => d.name?.toLowerCase() === speakerName.toLowerCase(),
-        ) ??
-        // Partial name match (e.g. "Sono" matches "Sono - WiiM Ultra")
-        devices.find((d) =>
-            d.name?.toLowerCase().includes(speakerName.toLowerCase()),
-        ) ??
-        // Fallback: single AVR device (WiiM Ultra after rename, before Spotify sync)
-        (() => {
-            const avrs = devices.filter((d) => d.type === 'AVR');
-            return avrs.length === 1 ? avrs[0] : undefined;
-        })();
+    const device = resolveSpeakerDevice(devices, speakerName);
 
     if (!device?.id) {
         const names =
@@ -413,6 +401,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 await amp.ensureOn();
                 return {
                     content: [{ type: 'text', text: 'Ampli Marantz allumé.' }],
+                };
+            }
+
+            case 'transfer_playback_to_speakers': {
+                const target =
+                    ((args as any)?.speaker as string | undefined) ??
+                    DEFAULT_SPEAKER;
+                if (amp) {
+                    await amp
+                        .ensureOn()
+                        .catch((e) => Logger.warn(`Amp power-on failed: ${e}`));
+                }
+                const devices = await spotify.getDevices();
+                const device = resolveSpeakerDevice(devices, target);
+                if (!device?.id) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Aucune cible "${target}" trouvée ou aucune lecture active.`,
+                            },
+                        ],
+                    };
+                }
+                await spotify.transferPlayback(device.id);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `Lecture transférée vers ${device.name}.`,
+                        },
+                    ],
                 };
             }
 

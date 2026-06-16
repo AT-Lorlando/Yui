@@ -207,4 +207,19 @@ export const SPOTIFY_TOOLS = [
             "Allume l'ampli Marantz SR4500 via le Broadlink RM4 Pro (idempotent).",
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
+    {
+        name: 'transfer_playback_to_speakers',
+        description:
+            'Transfère la lecture Spotify active (ex. depuis le téléphone) vers les enceintes du salon (WiiM). No-op si rien ne joue.',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {
+                speaker: {
+                    type: 'string',
+                    description:
+                        'Nom du haut-parleur cible (défaut: WiiM par défaut).',
+                },
+            },
+        },
+    },
 ];
