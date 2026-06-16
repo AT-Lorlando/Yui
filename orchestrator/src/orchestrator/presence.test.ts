@@ -1,11 +1,31 @@
 import assert from 'assert';
-import { geofenceShouldTriggerArrival } from './presence';
+import { geofenceTransition } from './presence';
 
 function run(): void {
-    assert.strictEqual(geofenceShouldTriggerArrival('away', 'enter'), true);
-    assert.strictEqual(geofenceShouldTriggerArrival('home', 'enter'), false);
-    assert.strictEqual(geofenceShouldTriggerArrival('unknown', 'enter'), false);
-    assert.strictEqual(geofenceShouldTriggerArrival('away', 'exit'), false);
+    assert.deepStrictEqual(geofenceTransition('away', 'enter'), {
+        next: 'home',
+        event: 'arrival',
+    });
+    assert.deepStrictEqual(geofenceTransition('unknown', 'enter'), {
+        next: 'home',
+        event: 'arrival',
+    });
+    assert.deepStrictEqual(geofenceTransition('home', 'enter'), {
+        next: 'home',
+        event: null,
+    });
+    assert.deepStrictEqual(geofenceTransition('home', 'exit'), {
+        next: 'away',
+        event: 'departure',
+    });
+    assert.deepStrictEqual(geofenceTransition('away', 'exit'), {
+        next: 'away',
+        event: null,
+    });
+    assert.deepStrictEqual(geofenceTransition('home', 'wat'), {
+        next: 'home',
+        event: null,
+    });
     console.log('All presence geofence tests passed');
 }
 

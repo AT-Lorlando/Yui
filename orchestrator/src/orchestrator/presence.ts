@@ -1,19 +1,16 @@
 /**
  * Presence detection — knows if the user is home or away.
  *
- * Two independent mechanisms:
+ * Geofence-authoritative: state is driven by native Android geofence events
+ * (enter/exit) pushed via POST /presence/geofence.
  *
- *  DEPARTURE (Mikrotik ARP watcher)
- *    Every MAC_POLL_MS the router's ARP table is fetched via its REST API.
- *    If PHONE_MAC has been absent for > AWAY_TIMEOUT_MS → run departure scene.
- *
- *  ARRIVAL (GPS, pushed by the mobile app via POST /location)
- *    handleLocation() computes haversine distance from home coordinates.
- *    If distance < ARRIVAL_RADIUS_M and state is 'away' → run arrival scene.
- *    Returns next_ping_ms so the app adapts its polling frequency.
+ * On arrival, a MAC burst is armed: the Mikrotik ARP table is polled at short
+ * intervals to detect when the phone joins the network (network-join event).
  */
 
 import Logger from '../logger';
+import { createMacBurst, type MacBurst } from './macBurst';
+import { loadPresenceConfig } from './presenceConfig';
 
 // ── Env ───────────────────────────────────────────────────────────────────────
 
@@ -24,62 +21,25 @@ const PHONE_IP = (process.env.PHONE_IP ?? '').trim(); // optional fixed IP for p
 const MIKROTIK_IP = process.env.MIKROTIK_IP ?? '10.0.0.1';
 const MIKROTIK_USER = process.env.MIKROTIK_USER ?? 'api-ro';
 const MIKROTIK_PASS = process.env.MIKROTIK_PASS ?? '';
-const AWAY_TIMEOUT_MS =
-    parseInt(process.env.PRESENCE_AWAY_TIMEOUT_MIN ?? '15') * 60_000;
-const ARRIVAL_RADIUS_M = parseInt(
-    process.env.PRESENCE_ARRIVAL_RADIUS_M ?? '200',
-);
-const MAC_POLL_MS = parseInt(process.env.PRESENCE_MAC_POLL_MS ?? '120000'); // 2 min
-
-// Scene IDs to trigger directly — no LLM involved
-const DEPARTURE_SCENE_ID = process.env.PRESENCE_DEPARTURE_SCENE ?? '';
-const ARRIVAL_SCENE_ID = process.env.PRESENCE_ARRIVAL_SCENE ?? '';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type PresenceState = 'home' | 'away' | 'unknown';
 
-export interface LocationResponse {
-    state: PresenceState;
-    distance_m: number;
-    next_ping_ms: number;
-}
+export type PresenceEventType = 'arrival' | 'departure' | 'network-join';
 
-// ── Haversine ─────────────────────────────────────────────────────────────────
+// ── Pure functions ─────────────────────────────────────────────────────────────
 
-function haversine(
-    lat1: number,
-    lng1: number,
-    lat2: number,
-    lng2: number,
-): number {
-    const R = 6_371_000;
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lng2 - lng1) * Math.PI) / 180;
-    const a =
-        Math.sin(Δφ / 2) ** 2 +
-        Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-// ── Smart polling intervals ───────────────────────────────────────────────────
-
-function nextPingMs(distanceM: number): number {
-    if (distanceM > 50_000) return 10 * 60_000; // >50 km  → 10 min
-    if (distanceM > 5_000) return 5 * 60_000; // >5 km   → 5 min
-    if (distanceM > 1_000) return 2 * 60_000; // >1 km   → 2 min
-    if (distanceM > 300) return 30_000; // >300 m  → 30 s
-    return 15_000; // <300 m  → 15 s
-}
-
-/** Pure decision : un ENTER ne déclenche l'arrivée que si on était parti. */
-export function geofenceShouldTriggerArrival(
+/** Pure : transition d'état geofence (dé-dupliquée) + event émis. */
+export function geofenceTransition(
     state: PresenceState,
     transition: string,
-): boolean {
-    return transition === 'enter' && state === 'away';
+): { next: PresenceState; event: PresenceEventType | null } {
+    if (transition === 'enter' && state !== 'home')
+        return { next: 'home', event: 'arrival' };
+    if (transition === 'exit' && state !== 'away')
+        return { next: 'away', event: 'departure' };
+    return { next: state, event: null };
 }
 
 /** Coords du domicile (depuis .env) — exposées pour l'endpoint /presence/config. */
@@ -90,20 +50,9 @@ export function getHomeCoords(): { lat: number; lng: number } {
 // ── Mikrotik REST API ─────────────────────────────────────────────────────────
 
 /**
- * Check if the phone is on the network via Mikrotik ARP.
- *
- * If PHONE_IP is set (fixed IP): query that specific entry and check
- * mac-address matches + status is "reachable". This avoids false positives
- * from stale ARP entries that can linger with the same MAC on old IPs.
- *
- * If PHONE_IP is not set: scan the full ARP table for the MAC (legacy).
- *
- * Returns true/false on success, null if the router is unreachable.
- */
-/**
  * Parses Mikrotik duration strings like "23m1s", "1h2m3s", "45s" → milliseconds.
  */
-function parseMikrotikDuration(s: string): number {
+export function parseMikrotikDuration(s: string): number {
     let ms = 0;
     const d = s.match(/(\d+)d/);
     if (d) ms += parseInt(d[1]) * 86_400_000;
@@ -128,12 +77,11 @@ interface NetworkCheckResult {
  *   - Queries DHCP lease for stable `last-seen` timestamp (survives WiFi sleep)
  *   - Queries ARP for real-time `reachable` status
  *   - present = true if DHCP lease is bound OR ARP is reachable
- *   - lastSeenAt = computed from DHCP last-seen (authoritative) or Date.now() if ARP reachable
  *
  * Using DHCP last-seen prevents the noisy "absent 2min / found / absent 2min" log
  * pattern caused by Android WiFi power-saving waking the radio briefly.
  */
-async function checkPhoneOnNetwork(): Promise<NetworkCheckResult> {
+export async function checkPhoneOnNetwork(): Promise<NetworkCheckResult> {
     const auth = Buffer.from(`${MIKROTIK_USER}:${MIKROTIK_PASS}`).toString(
         'base64',
     );
@@ -186,9 +134,6 @@ async function checkPhoneOnNetwork(): Promise<NetworkCheckResult> {
             }
 
             // present = DHCP bound OR ARP reachable
-            // DHCP handles sleep mode (phone stops responding to ARP but lease stays bound)
-            // ARP handles the case where DHCP hasn't expired yet after true departure
-            //   → departure is caught by the 15min absence timeout, not by DHCP expiry
             const present = dhcpBound || arpReachable;
 
             Logger.debug(
@@ -228,16 +173,21 @@ async function checkPhoneOnNetwork(): Promise<NetworkCheckResult> {
 
 export class PresenceManager {
     private state: PresenceState = 'unknown';
-    private lastSeenOnNetwork: number | null = null;
-    private macWatcherTimer: ReturnType<typeof setInterval> | null = null;
-    private _onChange:
-        | ((prev: PresenceState, next: PresenceState) => void)
-        | null = null;
+    private _onChange: ((p: PresenceState, n: PresenceState) => void) | null =
+        null;
+    private _onEvent: ((e: PresenceEventType) => void) | null = null;
+    private burst: MacBurst | null = null;
 
-    constructor(private readonly runScene: (id: string) => Promise<unknown>) {}
-
-    onChange(cb: (prev: PresenceState, next: PresenceState) => void): void {
+    onChange(cb: (p: PresenceState, n: PresenceState) => void): void {
         this._onChange = cb;
+    }
+
+    onEvent(cb: (e: PresenceEventType) => void): void {
+        this._onEvent = cb;
+    }
+
+    getState(): PresenceState {
+        return this.state;
     }
 
     private setState(next: PresenceState): void {
@@ -247,185 +197,58 @@ export class PresenceManager {
         if (this._onChange) {
             try {
                 this._onChange(prev, next);
-            } catch (err) {
-                Logger.warn(`presence onChange handler failed: ${err}`);
+            } catch (e) {
+                Logger.warn(`presence onChange failed: ${e}`);
             }
         }
     }
 
-    getState(): PresenceState {
-        return this.state;
+    private emit(event: PresenceEventType): void {
+        if (this._onEvent) {
+            try {
+                this._onEvent(event);
+            } catch (e) {
+                Logger.warn(`presence onEvent failed: ${e}`);
+            }
+        }
     }
 
-    /**
-     * Called on every POST /location from the mobile app.
-     * Checks arrival condition and returns next_ping_ms for adaptive polling.
-     */
-    handleLocation(
-        lat: number,
-        lng: number,
-        _accuracy: number,
-    ): LocationResponse {
-        if (!HOME_LAT || !HOME_LNG) {
-            Logger.warn('Presence: HOME_LAT / HOME_LNG not configured');
-            return {
-                state: this.state,
-                distance_m: -1,
-                next_ping_ms: 5 * 60_000,
-            };
-        }
-
-        const distanceM = Math.round(haversine(lat, lng, HOME_LAT, HOME_LNG));
-        Logger.info(
-            `[presence] GPS update: ${distanceM}m from home` +
-                ` (radius=${ARRIVAL_RADIUS_M}m, state=${this.state})`,
-        );
-
-        if (distanceM <= ARRIVAL_RADIUS_M && this.state === 'away') {
-            Logger.info(
-                `[presence] Within arrival radius → triggering arrival scene`,
-            );
-            this.triggerArrival();
-        } else if (distanceM <= ARRIVAL_RADIUS_M) {
-            Logger.info(
-                `[presence] Within radius but state=${this.state} — no scene triggered`,
-            );
-        }
-
-        return {
-            state: this.state,
-            distance_m: distanceM,
-            next_ping_ms: nextPingMs(distanceM),
-        };
-    }
-
-    /**
-     * Appelé sur POST /presence/geofence depuis l'app (geofence natif Android).
-     * ENTER + state === 'away' → arrival. Sinon no-op.
-     */
+    /** POST /presence/geofence : enter|exit pilotent l'état + events. */
     handleGeofence(transition: string): PresenceState {
-        if (geofenceShouldTriggerArrival(this.state, transition)) {
-            Logger.info('[presence] geofence ENTER → triggering arrival');
-            this.triggerArrival();
-        } else {
+        const { next, event } = geofenceTransition(this.state, transition);
+        if (event) {
             Logger.info(
+                `[presence] geofence ${transition} → ${next} (event=${event})`,
+            );
+            this.setState(next);
+            if (event === 'arrival') this.armBurst();
+            if (event === 'departure') this.burst?.cancel();
+            this.emit(event);
+        } else {
+            Logger.debug(
                 `[presence] geofence ${transition} ignored (state=${this.state})`,
             );
         }
         return this.state;
     }
 
+    private armBurst(): void {
+        this.burst?.cancel();
+        const cfg = loadPresenceConfig().mac;
+        this.burst = createMacBurst({
+            intervalMs: cfg.burstIntervalMs,
+            windowMs: cfg.burstWindowMs,
+            poll: async () => (await checkPhoneOnNetwork()).present,
+            onJoin: () => this.emit('network-join'),
+        });
+        this.burst.start();
+    }
+
     start(): void {
-        if (!PHONE_MAC) {
-            Logger.warn(
-                'Presence: PHONE_MAC not set — departure detection disabled',
-            );
-            return;
-        }
-        if (!MIKROTIK_PASS) {
-            Logger.warn(
-                'Presence: MIKROTIK_PASS not set — departure detection disabled',
-            );
-            return;
-        }
-        Logger.info(
-            `Presence: MAC watcher started (router=${MIKROTIK_IP}, timeout=${
-                AWAY_TIMEOUT_MS / 60_000
-            } min)`,
-        );
-        this.macWatcherTimer = setInterval(() => this.checkMac(), MAC_POLL_MS);
-        this.checkMac();
+        Logger.info('[presence] manager started (geofence-authoritative)');
     }
 
     stop(): void {
-        if (this.macWatcherTimer) {
-            clearInterval(this.macWatcherTimer);
-            this.macWatcherTimer = null;
-        }
-    }
-
-    // ── Private ───────────────────────────────────────────────────────────────
-
-    private async checkMac(): Promise<void> {
-        const { present } = await checkPhoneOnNetwork();
-
-        if (present === null) {
-            Logger.warn('[presence] MAC check skipped (router unreachable)');
-            return;
-        }
-
-        if (present) {
-            // ARP confirmed the phone is actively reachable right now
-            this.lastSeenOnNetwork = Date.now();
-            if (this.state !== 'home') {
-                Logger.info(
-                    `[presence] Phone on network → state=home (was ${this.state})`,
-                );
-                this.setState('home');
-            }
-            return;
-        }
-
-        // Phone not found and router responded
-        if (this.lastSeenOnNetwork === null) {
-            Logger.info(
-                `[presence] Phone not found on first check → state=away`,
-            );
-            this.setState('away');
-            return;
-        }
-
-        const absentMs = Date.now() - this.lastSeenOnNetwork;
-        const absentMin = Math.round(absentMs / 60_000);
-        // Only log at INFO when absence is long enough to be meaningful
-        if (absentMs > 5 * 60_000) {
-            Logger.info(
-                `[presence] Phone absent for ${absentMin}min (timeout=${
-                    AWAY_TIMEOUT_MS / 60_000
-                }min, state=${this.state})`,
-            );
-        } else {
-            Logger.debug(
-                `[presence] Phone absent for ${absentMin}min (WiFi sleep likely)`,
-            );
-        }
-
-        if (absentMs > AWAY_TIMEOUT_MS && this.state !== 'away') {
-            Logger.info(
-                `[presence] Timeout reached → triggering departure scene`,
-            );
-            this.triggerDeparture();
-        }
-    }
-
-    private triggerDeparture(): void {
-        this.setState('away');
-        if (!DEPARTURE_SCENE_ID) {
-            Logger.warn(
-                'Presence: departure detected but PRESENCE_DEPARTURE_SCENE not set',
-            );
-            return;
-        }
-        Logger.info(
-            `Presence: DEPARTURE → running scene "${DEPARTURE_SCENE_ID}"`,
-        );
-        this.runScene(DEPARTURE_SCENE_ID).catch((e) =>
-            Logger.error(`Presence departure scene error: ${e}`),
-        );
-    }
-
-    private triggerArrival(): void {
-        this.setState('home');
-        this.lastSeenOnNetwork = Date.now();
-        if (!ARRIVAL_SCENE_ID) {
-            Logger.warn(
-                'Presence: arrival detected but PRESENCE_ARRIVAL_SCENE not set',
-            );
-            return;
-        }
-        Logger.info(`Presence: ARRIVAL → running scene "${ARRIVAL_SCENE_ID}"`);
-        this.runScene(ARRIVAL_SCENE_ID).catch((e) =>
-            Logger.error(`Presence arrival scene error: ${e}`),
-        );
+        this.burst?.cancel();
     }
 }
