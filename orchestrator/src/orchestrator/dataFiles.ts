@@ -12,12 +12,6 @@ import * as path from 'path';
 
 export type DataKind = 'secret' | 'state' | 'editable';
 
-export interface DataFileInfo {
-    name: string;
-    size: number;
-    kind: DataKind;
-}
-
 const SECRET_NAME_RE =
     /(token|secret|credential|service-account|firebase|fcm)/i;
 const SECRET_CONTENT_RE =
@@ -40,68 +34,67 @@ export function classifyDataFile(name: string, content?: string): DataKind {
     return 'editable';
 }
 
-/** Resolve a caller path within data/, enforce .json and no escape. */
-function resolveDataPath(dir: string, file: string): string {
-    if (!file.endsWith('.json'))
-        throw new Error('Only .json files are allowed');
-    const root = path.resolve(dir);
-    const resolved = path.resolve(root, file);
-    const rel = path.relative(root, resolved);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) {
-        throw new Error('Path escapes data/ directory');
-    }
-    return resolved;
+import { dataPath, dataRoot, type DataCategory } from '@yui/shared';
+
+export interface DataFileInfo {
+    name: string;
+    size: number;
+    kind: DataKind;
+    category: DataCategory;
 }
 
-export function listDataFiles(opts?: { dir?: string }): DataFileInfo[] {
-    const dir = path.resolve(opts?.dir ?? 'data');
-    if (!fs.existsSync(dir)) return [];
-    return fs
-        .readdirSync(dir)
-        .filter((f) => f.endsWith('.json'))
-        .map((name) => {
+const CATEGORIES: DataCategory[] = ['shared', 'config', 'state'];
+
+/** Reject anything that isn't a bare <name>.json basename. */
+function resolveDataFile(name: string): string {
+    if (!name.endsWith('.json'))
+        throw new Error('Only .json files are allowed');
+    if (name.includes('/') || name.includes('\\') || name.includes('..'))
+        throw new Error('Invalid file name');
+    return dataPath(name);
+}
+
+export function listDataFiles(): DataFileInfo[] {
+    const root = dataRoot();
+    const out: DataFileInfo[] = [];
+    for (const category of CATEGORIES) {
+        const dir = path.join(root, category);
+        if (!fs.existsSync(dir)) continue;
+        for (const name of fs.readdirSync(dir)) {
+            if (!name.endsWith('.json')) continue;
             const full = path.join(dir, name);
             const stat = fs.statSync(full);
-            // Read content only to classify; secrets are never returned here.
             let content: string | undefined;
             try {
                 content = fs.readFileSync(full, 'utf-8');
             } catch {
                 content = undefined;
             }
-            return {
+            out.push({
                 name,
                 size: stat.size,
                 kind: classifyDataFile(name, content),
-            };
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
+                category,
+            });
+        }
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Read a file's content. Secrets are refused. */
-export function readDataFile(file: string, opts?: { dir?: string }): string {
-    const dir = opts?.dir ?? 'data';
-    const resolved = resolveDataPath(dir, file);
+export function readDataFile(name: string): string {
+    const resolved = resolveDataFile(name);
     if (!fs.existsSync(resolved)) throw new Error('File not found');
     const content = fs.readFileSync(resolved, 'utf-8');
-    if (classifyDataFile(path.basename(file), content) === 'secret') {
+    if (classifyDataFile(name, content) === 'secret') {
         throw new Error('This file is a secret and cannot be viewed');
     }
     return content;
 }
 
 /** Overwrite an editable file. Validates JSON; refuses secret/state files. */
-export function writeDataFile(
-    file: string,
-    content: string,
-    opts?: { dir?: string },
-): void {
-    const dir = opts?.dir ?? 'data';
-    const resolved = resolveDataPath(dir, file);
-
-    const name = path.basename(file);
-    // Classify against the EXISTING file's content (so a secret can't be
-    // unlocked by sending benign content), falling back to the new content.
+export function writeDataFile(name: string, content: string): void {
+    const resolved = resolveDataFile(name);
     let existing: string | undefined;
     try {
         existing = fs.readFileSync(resolved, 'utf-8');
@@ -113,11 +106,11 @@ export function writeDataFile(
     if (kind === 'state') {
         throw new Error('This file is runtime state and is read-only');
     }
-
     try {
         JSON.parse(content);
     } catch {
         throw new Error('Content is not valid JSON');
     }
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
     fs.writeFileSync(resolved, content, 'utf-8');
 }

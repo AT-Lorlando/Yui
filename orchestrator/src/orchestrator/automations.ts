@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import cron from 'node-cron';
 import Logger from '../logger';
 import { appendToHistory } from './history';
+import { dataPath } from '@yui/shared';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -34,8 +35,8 @@ export type CreateAutomationInput = Omit<Automation, 'id' | 'createdAt'>;
 
 // ── Storage ────────────────────────────────────────────────────────────────────
 
-const AUTOMATIONS_FILE = path.resolve(process.cwd(), 'data/automations.json');
-const SCHEDULES_FILE = path.resolve(process.cwd(), 'data/schedules.json');
+const AUTOMATIONS_FILE = dataPath('automations.json');
+const SCHEDULES_FILE = dataPath('schedules.json');
 
 function ensureDataDir(): void {
     const dir = path.dirname(AUTOMATIONS_FILE);

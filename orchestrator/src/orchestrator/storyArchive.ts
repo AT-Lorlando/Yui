@@ -3,9 +3,10 @@ import * as path from 'path';
 import OpenAI from 'openai';
 import { env } from '../env';
 import Logger from '../logger';
+import { dataPath } from '@yui/shared';
 import { StoryEntry } from './story';
 
-let INDEX_FILE = path.resolve(process.cwd(), 'data/story-index.json');
+let INDEX_FILE = dataPath('story-index.json');
 
 /** Test-only: redirige l'index vers un fichier temporaire. */
 export function _setIndexFileForTests(file: string): void {

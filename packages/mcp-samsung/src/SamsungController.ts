@@ -3,8 +3,9 @@ import dgram from 'dgram';
 import * as fs from 'fs';
 import * as path from 'path';
 import Logger from './logger';
+import { dataPath } from '@yui/shared';
 
-const TOKEN_FILE = path.resolve(process.cwd(), 'data/samsung-tv-token.json');
+const TOKEN_FILE = dataPath('samsung-tv-token.json');
 
 export interface TvStatus {
     power: 'on' | 'off';
@@ -16,7 +17,10 @@ export interface TvStatus {
 function sendWol(mac: string, tvIp: string): Promise<void> {
     return new Promise((resolve, reject) => {
         const hex = mac.replace(/[:\-]/g, '');
-        if (hex.length !== 12) { reject(new Error(`Invalid MAC: ${mac}`)); return; }
+        if (hex.length !== 12) {
+            reject(new Error(`Invalid MAC: ${mac}`));
+            return;
+        }
 
         const macBytes = Buffer.from(hex, 'hex');
         const magic = Buffer.alloc(6 + 16 * 6);
@@ -30,7 +34,8 @@ function sendWol(mac: string, tvIp: string): Promise<void> {
             sock.setBroadcast(true);
             sock.send(magic, 9, broadcast, (err) => {
                 sock.close();
-                if (err) reject(err); else resolve();
+                if (err) reject(err);
+                else resolve();
             });
         });
     });
@@ -41,8 +46,12 @@ function sendWol(mac: string, tvIp: string): Promise<void> {
 function loadToken(): string | null {
     try {
         if (fs.existsSync(TOKEN_FILE))
-            return JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf-8')).token ?? null;
-    } catch { /* ignore */ }
+            return (
+                JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf-8')).token ?? null
+            );
+    } catch {
+        /* ignore */
+    }
     return null;
 }
 
@@ -59,8 +68,8 @@ const INPUT_KEY_MAP: Record<string, string> = {
     HDMI1: 'KEY_HDMI1',
     HDMI2: 'KEY_HDMI2',
     HDMI3: 'KEY_HDMI3',
-    TV:    'KEY_TV',
-    AV:    'KEY_AV',
+    TV: 'KEY_TV',
+    AV: 'KEY_AV',
 };
 
 // ── Controller ────────────────────────────────────────────────────────────────
@@ -80,10 +89,16 @@ export class SamsungController {
             const req = http.get(
                 `http://${this.tvIp}:8001/api/v2/`,
                 { timeout: 2500 },
-                (res) => { resolve(res.statusCode === 200); res.resume(); },
+                (res) => {
+                    resolve(res.statusCode === 200);
+                    res.resume();
+                },
             );
             req.on('error', () => resolve(false));
-            req.on('timeout', () => { req.destroy(); resolve(false); });
+            req.on('timeout', () => {
+                req.destroy();
+                resolve(false);
+            });
         });
     }
 
@@ -97,9 +112,10 @@ export class SamsungController {
         if (keys.length === 0) return Promise.resolve();
         return new Promise((resolve, reject) => {
             const appName = Buffer.from('Yui').toString('base64');
-            const token   = loadToken();
-            const url     = `ws://${this.tvIp}:8001/api/v2/channels/samsung.remote.control`
-                          + `?name=${appName}${token ? `&token=${token}` : ''}`;
+            const token = loadToken();
+            const url =
+                `ws://${this.tvIp}:8001/api/v2/channels/samsung.remote.control` +
+                `?name=${appName}${token ? `&token=${token}` : ''}`;
 
             const ws = new WebSocket(url);
             let done = false;
@@ -107,21 +123,38 @@ export class SamsungController {
 
             // Abort if TV doesn't respond within 8 s
             const timeout = setTimeout(() => {
-                if (!done) { done = true; ws.close(); reject(new Error('Samsung WS connect timeout')); }
+                if (!done) {
+                    done = true;
+                    ws.close();
+                    reject(new Error('Samsung WS connect timeout'));
+                }
             }, 8_000);
 
             ws.addEventListener('open', async () => {
                 clearTimeout(timeout);
                 for (const key of keys) {
-                    ws.send(JSON.stringify({
-                        method: 'ms.remote.control',
-                        params: { Cmd: 'Click', DataOfCmd: key, TypeOfRemote: 'SendRemoteKey' },
-                    }));
-                    await new Promise(r => setTimeout(r, 80));
+                    ws.send(
+                        JSON.stringify({
+                            method: 'ms.remote.control',
+                            params: {
+                                Cmd: 'Click',
+                                DataOfCmd: key,
+                                TypeOfRemote: 'SendRemoteKey',
+                            },
+                        }),
+                    );
+                    await new Promise((r) => setTimeout(r, 80));
                 }
                 keySent = true;
-                if (!done) { done = true; resolve(); }
-                try { ws.close(); } catch { /* ignore */ }
+                if (!done) {
+                    done = true;
+                    resolve();
+                }
+                try {
+                    ws.close();
+                } catch {
+                    /* ignore */
+                }
             });
 
             ws.addEventListener('message', (e: MessageEvent) => {
@@ -129,15 +162,26 @@ export class SamsungController {
                     const data = JSON.parse(e.data as string);
                     const t = data?.data?.token;
                     if (t) saveToken(String(t));
-                } catch { /* ignore */ }
+                } catch {
+                    /* ignore */
+                }
             });
 
             ws.addEventListener('error', () => {
                 clearTimeout(timeout);
                 // If keys were already sent, the TV likely dropped the connection
                 // after processing (e.g. power-off) — treat as success
-                if (keySent) { if (!done) { done = true; resolve(); } return; }
-                if (!done) { done = true; reject(new Error('Samsung WebSocket error')); }
+                if (keySent) {
+                    if (!done) {
+                        done = true;
+                        resolve();
+                    }
+                    return;
+                }
+                if (!done) {
+                    done = true;
+                    reject(new Error('Samsung WebSocket error'));
+                }
             });
         });
     }
@@ -173,9 +217,9 @@ export class SamsungController {
 
         const deadline = Date.now() + 30_000;
         while (Date.now() < deadline) {
-            await new Promise(r => setTimeout(r, 3000));
+            await new Promise((r) => setTimeout(r, 3000));
             if (await this.isOn()) {
-                await new Promise(r => setTimeout(r, 1500)); // let WS server start
+                await new Promise((r) => setTimeout(r, 1500)); // let WS server start
                 await this.sendKeys(['KEY_HDMI3']);
                 return 'TV powered on and switched to Chromecast (HDMI3).';
             }
@@ -196,12 +240,17 @@ export class SamsungController {
         await this.sendKeys(keys);
     }
 
-    async mute(): Promise<void>   { await this.sendKeys(['KEY_MUTE']); }
-    async unmute(): Promise<void> { await this.sendKeys(['KEY_MUTE']); }
+    async mute(): Promise<void> {
+        await this.sendKeys(['KEY_MUTE']);
+    }
+    async unmute(): Promise<void> {
+        await this.sendKeys(['KEY_MUTE']);
+    }
 
     async setInputSource(source: string): Promise<void> {
-        const key = INPUT_KEY_MAP[source.toUpperCase()]
-                 ?? `KEY_${source.toUpperCase()}`;
+        const key =
+            INPUT_KEY_MAP[source.toUpperCase()] ??
+            `KEY_${source.toUpperCase()}`;
         await this.sendKeys([key]);
     }
 
@@ -220,7 +269,10 @@ export class SamsungController {
                     },
                     timeout: 5000,
                 },
-                (res) => { res.resume(); resolve(); },
+                (res) => {
+                    res.resume();
+                    resolve();
+                },
             );
             req.on('error', reject);
             req.write(body);
@@ -237,7 +289,7 @@ export class SamsungController {
             { id: 'HDMI1', name: 'HDMI 1' },
             { id: 'HDMI2', name: 'HDMI 2' },
             { id: 'HDMI3', name: 'HDMI 3 (Chromecast)' },
-            { id: 'TV',    name: 'TV' },
+            { id: 'TV', name: 'TV' },
         ];
     }
 }

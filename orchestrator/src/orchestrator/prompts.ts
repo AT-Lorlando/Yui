@@ -1,8 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { dataPath } from '@yui/shared';
 
 const PROMPTS_ROOT = path.resolve(process.cwd(), 'prompts');
-const MANIFEST = path.resolve(process.cwd(), 'data', 'prompts.json');
+const MANIFEST = dataPath('prompts.json');
 
 export interface PromptFile {
     file: string; // relative path within prompts/, e.g. "00-personality.md" or "domains/domotique.md"

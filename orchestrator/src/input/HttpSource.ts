@@ -7,6 +7,7 @@ import * as http from 'http';
 import Logger from '../logger';
 import env from '../env';
 import { getSettings, updateSettings, applyToEnv } from '../settings';
+import { dataPath } from '@yui/shared';
 import {
     InputSource,
     StreamHandler,
@@ -966,7 +967,7 @@ export class HttpSource implements InputSource {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
             try {
-                const timersFile = path.join(process.cwd(), 'data/timers.json');
+                const timersFile = dataPath('timers.json');
                 const raw = fs.existsSync(timersFile)
                     ? (JSON.parse(fs.readFileSync(timersFile, 'utf-8')) as {
                           id: string;

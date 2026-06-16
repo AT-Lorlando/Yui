@@ -2,15 +2,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import Logger from './logger';
+import { dataPath } from '@yui/shared';
 
-const TIMERS_FILE = path.resolve(process.cwd(), 'data/timers.json');
+const TIMERS_FILE = dataPath('timers.json');
 
 export interface Timer {
     id: string;
     label: string;
     duration_seconds: number;
-    started_at: number;   // ms
-    fires_at: number;     // ms
+    started_at: number; // ms
+    fires_at: number; // ms
     room?: string;
 }
 
@@ -62,23 +63,33 @@ async function blinkRoom(roomName: string): Promise<void> {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ alert: 'lselect' }),
         });
-        Logger.info(`Blink triggered on group "${groups[groupId].name}" (${groupId})`);
+        Logger.info(
+            `Blink triggered on group "${groups[groupId].name}" (${groupId})`,
+        );
     } catch (err) {
         Logger.error(`Hue blink failed: ${err}`);
     }
 }
 
 // Base URL where sonneries are served by the orchestrator (e.g. http://10.0.0.101:3000/sonneries)
-const RINGTONE_BASE_URL = (process.env.RINGTONE_BASE_URL ?? 'http://localhost:3000/ringtones').replace(/\/$/, '');
+const RINGTONE_BASE_URL = (
+    process.env.RINGTONE_BASE_URL ?? 'http://localhost:3000/ringtones'
+).replace(/\/$/, '');
 // Local path to ringtones directory — used to pick a random file
-const RINGTONE_DIR = path.resolve(process.cwd(), process.env.RINGTONE_DIR ?? 'assets/ringtones');
+const RINGTONE_DIR = path.resolve(
+    process.cwd(),
+    process.env.RINGTONE_DIR ?? 'assets/ringtones',
+);
 // Orchestrator chime endpoint — receives { url } and casts it
-const CHIME_ENDPOINT = process.env.CHIME_ENDPOINT ?? 'http://localhost:3000/chime';
+const CHIME_ENDPOINT =
+    process.env.CHIME_ENDPOINT ?? 'http://localhost:3000/chime';
 
 async function castRingtone(): Promise<void> {
     let files: string[] = [];
     try {
-        files = fs.readdirSync(RINGTONE_DIR).filter((f) => /\.(mp3|wav|ogg|flac)$/i.test(f));
+        files = fs
+            .readdirSync(RINGTONE_DIR)
+            .filter((f) => /\.(mp3|wav|ogg|flac)$/i.test(f));
     } catch {
         Logger.warn(`Sonnerie directory not found: ${RINGTONE_DIR}`);
     }
@@ -89,7 +100,7 @@ async function castRingtone(): Promise<void> {
     }
 
     const file = files[Math.floor(Math.random() * files.length)];
-    const url  = `${RINGTONE_BASE_URL}/${encodeURIComponent(file)}`;
+    const url = `${RINGTONE_BASE_URL}/${encodeURIComponent(file)}`;
     Logger.info(`Casting sonnerie: ${file}`);
 
     try {
@@ -122,7 +133,9 @@ function scheduleTimeout(timer: Timer): void {
     const handle = setTimeout(() => void onFire(timer), delay);
     _handles.set(timer.id, handle);
     Logger.info(
-        `Timer scheduled: "${timer.label}" fires in ${Math.round(delay / 1000)}s`,
+        `Timer scheduled: "${timer.label}" fires in ${Math.round(
+            delay / 1000,
+        )}s`,
     );
 }
 
@@ -130,7 +143,9 @@ export function initTimers(): void {
     const timers = loadTimers();
     for (const timer of timers) {
         if (timer.fires_at <= Date.now()) {
-            Logger.info(`Timer "${timer.label}" expired during downtime — firing now`);
+            Logger.info(
+                `Timer "${timer.label}" expired during downtime — firing now`,
+            );
             void onFire(timer);
         } else {
             scheduleTimeout(timer);

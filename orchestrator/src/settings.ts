@@ -8,6 +8,12 @@
 // current env on first boot, so behaviour is unchanged until someone edits it.
 import * as fs from 'fs';
 import * as path from 'path';
+import { dataRoot } from '@yui/shared';
+
+/** Default directory for settings.json — the config category folder. */
+function defaultDir(): string {
+    return path.join(dataRoot(), 'config');
+}
 
 export type LogLevel =
     | 'error'
@@ -173,7 +179,7 @@ export function loadSettings(opts?: {
     dir?: string;
     env?: EnvSource;
 }): Settings {
-    const dir = opts?.dir ?? 'data';
+    const dir = opts?.dir ?? defaultDir();
     const env = opts?.env ?? process.env;
     const file = path.join(dir, FILENAME);
     const fromEnv = settingsFromEnv(env);
@@ -204,7 +210,7 @@ export function initSettings(opts?: {
     dir?: string;
     env?: EnvSource;
 }): Settings {
-    activeDir = opts?.dir ?? 'data';
+    activeDir = opts?.dir ?? defaultDir();
     activeEnv = opts?.env ?? process.env;
     current = loadSettings({ dir: activeDir, env: activeEnv });
     return current;

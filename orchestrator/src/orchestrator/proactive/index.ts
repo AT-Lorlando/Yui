@@ -1,5 +1,6 @@
 import * as path from 'path';
 import Logger from '../../logger';
+import { dataPath } from '@yui/shared';
 import { isQuietHours, passesThreshold } from './gates';
 import { Dedup } from './dedup';
 import { DigestBuffer, isDigestDue } from './digest';
@@ -22,7 +23,7 @@ import type {
     Watcher,
 } from './types';
 
-const DEDUP_FILE = path.resolve(process.cwd(), 'data/proactive-dedup.json');
+const DEDUP_FILE = dataPath('proactive-dedup.json');
 
 export class ProactiveEngine {
     private dedup: Dedup;

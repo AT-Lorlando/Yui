@@ -10,10 +10,6 @@ import {
     writeDataFile,
 } from './dataFiles';
 
-function tmpDir(): string {
-    return fs.mkdtempSync(path.join(os.tmpdir(), 'yui-data-'));
-}
-
 function run(): void {
     // ── classifyDataFile (by name) ────────────────────────────────────────────
     assert.strictEqual(classifyDataFile('scenes.json'), 'editable');
@@ -26,8 +22,6 @@ function run(): void {
     );
     assert.strictEqual(classifyDataFile('story-index.json'), 'state');
     assert.strictEqual(classifyDataFile('amp-state.json'), 'state');
-
-    // ── classifyDataFile (by content — catches random-named service accounts) ─
     const saKey = '{ "type": "service_account", "private_key": "-----BEGIN" }';
     assert.strictEqual(
         classifyDataFile('yuiproject-55825-abc.json', saKey),
@@ -37,51 +31,49 @@ function run(): void {
         classifyDataFile('google.json', '{ "refresh_token": "x" }'),
         'secret',
     );
-    // benign content stays editable
     assert.strictEqual(
         classifyDataFile('scenes.json', '[{"id":"x"}]'),
         'editable',
     );
 
-    // ── list / read / write against a temp data dir ───────────────────────────
-    const dir = tmpDir();
-    fs.writeFileSync(path.join(dir, 'scenes.json'), '[{"id":"a"}]');
-    fs.writeFileSync(path.join(dir, 'amp-state.json'), '{"marantz_amp":"off"}');
-    fs.writeFileSync(
-        path.join(dir, 'creds.json'),
-        '{"private_key":"-----BEGIN"}',
-    );
+    // ── list / read / write against a temp data root via YUI_DATA_DIR ─────────
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-data-'));
+    const prev = process.env.YUI_DATA_DIR;
+    process.env.YUI_DATA_DIR = root;
+    try {
+        fs.mkdirSync(path.join(root, 'config'), { recursive: true });
+        fs.mkdirSync(path.join(root, 'state'), { recursive: true });
+        fs.mkdirSync(path.join(root, 'shared'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'config', 'scenes.json'), '[]');
+        fs.writeFileSync(path.join(root, 'state', 'amp-state.json'), '{}');
+        fs.writeFileSync(
+            path.join(root, 'shared', 'firebase-service-account.json'),
+            '{"private_key":"x"}',
+        );
 
-    const list = listDataFiles({ dir });
-    const byName = Object.fromEntries(list.map((f) => [f.name, f]));
-    assert.strictEqual(byName['scenes.json'].kind, 'editable');
-    assert.strictEqual(byName['amp-state.json'].kind, 'state');
-    assert.strictEqual(byName['creds.json'].kind, 'secret');
-    assert.ok(typeof byName['scenes.json'].size === 'number');
+        const files = listDataFiles();
+        const byName = Object.fromEntries(files.map((f) => [f.name, f]));
+        assert.strictEqual(byName['scenes.json'].category, 'config');
+        assert.strictEqual(byName['scenes.json'].kind, 'editable');
+        assert.strictEqual(byName['amp-state.json'].category, 'state');
+        assert.strictEqual(byName['amp-state.json'].kind, 'state');
+        assert.strictEqual(
+            byName['firebase-service-account.json'].category,
+            'shared',
+        );
 
-    // read: editable + state OK, secret refused
-    assert.ok(readDataFile('scenes.json', { dir }).includes('"id"'));
-    assert.ok(readDataFile('amp-state.json', { dir }).includes('marantz'));
-    assert.throws(() => readDataFile('creds.json', { dir }), /secret/i);
-
-    // write: editable OK (and must be valid JSON)
-    writeDataFile('scenes.json', '[{"id":"b"}]', { dir });
-    assert.ok(readDataFile('scenes.json', { dir }).includes('"b"'));
-    assert.throws(
-        () => writeDataFile('scenes.json', 'not json', { dir }),
-        /JSON/i,
-    );
-    // write: state + secret refused
-    assert.throws(
-        () => writeDataFile('amp-state.json', '{}', { dir }),
-        /read-?only|state/i,
-    );
-    assert.throws(() => writeDataFile('creds.json', '{}', { dir }), /secret/i);
-
-    // path traversal refused
-    assert.throws(() => readDataFile('../.env', { dir }), /\.json|escape/i);
-
-    fs.rmSync(dir, { recursive: true, force: true });
+        assert.strictEqual(readDataFile('scenes.json'), '[]');
+        assert.throws(() => readDataFile('firebase-service-account.json'));
+        writeDataFile('scenes.json', '[{"id":"a"}]');
+        assert.strictEqual(readDataFile('scenes.json'), '[{"id":"a"}]');
+        assert.throws(() => writeDataFile('amp-state.json', '{}'));
+        assert.throws(() => writeDataFile('scenes.json', 'not json'));
+        assert.throws(() => readDataFile('../secret.json'));
+    } finally {
+        if (prev === undefined) delete process.env.YUI_DATA_DIR;
+        else process.env.YUI_DATA_DIR = prev;
+        fs.rmSync(root, { recursive: true, force: true });
+    }
 
     console.log('All dataFiles tests passed');
 }

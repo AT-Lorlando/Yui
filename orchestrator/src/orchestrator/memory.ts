@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Logger from '../logger';
+import { dataPath } from '@yui/shared';
 
 export type MemoryPriority = 'always' | 'on-demand';
 
@@ -13,7 +14,7 @@ export interface MemoryStore {
     [namespace: string]: MemoryNamespace;
 }
 
-const MEMORY_FILE = path.resolve(process.cwd(), 'data/memory.json');
+const MEMORY_FILE = dataPath('memory.json');
 
 function ensureDataDir(): void {
     const dir = path.dirname(MEMORY_FILE);

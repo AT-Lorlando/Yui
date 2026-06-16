@@ -1,11 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import Logger from '../logger';
+import { dataPath } from '@yui/shared';
 import type { SceneAction, CallTool, SceneContext } from './scenes';
 import { runActionList } from './scenes';
 import type { PresenceEventType } from './presence';
 
-const RULES_FILE = path.resolve(process.cwd(), 'data/presence-rules.json');
+const RULES_FILE = dataPath('presence-rules.json');
 
 const EVENT_TYPES: PresenceEventType[] = [
     'arrival',

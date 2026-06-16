@@ -1,11 +1,19 @@
 import assert from 'assert';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { ProactiveEngine } from './index';
-import { DigestBuffer } from './digest';
-import { Dedup } from './dedup';
+import { dataPath } from '@yui/shared';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
 import type { PresenceState } from '../presence';
+
+// Isolate ALL data-file I/O into a temp dir. YUI_DATA_DIR must be set before
+// the engine modules resolve their dataPath() constants at load time, so they
+// are pulled in via require() (which runs after this assignment) rather than a
+// hoisted import. This keeps the test from touching the real data/ tree.
+process.env.YUI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-ea-'));
+const { ProactiveEngine } = require('./index') as typeof import('./index');
+const { DigestBuffer } = require('./digest') as typeof import('./digest');
+const { Dedup } = require('./dedup') as typeof import('./dedup');
 
 const WL = [
     {
@@ -39,17 +47,16 @@ function evt(): CandidateEvent {
 }
 
 async function run(): Promise<void> {
-    const histFile = path.resolve(
-        process.cwd(),
-        'data/automation-history.json',
+    const histFile = dataPath('automation-history.json');
+    const autoFile = dataPath('automations.json');
+    const digestA = path.join(
+        process.env.YUI_DATA_DIR!,
+        'proactive-digest.ta.json',
     );
-    const autoFile = path.resolve(process.cwd(), 'data/automations.json');
-    const histBak = fs.existsSync(histFile)
-        ? fs.readFileSync(histFile, 'utf-8')
-        : null;
-    const autoBak = fs.existsSync(autoFile)
-        ? fs.readFileSync(autoFile, 'utf-8')
-        : null;
+    const digestB = path.join(
+        process.env.YUI_DATA_DIR!,
+        'proactive-digest.tb.json',
+    );
 
     function deps(calls: { tool: string }[]): ProactiveDeps {
         return {
@@ -69,6 +76,8 @@ async function run(): Promise<void> {
 
     try {
         // a. aucune automation conflictuelle → action exécutée
+        fs.mkdirSync(path.dirname(histFile), { recursive: true });
+        fs.mkdirSync(path.dirname(autoFile), { recursive: true });
         fs.writeFileSync(histFile, '[]');
         fs.writeFileSync(autoFile, '[]');
         {
@@ -76,13 +85,12 @@ async function run(): Promise<void> {
             const eng = new ProactiveEngine(
                 cfg(),
                 deps(calls),
-                new DigestBuffer('data/proactive-digest.ta.json'),
+                new DigestBuffer(digestA),
                 new Dedup(),
             );
             await eng.processCandidate(evt());
             assert.strictEqual(calls.length, 1);
             assert.strictEqual(calls[0].tool, 'irrigation_start');
-            fs.rmSync('data/proactive-digest.ta.json', { force: true });
         }
 
         // b. automation activée avec le même tag → action bridée (mais notif ok)
@@ -105,20 +113,16 @@ async function run(): Promise<void> {
             const eng = new ProactiveEngine(
                 cfg(),
                 deps(calls),
-                new DigestBuffer('data/proactive-digest.tb.json'),
+                new DigestBuffer(digestB),
                 new Dedup(),
             );
             await eng.processCandidate(evt());
             assert.strictEqual(calls.length, 0); // action bridée
-            fs.rmSync('data/proactive-digest.tb.json', { force: true });
         }
 
         console.log('All engine-action tests passed');
     } finally {
-        if (histBak !== null) fs.writeFileSync(histFile, histBak);
-        else fs.rmSync(histFile, { force: true });
-        if (autoBak !== null) fs.writeFileSync(autoFile, autoBak);
-        else fs.rmSync(autoFile, { force: true });
+        fs.rmSync(process.env.YUI_DATA_DIR!, { recursive: true, force: true });
     }
 }
 

@@ -6,8 +6,16 @@ banned_ips.txt
 refresh-token.json
 stories/*
 .entities/
-# Runtime data (user-specific, not committed)
-data/
+# Data dir: ignore everything except the config files versioned on purpose.
+# shared/ (secrets) + state/ (runtime) + per-instance config stay local to each
+# checkout; only the files explicitly re-included below are tracked (these were
+# already versioned before the split). See docs/.../2026-06-16-data-dir-split-design.md
+data/*
+!data/config/
+data/config/*
+!data/config/scenes.json
+!data/config/proactive.json
+!data/config/hue-remotes.json
 assets/my_voice.wav
 **/dist/
 prompts/*

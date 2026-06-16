@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { dataPath } from '@yui/shared';
 
 export type Pump = 'A' | 'B';
 export type AmountKey = 'petit' | 'normal' | 'grand';
@@ -14,9 +15,7 @@ export interface IrrigationConfig {
     amounts: Record<AmountKey, number>;
 }
 
-const HERE = __dirname;
-const PROJECT_ROOT = path.resolve(HERE, '..', '..', '..');
-export const CONFIG_FILE = path.join(PROJECT_ROOT, 'data', 'irrigation.json');
+export const CONFIG_FILE = dataPath('irrigation.json');
 
 export const DEFAULT_CONFIG: IrrigationConfig = {
     pumps: {

@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
+import { dataPath } from '@yui/shared';
 
-const CONFIG_FILE = path.resolve(process.cwd(), 'data/presence.json');
+const CONFIG_FILE = dataPath('presence.json');
 
 export interface GeofenceConfig {
     enabled: boolean;

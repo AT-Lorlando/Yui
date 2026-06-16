@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { dataPath } from '@yui/shared';
 
-const PRESETS_FILE = path.resolve(process.cwd(), 'data/timer-presets.json');
+const PRESETS_FILE = dataPath('timer-presets.json');
 
 export interface TimerPreset {
     id: string;
@@ -18,7 +19,9 @@ function ensureDataDir(): void {
 export function listPresets(): TimerPreset[] {
     try {
         if (!fs.existsSync(PRESETS_FILE)) return [];
-        return JSON.parse(fs.readFileSync(PRESETS_FILE, 'utf-8')) as TimerPreset[];
+        return JSON.parse(
+            fs.readFileSync(PRESETS_FILE, 'utf-8'),
+        ) as TimerPreset[];
     } catch {
         return [];
     }
@@ -29,11 +32,18 @@ function save(presets: TimerPreset[]): void {
     fs.writeFileSync(PRESETS_FILE, JSON.stringify(presets, null, 2));
 }
 
-export function addPreset(input: { label: string; duration_seconds: number; icon?: string }): TimerPreset {
+export function addPreset(input: {
+    label: string;
+    duration_seconds: number;
+    icon?: string;
+}): TimerPreset {
     if (typeof input.label !== 'string' || !input.label.trim()) {
         throw new Error('label is required');
     }
-    if (!Number.isInteger(input.duration_seconds) || input.duration_seconds <= 0) {
+    if (
+        !Number.isInteger(input.duration_seconds) ||
+        input.duration_seconds <= 0
+    ) {
         throw new Error('duration_seconds must be a positive integer');
     }
     const preset: TimerPreset = {

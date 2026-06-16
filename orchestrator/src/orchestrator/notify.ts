@@ -1,9 +1,10 @@
 import { GoogleAuth } from 'google-auth-library';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import Logger from '../logger';
+import { dataPath } from '@yui/shared';
 
-const TOKEN_FILE = 'data/fcm-token.json';
-const SERVICE_ACCOUNT_FILE = 'data/firebase-service-account.json';
+const TOKEN_FILE = dataPath('fcm-token.json');
+const SERVICE_ACCOUNT_FILE = dataPath('firebase-service-account.json');
 
 export function saveFcmToken(token: string): void {
     writeFileSync(TOKEN_FILE, JSON.stringify({ token }));
@@ -46,7 +47,9 @@ export async function sendNotification(text: string): Promise<void> {
     }
 
     try {
-        const credentials = JSON.parse(readFileSync(SERVICE_ACCOUNT_FILE, 'utf-8'));
+        const credentials = JSON.parse(
+            readFileSync(SERVICE_ACCOUNT_FILE, 'utf-8'),
+        );
         const projectId: string = credentials.project_id;
         const accessToken = await getAccessToken();
 
