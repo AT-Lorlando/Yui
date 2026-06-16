@@ -16,15 +16,12 @@ import {
     type OutputChannel,
 } from './orchestrator/automations';
 import { sendNotification } from './orchestrator/notify';
+import { PresenceManager, getHomeCoords } from './orchestrator/presence';
 import {
-    PresenceManager,
-    getHomeCoords,
-    type PresenceState,
-} from './orchestrator/presence';
-import {
-    loadGeofenceConfig,
-    saveGeofenceConfig,
+    loadPresenceConfig,
+    savePresenceConfig,
 } from './orchestrator/presenceConfig';
+import { createPresenceRulesEngine } from './orchestrator/presenceRules';
 import {
     listScenes,
     createScene,
@@ -131,14 +128,7 @@ async function main() {
 
     // Presence manager — detects departure (MAC) and arrival (GPS)
     // Triggers scenes directly — no LLM involved
-    let presence: PresenceManager;
-    presence = new PresenceManager((id) =>
-        runScene(id, deviceHandler, {
-            presenceState: presence.getState(),
-            notify: (msg) => sendNotification(msg),
-            callToolRaw: (t, a) => orchestrator.callToolRaw(t, a ?? {}),
-        }),
-    );
+    const presence = new PresenceManager();
     presence.start();
 
     const makeSceneRunner = (id: string) =>
@@ -196,27 +186,34 @@ async function main() {
         callTool: (name, args) => orchestrator.callTool(name, args),
     });
 
-    const locationHandler = (lat: number, lng: number, accuracy: number) =>
-        presence.handleLocation(lat, lng, accuracy);
+    const presenceRules = createPresenceRulesEngine({
+        callTool: (t, a) => orchestrator.callTool(t, a ?? {}),
+        context: () => ({
+            presenceState: presence.getState(),
+            notify: (msg: string) => sendNotification(msg),
+            callToolRaw: (t: string, a?: Record<string, unknown>) =>
+                orchestrator.callToolRaw(t, a ?? {}),
+        }),
+        arrivalScene: process.env.PRESENCE_ARRIVAL_SCENE,
+        departureScene: process.env.PRESENCE_DEPARTURE_SCENE,
+    });
+    presence.onEvent((event) => presenceRules.handleEvent(event));
 
     const buildConfigDto = () => {
         const { lat, lng } = getHomeCoords();
-        const g = loadGeofenceConfig();
-        return {
-            homeLat: lat,
-            homeLng: lng,
-            radiusM: g.radiusM,
-            enabled: g.enabled,
-        };
+        const c = loadPresenceConfig();
+        return { homeLat: lat, homeLng: lng, geofence: c.geofence, mac: c.mac };
     };
     const presenceHandler = {
         getState: () => presence.getState(),
         handleGeofence: (t: string) => presence.handleGeofence(t),
         getConfig: buildConfigDto,
-        setConfig: (patch: { radiusM?: number; enabled?: boolean }) => {
-            saveGeofenceConfig(patch);
+        setConfig: (patch: any) => {
+            savePresenceConfig(patch);
             return buildConfigDto();
         },
+        listRules: () => presenceRules.list(),
+        replaceRules: (rules: any) => presenceRules.replace(rules),
     };
 
     const sources: InputSource[] = [new StdinSource(), new HttpSource()];
@@ -228,7 +225,6 @@ async function main() {
             deviceHandler,
             scenesHandler,
             toolsHandler,
-            locationHandler,
             automationsHandler,
             presenceHandler,
             conversationsHandler,
@@ -240,6 +236,7 @@ async function main() {
     const shutdown = async (signal: string) => {
         Logger.info(`Received ${signal}, shutting down…`);
         presence.stop();
+        presenceRules.stop();
         proactive.stop();
         hueRemotes.stop();
         for (const source of sources) {

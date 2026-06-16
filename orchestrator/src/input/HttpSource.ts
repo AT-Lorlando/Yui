@@ -14,7 +14,6 @@ import {
     DeviceHandler,
     ScenesHandler,
     ToolsHandler,
-    LocationHandler,
     AutomationsHandler,
     PresenceHandler,
     ConversationsHandler,
@@ -126,7 +125,6 @@ export class HttpSource implements InputSource {
         deviceHandler?: DeviceHandler,
         scenesHandler?: ScenesHandler,
         toolsHandler?: ToolsHandler,
-        locationHandler?: LocationHandler,
         automationsHandler?: AutomationsHandler,
         presenceHandler?: PresenceHandler,
         conversationsHandler?: ConversationsHandler,
@@ -1044,16 +1042,16 @@ export class HttpSource implements InputSource {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
             const transition = String(req.body?.transition ?? '');
-            if (transition !== 'enter') {
+            if (transition !== 'enter' && transition !== 'exit') {
                 return res
                     .status(400)
-                    .json({ error: "transition must be 'enter'" });
+                    .json({ error: "transition must be 'enter' or 'exit'" });
             }
             if (!presenceHandler) {
                 return res.status(503).json({ error: 'presence unavailable' });
             }
             const cfg = presenceHandler.getConfig();
-            if (!cfg.enabled) {
+            if (!cfg.geofence.enabled) {
                 return res.json({
                     state: presenceHandler.getState(),
                     ignored: true,
@@ -1073,24 +1071,34 @@ export class HttpSource implements InputSource {
 
         app.put('/presence/config', (req: any, res: any) => {
             const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
+            if (!this.checkPassword(bearer, req.ip))
                 return res.status(401).json({ error: 'Unauthorized' });
-            }
-            if (!presenceHandler) {
+            if (!presenceHandler)
                 return res.status(503).json({ error: 'presence unavailable' });
-            }
-            const patch: { radiusM?: number; enabled?: boolean } = {};
-            if (req.body?.radiusM !== undefined) {
-                const r = Number(req.body.radiusM);
-                if (!Number.isFinite(r)) {
-                    return res.status(400).json({ error: 'radiusM invalid' });
-                }
-                patch.radiusM = r;
-            }
-            if (req.body?.enabled !== undefined) {
-                patch.enabled = Boolean(req.body.enabled);
-            }
+            const body = req.body ?? {};
+            const patch: any = {};
+            if (body.geofence) patch.geofence = body.geofence;
+            if (body.mac) patch.mac = body.mac;
             res.json(presenceHandler.setConfig(patch));
+        });
+
+        app.get('/presence/rules', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip))
+                return res.status(401).json({ error: 'Unauthorized' });
+            res.json(presenceHandler ? presenceHandler.listRules() : []);
+        });
+        app.put('/presence/rules', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip))
+                return res.status(401).json({ error: 'Unauthorized' });
+            if (!presenceHandler)
+                return res.status(503).json({ error: 'presence unavailable' });
+            try {
+                res.json(presenceHandler.replaceRules(req.body));
+            } catch (e: any) {
+                res.status(400).json({ error: String(e?.message ?? e) });
+            }
         });
 
         // ── Prompts (markdown files in prompts/ + data/prompts.json manifest) ──
@@ -1221,9 +1229,6 @@ export class HttpSource implements InputSource {
             }
         });
 
-        // ── Location & presence ───────────────────────────────────────────────
-        // POST /location  — called by the mobile app with GPS coordinates.
-        // Returns next_ping_ms so the app knows when to send the next update.
         app.get('/settings', (req: any, res: any) => {
             const bearer = req.headers['authorization']?.split(' ')[1];
             if (!this.checkPassword(bearer, req.ip)) {
@@ -1403,47 +1408,6 @@ export class HttpSource implements InputSource {
                     error: err instanceof Error ? err.message : String(err),
                 });
             }
-        });
-
-        app.post('/location', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-
-            const { lat, lng, accuracy } = req.body ?? {};
-            if (typeof lat !== 'number' || typeof lng !== 'number') {
-                return res
-                    .status(400)
-                    .json({ error: 'lat and lng are required numbers' });
-            }
-
-            if (!locationHandler) {
-                // Presence system not configured — accept the ping, tell app to retry in 5 min
-                Logger.info(
-                    `Location received: ${lat.toFixed(5)},${lng.toFixed(
-                        5,
-                    )} (no presence handler)`,
-                );
-                return res.json({
-                    state: 'unknown',
-                    distance_m: -1,
-                    next_ping_ms: 5 * 60_000,
-                });
-            }
-
-            Logger.info(
-                `[location] lat=${lat.toFixed(6)} lng=${lng.toFixed(
-                    6,
-                )} accuracy=±${Math.round(accuracy ?? 0)}m`,
-            );
-            const result = locationHandler(lat, lng, accuracy ?? 0);
-            Logger.info(
-                `[location] → state=${result.state} distance=${
-                    result.distance_m
-                }m next_ping=${Math.round(result.next_ping_ms / 1000)}s`,
-            );
-            return res.json(result);
         });
 
         // ── FCM device token registration ─────────────────────────────────────

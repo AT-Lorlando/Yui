@@ -2,7 +2,7 @@ import assert from 'assert';
 import { PresenceManager } from '../presence';
 
 function run(): void {
-    const pm = new PresenceManager(async () => ({ success: true }));
+    const pm = new PresenceManager();
     const seen: string[] = [];
     pm.onChange((prev, next) => seen.push(`${prev}->${next}`));
 

@@ -72,8 +72,8 @@ export interface AutomationsHandler {
 export interface PresenceConfigDto {
     homeLat: number;
     homeLng: number;
-    radiusM: number;
-    enabled: boolean;
+    geofence: { enabled: boolean; radiusM: number };
+    mac: { burstIntervalMs: number; burstWindowMs: number };
 }
 
 export interface PresenceHandler {
@@ -83,9 +83,13 @@ export interface PresenceHandler {
     ) => import('../orchestrator/presence').PresenceState;
     getConfig: () => PresenceConfigDto;
     setConfig: (patch: {
-        radiusM?: number;
-        enabled?: boolean;
+        geofence?: { enabled?: boolean; radiusM?: number };
+        mac?: { burstIntervalMs?: number; burstWindowMs?: number };
     }) => PresenceConfigDto;
+    listRules: () => import('../orchestrator/presenceRules').PresenceRule[];
+    replaceRules: (
+        rules: import('../orchestrator/presenceRules').PresenceRule[],
+    ) => import('../orchestrator/presenceRules').PresenceRule[];
 }
 
 /** Respawns an MCP server to pick up data/integrations.json edits. */
@@ -97,12 +101,6 @@ export interface IntegrationsHandler {
 export interface ProactiveHandler {
     reload: () => void;
 }
-
-export type LocationHandler = (
-    lat: number,
-    lng: number,
-    accuracy: number,
-) => import('../orchestrator/presence').LocationResponse;
 
 export interface ConversationsHandler {
     list: (
@@ -137,7 +135,6 @@ export interface InputSource {
         deviceHandler?: DeviceHandler,
         scenesHandler?: ScenesHandler,
         toolsHandler?: ToolsHandler,
-        locationHandler?: LocationHandler,
         automationsHandler?: AutomationsHandler,
         presenceHandler?: PresenceHandler,
         conversationsHandler?: ConversationsHandler,
