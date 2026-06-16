@@ -6,8 +6,10 @@ banned_ips.txt
 refresh-token.json
 stories/*
 .entities/
-# Runtime data (user-specific, not committed)
-data/
+# Data dir: ignore everything except hand-edited config (shared/ secrets and
+# state/ runtime stay out of git; see docs/.../2026-06-16-data-dir-split-design.md)
+data/*
+!data/config/
 assets/my_voice.wav
 **/dist/
 prompts/*
