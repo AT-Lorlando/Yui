@@ -13,7 +13,8 @@ import {
 import { SpotifyAuth } from './SpotifyAuth';
 import { SpotifyController } from './SpotifyController';
 import { AmpController } from './AmpController';
-import { SPOTIFY_TOOLS } from './tools';
+import { buildSpotifyTools } from './tools';
+import { handleMusicPlay } from './musicPlayHandler';
 import { resolveSpeakerDevice } from './resolveDevice';
 import Logger from './logger';
 
@@ -24,6 +25,8 @@ const BROADLINK_HOST = process.env.BROADLINK_HOST || '';
 let amp: AmpController | null = null;
 
 let spotify: SpotifyController;
+
+let SPOTIFY_TOOL_LIST = buildSpotifyTools();
 
 const server = new Server(
     { name: 'mcp-spotify', version: '1.0.0' },
@@ -86,7 +89,7 @@ async function playOnSpeaker(
 }
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: SPOTIFY_TOOLS };
+    return { tools: SPOTIFY_TOOL_LIST };
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -436,6 +439,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
 
+            case 'music_play': {
+                const msg = await handleMusicPlay((args ?? {}) as any, {
+                    defaultSpeaker: DEFAULT_SPEAKER,
+                    getDevices: () => spotify.getDevices(),
+                    resolveSpeaker: (devs, name) =>
+                        resolveSpeakerDevice(devs, name),
+                    transfer: (id) => spotify.transferPlayback(id),
+                    search: (q, t) => spotify.search(q, (t as any) ?? 'track'),
+                    playUri: (uri, id) => spotify.playUri(uri, id),
+                    play: (id) => spotify.play(id),
+                });
+                return { content: [{ type: 'text', text: msg }] };
+            }
+
             default:
                 throw new McpError(
                     ErrorCode.MethodNotFound,
@@ -480,6 +497,14 @@ async function main() {
     const api = await SpotifyAuth.connect();
     spotify = new SpotifyController(api);
     Logger.info('Spotify authenticated.');
+
+    // Populate speaker enum best-effort after auth
+    try {
+        const devs = await spotify.getDevices();
+        SPOTIFY_TOOL_LIST = buildSpotifyTools(devs.map((d) => d.name));
+    } catch {
+        /* keep no-enum fallback */
+    }
 
     // Spotify access tokens expire after 1 hour. Refresh every 50 minutes so the
     // token is always valid regardless of how long the process runs.

@@ -1,3 +1,9 @@
+import { buildMusicPlayTool } from './musicPlayHandler';
+
+export function buildSpotifyTools(speakerNames: string[] = []) {
+    return [...SPOTIFY_TOOLS, buildMusicPlayTool(speakerNames)];
+}
+
 export const SPOTIFY_TOOLS = [
     {
         name: 'list_speakers',
