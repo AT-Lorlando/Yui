@@ -633,6 +633,8 @@ export class HttpSource implements InputSource {
                         favorite,
                         intro,
                         floating,
+                        authoring,
+                        simple,
                     } = req.body;
                     const scene = scenesHandler.create({
                         name,
@@ -644,6 +646,8 @@ export class HttpSource implements InputSource {
                         favorite,
                         intro,
                         floating,
+                        authoring,
+                        simple,
                     });
                     res.status(201).json(scene);
                 } catch (e: any) {
@@ -674,6 +678,8 @@ export class HttpSource implements InputSource {
                         favorite,
                         intro,
                         floating,
+                        authoring,
+                        simple,
                     } = req.body;
                     const scene = scenesHandler.update(req.params.id, {
                         name,
@@ -685,6 +691,8 @@ export class HttpSource implements InputSource {
                         favorite,
                         intro,
                         floating,
+                        authoring,
+                        simple,
                     });
                     if (!scene)
                         return res

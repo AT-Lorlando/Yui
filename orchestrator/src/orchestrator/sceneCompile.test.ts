@@ -208,6 +208,44 @@ function testParseRoundTrip(): void {
     );
 }
 
+function testCompileIfSimple(): void {
+    const { compileIfSimple } = require('./sceneCompile');
+
+    // authoring simple → state/intro/floating régénérés, setup vidé
+    const out = compileIfSimple({
+        name: 'X',
+        authoring: 'simple',
+        simple: {
+            lights: [{ target: 'Salon', on: true, color: '#1DB954' }],
+            ambiance: { motion: true },
+        },
+        setup: [{ tool: 'garbage', args: {} }],
+        state: [{ tool: 'stale', args: {} }],
+    });
+    assert.deepStrictEqual(out.setup, []);
+    assert.deepStrictEqual(out.state, [
+        {
+            tool: 'set_lights',
+            args: { target: 'Salon', on: true, color: '#1DB954' },
+        },
+    ]);
+    assert.ok(out.floating, 'floating régénéré');
+    assert.strictEqual(out.name, 'X', 'autres champs préservés');
+
+    // authoring advanced → inchangé
+    const adv = compileIfSimple({
+        authoring: 'advanced',
+        setup: [{ tool: 'tv_on', args: {} }],
+        state: [{ tool: 'cast_netflix', args: {} }],
+    });
+    assert.deepStrictEqual(adv.setup, [{ tool: 'tv_on', args: {} }]);
+    assert.deepStrictEqual(adv.state, [{ tool: 'cast_netflix', args: {} }]);
+
+    // pas d'authoring → inchangé
+    const none = compileIfSimple({ state: [{ tool: 'keep', args: {} }] });
+    assert.deepStrictEqual(none.state, [{ tool: 'keep', args: {} }]);
+}
+
 function run(): void {
     testCompileState();
     testCompileMinimal();
@@ -215,6 +253,7 @@ function run(): void {
     testCompileAmbiance();
     testRepresentable();
     testParseRoundTrip();
+    testCompileIfSimple();
     console.log('All sceneCompile tests passed');
 }
 

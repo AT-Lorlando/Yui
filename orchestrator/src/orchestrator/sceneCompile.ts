@@ -205,6 +205,33 @@ export function compileSimpleScene(spec: SimpleSceneSpec): CompiledScene {
     return result;
 }
 
+// ── Câblage create/update ─────────────────────────────────────────────────────
+
+export interface SceneCompilable {
+    authoring?: 'simple' | 'advanced';
+    simple?: SimpleSceneSpec;
+    setup?: SceneAction[];
+    state?: SceneAction[];
+    intro?: AnimationEffect[];
+    floating?: FloatingConfig;
+}
+
+/**
+ * Si la scène est en mode simple, (re)compile state/intro/floating depuis le blob
+ * `simple` et vide le setup. Sinon renvoie la donnée inchangée.
+ */
+export function compileIfSimple<T extends SceneCompilable>(data: T): T {
+    if (data.authoring !== 'simple' || !data.simple) return data;
+    const compiled = compileSimpleScene(data.simple);
+    return {
+        ...data,
+        setup: [],
+        state: compiled.state,
+        intro: compiled.intro,
+        floating: compiled.floating,
+    };
+}
+
 // ── Détection & parsing inverse ───────────────────────────────────────────────
 
 const REPRESENTABLE_TOOLS = new Set([

@@ -6,6 +6,7 @@ import { dataPath } from '@yui/shared';
 import type { PresenceState } from './presence';
 import type { AnimationEffect, FloatingConfig } from './animation/types';
 import { animationManager } from './animation/animationManager';
+import { compileIfSimple, type SimpleSceneSpec } from './sceneCompile';
 
 // ── Scene conditions ───────────────────────────────────────────────────────────
 
@@ -110,6 +111,10 @@ export interface Scene {
     intro?: AnimationEffect[];
     /** Optional continuous floating-colour config started after the state. */
     floating?: FloatingConfig;
+    /** Quel éditeur ouvrir : 'simple' (déclaratif) ou 'advanced' (liste d'actions). */
+    authoring?: 'simple' | 'advanced';
+    /** Spec déclarative — source de vérité quand authoring === 'simple'. */
+    simple?: SimpleSceneSpec;
 }
 
 export type CreateSceneInput = Omit<Scene, 'id' | 'createdAt' | 'builtIn'>;
@@ -148,8 +153,9 @@ export function getScene(id: string): Scene | null {
 }
 
 export function createScene(data: CreateSceneInput): Scene {
+    const compiled = compileIfSimple(data);
     const scene: Scene = {
-        ...data,
+        ...compiled,
         id: crypto.randomUUID().slice(0, 8),
         createdAt: Date.now(),
         builtIn: false,
@@ -180,7 +186,7 @@ export function updateScene(
     const scenes = loadScenes();
     const idx = scenes.findIndex((s) => s.id === id);
     if (idx === -1 || scenes[idx].builtIn) return null;
-    scenes[idx] = { ...scenes[idx], ...input };
+    scenes[idx] = compileIfSimple({ ...scenes[idx], ...input });
     saveScenes(scenes);
     Logger.info(`Scene updated: "${scenes[idx].name}" (${id})`);
     return scenes[idx];
