@@ -15,7 +15,7 @@ import { SAMSUNG_TOOLS } from './tools';
 import Logger from './logger';
 
 const tvIp = process.env.SMARTTHINGS_TV_IP;
-const mac   = process.env.SMARTTHINGS_TV_MAC;
+const mac = process.env.SMARTTHINGS_TV_MAC;
 
 if (!tvIp) {
     console.error('Missing SMARTTHINGS_TV_IP in .env');
@@ -42,10 +42,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const status = await tv.getStatus();
                 const inputs = tv.getSupportedInputs();
                 return {
-                    content: [{
-                        type: 'text',
-                        text: JSON.stringify({ ...status, supportedInputs: inputs }, null, 2),
-                    }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(
+                                { ...status, supportedInputs: inputs },
+                                null,
+                                2,
+                            ),
+                        },
+                    ],
                 };
             }
 
@@ -56,13 +62,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 } else {
                     await tv.powerOff();
                 }
-                return { content: [{ type: 'text', text: `TV turned ${state}.` }] };
+                return {
+                    content: [{ type: 'text', text: `TV turned ${state}.` }],
+                };
             }
 
             case 'tv_set_volume': {
                 const level = Number((args as any).level);
                 await tv.setVolume(level);
-                return { content: [{ type: 'text', text: `TV volume set to ${level}.` }] };
+                return {
+                    content: [
+                        { type: 'text', text: `TV volume set to ${level}.` },
+                    ],
+                };
             }
 
             case 'tv_mute': {
@@ -72,7 +84,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 } else {
                     await tv.unmute();
                 }
-                return { content: [{ type: 'text', text: `TV ${mute ? 'muted' : 'unmuted'}.` }] };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `TV ${mute ? 'muted' : 'unmuted'}.`,
+                        },
+                    ],
+                };
             }
 
             case 'tv_prepare_chromecast': {
@@ -83,25 +102,58 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'tv_set_input': {
                 const source = String((args as any).source);
                 await tv.setInputSource(source);
-                return { content: [{ type: 'text', text: `TV input switched to ${source}.` }] };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `TV input switched to ${source}.`,
+                        },
+                    ],
+                };
             }
 
             case 'tv_launch_app': {
                 const appId = String((args as any).appId);
                 const appName = (args as any)?.appName as string | undefined;
                 await tv.launchApp(appId);
-                return { content: [{ type: 'text', text: `Launched ${appName ?? appId} on TV.` }] };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `Launched ${appName ?? appId} on TV.`,
+                        },
+                    ],
+                };
+            }
+
+            case 'tv_input': {
+                const source = String((args as any).source);
+                await tv.setInputSource(source);
+                return {
+                    content: [{ type: 'text', text: `Entrée TV → ${source}.` }],
+                };
             }
 
             default:
-                throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+                throw new McpError(
+                    ErrorCode.MethodNotFound,
+                    `Unknown tool: ${name}`,
+                );
         }
     } catch (error) {
         if (error instanceof McpError) throw error;
-        Logger.error(`Tool ${name} raw error: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
-        const message = error instanceof Error
-            ? error.message
-            : (error as any)?.response?.data?.message ?? (error as any)?.message ?? JSON.stringify(error);
+        Logger.error(
+            `Tool ${name} raw error: ${JSON.stringify(
+                error,
+                Object.getOwnPropertyNames(error),
+            )}`,
+        );
+        const message =
+            error instanceof Error
+                ? error.message
+                : (error as any)?.response?.data?.message ??
+                  (error as any)?.message ??
+                  JSON.stringify(error);
         Logger.error(`Tool ${name} failed: ${message}`);
         return {
             content: [{ type: 'text', text: `Error: ${message}` }],

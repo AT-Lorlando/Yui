@@ -1,7 +1,10 @@
+import { TV_INPUT_TOOL } from './tvInputTool';
+
 export const SAMSUNG_TOOLS = [
     {
         name: 'tv_get_status',
-        description: 'Get the current Samsung TV status: power state, volume, mute, and input source.',
+        description:
+            'Get the current Samsung TV status: power state, volume, mute, and input source.',
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {
@@ -10,7 +13,11 @@ export const SAMSUNG_TOOLS = [
         inputSchema: {
             type: 'object' as const,
             properties: {
-                state: { type: 'string', enum: ['on', 'off'], description: 'Desired power state' },
+                state: {
+                    type: 'string',
+                    enum: ['on', 'off'],
+                    description: 'Desired power state',
+                },
             },
             required: ['state'],
         },
@@ -21,7 +28,12 @@ export const SAMSUNG_TOOLS = [
         inputSchema: {
             type: 'object' as const,
             properties: {
-                level: { type: 'number', minimum: 0, maximum: 100, description: 'Volume level 0–100' },
+                level: {
+                    type: 'number',
+                    minimum: 0,
+                    maximum: 100,
+                    description: 'Volume level 0–100',
+                },
             },
             required: ['level'],
         },
@@ -32,18 +44,26 @@ export const SAMSUNG_TOOLS = [
         inputSchema: {
             type: 'object' as const,
             properties: {
-                mute: { type: 'boolean', description: 'true to mute, false to unmute' },
+                mute: {
+                    type: 'boolean',
+                    description: 'true to mute, false to unmute',
+                },
             },
             required: ['mute'],
         },
     },
     {
         name: 'tv_set_input',
-        description: 'Switch the Samsung TV input source. Use tv_get_status to see available inputs (id field).',
+        description:
+            'Switch the Samsung TV input source. Use tv_get_status to see available inputs (id field).',
         inputSchema: {
             type: 'object' as const,
             properties: {
-                source: { type: 'string', description: 'Input source id from tv_get_status (e.g. HDMI3, dtv)' },
+                source: {
+                    type: 'string',
+                    description:
+                        'Input source id from tv_get_status (e.g. HDMI3, dtv)',
+                },
             },
             required: ['source'],
         },
@@ -58,14 +78,20 @@ export const SAMSUNG_TOOLS = [
     },
     {
         name: 'tv_launch_app',
-        description: 'Launch an app on the Samsung TV by app ID (e.g. Netflix: 11101200001, YouTube: 111299001912, Prime Video: 3201910019365, Disney+: 3201901017640).',
+        description:
+            'Launch an app on the Samsung TV by app ID (e.g. Netflix: 11101200001, YouTube: 111299001912, Prime Video: 3201910019365, Disney+: 3201901017640).',
         inputSchema: {
             type: 'object' as const,
             properties: {
                 appId: { type: 'string', description: 'Samsung TV app ID' },
-                appName: { type: 'string', description: 'Human-readable app name (for confirmation message)' },
+                appName: {
+                    type: 'string',
+                    description:
+                        'Human-readable app name (for confirmation message)',
+                },
             },
             required: ['appId'],
         },
     },
+    TV_INPUT_TOOL,
 ];

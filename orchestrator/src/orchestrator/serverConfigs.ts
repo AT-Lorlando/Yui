@@ -22,6 +22,7 @@ export const LLM_HIDDEN_TOOLS = new Set([
     'lights_palette_set',
     'covers_set',
     'music_play',
+    'tv_input',
 ]);
 
 /**
