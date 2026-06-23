@@ -12,6 +12,7 @@ stories/*
 # already versioned before the split). See docs/.../2026-06-16-data-dir-split-design.md
 data/*
 assets/my_voice.wav
+assets/apk/
 **/dist/
 prompts/*
 **/__pycache__/

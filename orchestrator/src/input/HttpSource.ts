@@ -159,6 +159,20 @@ export class HttpSource implements InputSource {
         const mediaDir = path.join(process.cwd(), 'assets', 'media');
         app.use('/media', express.static(mediaDir));
 
+        // ── APK download ───────────────────────────────────────────────────────
+        // GET /download/apk — serves the latest built Android debug APK,
+        // placed at assets/apk/yui.apk by `npm run build:apk`. Public (no auth,
+        // like ringtones/chimes/media) — sideload convenience from the web app.
+        const apkPath = path.join(process.cwd(), 'assets', 'apk', 'yui.apk');
+        app.get('/download/apk', (_req: any, res: any) => {
+            if (!fs.existsSync(apkPath)) {
+                return res.status(404).json({
+                    error: 'APK not built yet (run npm run build:apk)',
+                });
+            }
+            res.download(apkPath, 'yui.apk');
+        });
+
         // ── Static voice-debug wakes ───────────────────────────────────────────
         // Served at /voice-debug/wakes/<file>.wav — recorded wake-word WAVs for
         // replay in the voice debug panel (written by the voice server).
