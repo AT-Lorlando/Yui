@@ -76,15 +76,24 @@ export class ProactiveEngine {
                 await this.tryAction(ev.proposedAction, nowMs);
             }
 
-            // 5. formulation
-            const message = await this.phrase(ev);
-            if (!message) return;
+            // 5. formulation (avec le dernier message comme contexte)
+            const message = await this.phrase(
+                ev,
+                this.dedup.lastMessage(ev.subject),
+            );
+            if (!message) {
+                // RIEN : rien de neuf à dire — on ré-arme le cooldown (sans
+                // toucher au dernier message) pour ne pas re-consulter le LLM
+                // à chaque poll.
+                this.dedup.record(ev.subject, nowMs);
+                return;
+            }
 
             // 7. sortie
             await this.emit(message);
 
             // 8. trace
-            this.dedup.record(ev.subject, nowMs);
+            this.dedup.record(ev.subject, nowMs, message);
         } catch (err) {
             Logger.error(
                 `proactive: processCandidate "${ev.subject}" — ${err}`,
@@ -92,11 +101,18 @@ export class ProactiveEngine {
         }
     }
 
-    private async phrase(ev: CandidateEvent): Promise<string | null> {
+    private async phrase(
+        ev: CandidateEvent,
+        lastMessage?: string,
+    ): Promise<string | null> {
         if (ev.template) return ev.template;
         try {
             const sys = this.cfg.prompts?.phrase ?? DEFAULT_PHRASE_PROMPT;
-            const out = (await this.deps.complete(sys, ev.facts)).trim();
+            const user =
+                lastMessage && lastMessage.length > 0
+                    ? `Déjà signalé récemment : "${lastMessage}". Situation actuelle : ${ev.facts}`
+                    : ev.facts;
+            const out = (await this.deps.complete(sys, user)).trim();
             if (!out || out.toUpperCase() === 'RIEN') return null;
             return out;
         } catch (err) {
