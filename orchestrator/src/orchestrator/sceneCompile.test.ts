@@ -51,9 +51,71 @@ function testCompileMinimal(): void {
     ]);
 }
 
+function testBuildAutoIntro(): void {
+    const { buildAutoIntro } = require('./sceneCompile');
+    const fx = buildAutoIntro(
+        ['#1DB954', '#1E90FF'],
+        ['Salon', 'Bureau'],
+        'sweep',
+        'normal',
+    );
+    assert.strictEqual(fx.length, 2, 'un effet par couleur');
+    assert.deepStrictEqual(fx[0], {
+        type: 'sweep',
+        target: 'Salon',
+        colors: ['#1DB954'],
+        startAtMs: 0,
+        staggerMs: 120,
+        transitionMs: 350,
+        holdMs: 100,
+    });
+    assert.strictEqual(
+        fx[1].startAtMs,
+        450,
+        'chaînage = transitionMs + holdMs précédent',
+    );
+
+    // style none → vide
+    assert.deepStrictEqual(
+        buildAutoIntro(['#fff'], ['Salon'], 'none', 'normal'),
+        [],
+    );
+    // palette vide → vide
+    assert.deepStrictEqual(
+        buildAutoIntro([], ['Salon'], 'sweep', 'normal'),
+        [],
+    );
+}
+
+function testCompileAmbiance(): void {
+    const spec: SimpleSceneSpec = {
+        lights: [
+            { target: 'Salon', on: true, color: '#1DB954', brightness: 35 },
+            { target: 'Bureau', on: true, color: '#1E90FF', brightness: 35 },
+        ],
+        ambiance: { intro: { style: 'sweep', speed: 'normal' }, motion: true },
+    };
+    const { intro, floating } = compileSimpleScene(spec);
+    assert.ok(intro && intro.length === 2, 'intro générée depuis la palette');
+    assert.deepStrictEqual(intro![0].colors, ['#1DB954']);
+    assert.ok(floating, 'floating généré');
+    assert.deepStrictEqual(floating!.palette, ['#1DB954', '#1E90FF']);
+    assert.strictEqual(floating!.target, 'Salon');
+    assert.strictEqual(floating!.engine, 'software');
+
+    // pas d'ambiance → ni intro ni floating
+    const bare = compileSimpleScene({
+        lights: [{ target: 'Salon', on: true }],
+    });
+    assert.strictEqual(bare.intro, undefined);
+    assert.strictEqual(bare.floating, undefined);
+}
+
 function run(): void {
     testCompileState();
     testCompileMinimal();
+    testBuildAutoIntro();
+    testCompileAmbiance();
     console.log('All sceneCompile tests passed');
 }
 
