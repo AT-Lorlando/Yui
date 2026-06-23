@@ -46,6 +46,7 @@ export interface ToolsHandler {
         name: string;
         description: string;
         inputSchema: Record<string, unknown>;
+        hidden: boolean;
     }[];
     call: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 }

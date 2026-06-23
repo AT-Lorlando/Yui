@@ -36,6 +36,7 @@ import {
 export type { McpServerConfig, CollectedTool };
 export { buildServerConfigs, LLM_HIDDEN_TOOLS } from './serverConfigs';
 import { LLM_HIDDEN_TOOLS, buildServerConfigs } from './serverConfigs';
+import { annotateHidden } from './toolsHidden';
 
 /** Max messages kept in the rolling conversation buffer (user + assistant pairs). */
 const HISTORY_MAX = 10;
@@ -759,13 +760,15 @@ export class Orchestrator {
         name: string;
         description: string;
         inputSchema: Record<string, unknown>;
+        hidden: boolean;
     }[] {
-        return this.collectedTools.map((ct) => ({
+        const tools = this.collectedTools.map((ct) => ({
             serverName: ct.serverName,
             name: ct.tool.name,
             description: ct.tool.description,
-            inputSchema: ct.tool.inputSchema,
+            inputSchema: ct.tool.inputSchema as Record<string, unknown>,
         }));
+        return annotateHidden(tools, LLM_HIDDEN_TOOLS);
     }
 
     async *simulate(
