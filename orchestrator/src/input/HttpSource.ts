@@ -633,8 +633,6 @@ export class HttpSource implements InputSource {
                         favorite,
                         intro,
                         floating,
-                        authoring,
-                        simple,
                     } = req.body;
                     const scene = scenesHandler.create({
                         name,
@@ -646,8 +644,6 @@ export class HttpSource implements InputSource {
                         favorite,
                         intro,
                         floating,
-                        authoring,
-                        simple,
                     });
                     res.status(201).json(scene);
                 } catch (e: any) {
@@ -678,8 +674,6 @@ export class HttpSource implements InputSource {
                         favorite,
                         intro,
                         floating,
-                        authoring,
-                        simple,
                     } = req.body;
                     const scene = scenesHandler.update(req.params.id, {
                         name,
@@ -691,8 +685,6 @@ export class HttpSource implements InputSource {
                         favorite,
                         intro,
                         floating,
-                        authoring,
-                        simple,
                     });
                     if (!scene)
                         return res
@@ -710,27 +702,6 @@ export class HttpSource implements InputSource {
                 if (!scene)
                     return res.status(404).json({ error: 'Scene not found' });
                 res.json({ scene });
-            });
-
-            // Parse advanced actions back into a simple spec (null if not representable)
-            sc.post('/parse', (req: any, res: any) => {
-                try {
-                    const {
-                        setup = [],
-                        state = [],
-                        intro,
-                        floating,
-                    } = req.body ?? {};
-                    const simple = scenesHandler.parse({
-                        setup,
-                        state,
-                        intro,
-                        floating,
-                    });
-                    res.json({ simple });
-                } catch (e: any) {
-                    res.status(400).json({ error: e.message });
-                }
             });
 
             app.use('/scenes', sc);

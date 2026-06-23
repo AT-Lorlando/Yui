@@ -6,7 +6,6 @@ import { dataPath } from '@yui/shared';
 import type { PresenceState } from './presence';
 import type { AnimationEffect, FloatingConfig } from './animation/types';
 import { animationManager } from './animation/animationManager';
-import { compileIfSimple, type SimpleSceneSpec } from './sceneCompile';
 
 // ── Scene conditions ───────────────────────────────────────────────────────────
 
@@ -111,10 +110,6 @@ export interface Scene {
     intro?: AnimationEffect[];
     /** Optional continuous floating-colour config started after the state. */
     floating?: FloatingConfig;
-    /** Quel éditeur ouvrir : 'simple' (déclaratif) ou 'advanced' (liste d'actions). */
-    authoring?: 'simple' | 'advanced';
-    /** Spec déclarative — source de vérité quand authoring === 'simple'. */
-    simple?: SimpleSceneSpec;
 }
 
 export type CreateSceneInput = Omit<Scene, 'id' | 'createdAt' | 'builtIn'>;
@@ -153,9 +148,8 @@ export function getScene(id: string): Scene | null {
 }
 
 export function createScene(data: CreateSceneInput): Scene {
-    const compiled = compileIfSimple(data);
     const scene: Scene = {
-        ...compiled,
+        ...data,
         id: crypto.randomUUID().slice(0, 8),
         createdAt: Date.now(),
         builtIn: false,
@@ -186,7 +180,7 @@ export function updateScene(
     const scenes = loadScenes();
     const idx = scenes.findIndex((s) => s.id === id);
     if (idx === -1 || scenes[idx].builtIn) return null;
-    scenes[idx] = compileIfSimple({ ...scenes[idx], ...input });
+    scenes[idx] = { ...scenes[idx], ...input };
     saveScenes(scenes);
     Logger.info(`Scene updated: "${scenes[idx].name}" (${id})`);
     return scenes[idx];
@@ -397,35 +391,6 @@ export async function runVirtualAction(
                 typeof action.args.position === 'number'
                     ? action.args.position
                     : 80;
-            const covers = (await callTool('list_covers', {})) as any[];
-            await Promise.allSettled(
-                (covers ?? []).map((c) =>
-                    callTool('set_cover_position', {
-                        device: c.name ?? c.label ?? c.url,
-                        position,
-                    }),
-                ),
-            );
-            break;
-        }
-
-        case '_covers_all': {
-            // Ouvre/ferme tous les volets Somfy. position: 0 = ouvert, 100 = fermé.
-            // daylightOnly: ne rien faire la nuit (avant 7h / après 21h).
-            if (action.args.daylightOnly === true) {
-                const hour = new Date().getHours();
-                if (hour < 7 || hour >= 21) {
-                    Logger.debug('Scene _covers_all: night — skipping');
-                    break;
-                }
-            }
-            const closing = action.args.action === 'close';
-            const position =
-                typeof action.args.position === 'number'
-                    ? action.args.position
-                    : closing
-                    ? 80
-                    : 0;
             const covers = (await callTool('list_covers', {})) as any[];
             await Promise.allSettled(
                 (covers ?? []).map((c) =>
