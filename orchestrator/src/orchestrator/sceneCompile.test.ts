@@ -111,11 +111,110 @@ function testCompileAmbiance(): void {
     assert.strictEqual(bare.floating, undefined);
 }
 
+function testRepresentable(): void {
+    const { isSimpleRepresentable } = require('./sceneCompile');
+
+    // représentable : actions connues, pas de setup/condition/$fn
+    assert.strictEqual(
+        isSimpleRepresentable({
+            setup: [],
+            state: [
+                { tool: 'set_lights', args: { target: 'Salon', on: true } },
+                { tool: 'pause_music', args: {} },
+            ],
+        }),
+        true,
+    );
+    // non : setup non vide
+    assert.strictEqual(
+        isSimpleRepresentable({
+            setup: [{ tool: 'tv_on', args: {} }],
+            state: [],
+        }),
+        false,
+    );
+    // non : condition présente
+    assert.strictEqual(
+        isSimpleRepresentable({
+            setup: [],
+            state: [
+                {
+                    tool: 'set_lights',
+                    args: { target: 'Salon', on: true },
+                    condition: { hourBetween: [7, 22] },
+                } as any,
+            ],
+        }),
+        false,
+    );
+    // non : $fn dans les args
+    assert.strictEqual(
+        isSimpleRepresentable({
+            setup: [],
+            state: [
+                {
+                    tool: 'set_lights',
+                    args: {
+                        target: 'Salon',
+                        on: true,
+                        brightness: { $fn: 'time_brightness' },
+                    },
+                },
+            ],
+        }),
+        false,
+    );
+    // non : tool inconnu (casting)
+    assert.strictEqual(
+        isSimpleRepresentable({
+            setup: [],
+            state: [{ tool: 'cast_netflix', args: {} }],
+        }),
+        false,
+    );
+    // non : _lights_palette n'est pas représentable par device
+    assert.strictEqual(
+        isSimpleRepresentable({
+            setup: [],
+            state: [{ tool: '_lights_palette', args: { colors: ['#fff'] } }],
+        }),
+        false,
+    );
+}
+
+function testParseRoundTrip(): void {
+    const spec: SimpleSceneSpec = {
+        allOff: true,
+        lights: [
+            { target: 'Salon', on: true, brightness: 30, color: '#FF1744' },
+            { target: 'Bureau', on: false },
+        ],
+        music: { action: 'play', query: 'jazz', speaker: 'Salon' },
+        covers: { action: 'close', position: 80, daylightOnly: true },
+        door: { action: 'unlock' },
+    };
+    const { parseToSimpleSpec } = require('./sceneCompile');
+    const compiled = compileSimpleScene(spec);
+    const parsed = parseToSimpleSpec({ setup: [], state: compiled.state });
+    assert.deepStrictEqual(parsed, spec);
+
+    // non représentable → null
+    assert.strictEqual(
+        parseToSimpleSpec({
+            setup: [],
+            state: [{ tool: 'cast_netflix', args: {} }],
+        }),
+        null,
+    );
+}
+
 function run(): void {
     testCompileState();
     testCompileMinimal();
     testBuildAutoIntro();
     testCompileAmbiance();
+    testRepresentable();
+    testParseRoundTrip();
     console.log('All sceneCompile tests passed');
 }
 

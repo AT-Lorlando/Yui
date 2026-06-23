@@ -1,4 +1,4 @@
-import type { SceneAction } from './scenes';
+import type { Scene, SceneAction } from './scenes';
 import type { AnimationEffect, FloatingConfig } from './animation/types';
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -203,4 +203,124 @@ export function compileSimpleScene(spec: SimpleSceneSpec): CompiledScene {
     }
 
     return result;
+}
+
+// ── Détection & parsing inverse ───────────────────────────────────────────────
+
+const REPRESENTABLE_TOOLS = new Set([
+    '_lights_all_off',
+    'set_lights',
+    'pause_music',
+    'play_music',
+    'lock_door',
+    'unlock_door',
+    '_covers_all',
+    '_close_covers_if_daylight',
+]);
+
+function hasFn(value: unknown): boolean {
+    if (value === null || typeof value !== 'object') return false;
+    if ('$fn' in (value as object)) return true;
+    return Object.values(value as Record<string, unknown>).some(hasFn);
+}
+
+export function isSimpleRepresentable(
+    scene: Pick<Scene, 'setup' | 'state'>,
+): boolean {
+    if (scene.setup && scene.setup.length > 0) return false;
+    return scene.state.every((a) => {
+        if (!REPRESENTABLE_TOOLS.has(a.tool)) return false;
+        if (a.condition) return false;
+        if (hasFn(a.args)) return false;
+        return true;
+    });
+}
+
+export function parseToSimpleSpec(
+    scene: Pick<Scene, 'setup' | 'state' | 'intro' | 'floating'>,
+): SimpleSceneSpec | null {
+    if (!isSimpleRepresentable(scene)) return null;
+
+    const spec: SimpleSceneSpec = { lights: [] };
+
+    for (const a of scene.state) {
+        switch (a.tool) {
+            case '_lights_all_off':
+                spec.allOff = true;
+                break;
+            case 'set_lights': {
+                const args = a.args as {
+                    target: string;
+                    on?: boolean;
+                    brightness?: number;
+                    color?: string;
+                };
+                if (args.on === false) {
+                    spec.lights.push({ target: args.target, on: false });
+                } else {
+                    const light: SimpleLightTarget = {
+                        target: args.target,
+                        on: true,
+                    };
+                    if (args.brightness !== undefined)
+                        light.brightness = args.brightness;
+                    if (args.color !== undefined) light.color = args.color;
+                    spec.lights.push(light);
+                }
+                break;
+            }
+            case 'pause_music':
+                spec.music = { action: 'off' };
+                break;
+            case 'play_music': {
+                const args = a.args as { speakerName?: string; query?: string };
+                spec.music = { action: 'play' };
+                if (args.query) spec.music.query = args.query;
+                if (args.speakerName) spec.music.speaker = args.speakerName;
+                break;
+            }
+            case 'lock_door':
+                spec.door = { action: 'lock' };
+                break;
+            case 'unlock_door':
+                spec.door = { action: 'unlock' };
+                break;
+            case '_covers_all': {
+                const args = a.args as {
+                    action?: 'open' | 'close';
+                    position?: number;
+                    daylightOnly?: boolean;
+                };
+                spec.covers = { action: args.action ?? 'close' };
+                if (args.position !== undefined)
+                    spec.covers.position = args.position;
+                if (args.daylightOnly !== undefined)
+                    spec.covers.daylightOnly = args.daylightOnly;
+                break;
+            }
+            case '_close_covers_if_daylight': {
+                const args = a.args as { position?: number };
+                spec.covers = { action: 'close', daylightOnly: true };
+                if (args.position !== undefined)
+                    spec.covers.position = args.position;
+                break;
+            }
+        }
+    }
+
+    // Ambiance best-effort : style depuis le 1er effet, motion si floating présent.
+    if (scene.intro?.length) {
+        const style = scene.intro[0].type;
+        if (style === 'sweep' || style === 'pulse' || style === 'fade') {
+            spec.ambiance = {
+                ...(spec.ambiance ?? {}),
+                intro: { style, speed: 'normal' },
+            };
+        }
+    }
+    if (scene.floating) {
+        spec.ambiance = { ...(spec.ambiance ?? {}), motion: true };
+    }
+
+    return spec;
 }
