@@ -38,6 +38,12 @@ export interface ScenesHandler {
     toggleFavorite: (
         id: string,
     ) => import('../orchestrator/scenes').Scene | null;
+    parse: (
+        scene: Pick<
+            import('../orchestrator/scenes').Scene,
+            'setup' | 'state' | 'intro' | 'floating'
+        >,
+    ) => import('../orchestrator/sceneCompile').SimpleSceneSpec | null;
 }
 
 export interface ToolsHandler {

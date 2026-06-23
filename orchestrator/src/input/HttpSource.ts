@@ -712,6 +712,27 @@ export class HttpSource implements InputSource {
                 res.json({ scene });
             });
 
+            // Parse advanced actions back into a simple spec (null if not representable)
+            sc.post('/parse', (req: any, res: any) => {
+                try {
+                    const {
+                        setup = [],
+                        state = [],
+                        intro,
+                        floating,
+                    } = req.body ?? {};
+                    const simple = scenesHandler.parse({
+                        setup,
+                        state,
+                        intro,
+                        floating,
+                    });
+                    res.json({ simple });
+                } catch (e: any) {
+                    res.status(400).json({ error: e.message });
+                }
+            });
+
             app.use('/scenes', sc);
         }
 

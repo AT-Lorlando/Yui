@@ -30,6 +30,7 @@ import {
     runScene,
     toggleFavorite,
 } from './orchestrator/scenes';
+import { parseToSimpleSpec } from './orchestrator/sceneCompile';
 import Logger from './logger';
 import {
     listConversations,
@@ -118,6 +119,7 @@ async function main() {
         update: updateScene,
         remove: deleteScene,
         toggleFavorite,
+        parse: parseToSimpleSpec,
     };
 
     const toolsHandler = {
