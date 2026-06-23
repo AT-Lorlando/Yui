@@ -18,7 +18,7 @@ export const DEFAULT_CONFIG: ProactiveConfig = {
     chattiness: 'normal',
     quietHours: { start: '23:00', end: '07:00' },
     digestTime: '07:00',
-    defaultCooldownMin: 30,
+    defaultCooldownMin: 60,
     automationGuardWindowMin: 60,
     whitelist: [],
     prompts: { phrase: DEFAULT_PHRASE_PROMPT, digest: DEFAULT_DIGEST_PROMPT },
