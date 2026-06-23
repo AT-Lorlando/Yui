@@ -16,6 +16,7 @@ export const LLM_HIDDEN_TOOLS = new Set([
     'list_media',
     'cast_wallpaper',
     'cast_video',
+    'cast_app',
     'transfer_playback_to_speakers',
     'light_set',
     'lights_palette_set',

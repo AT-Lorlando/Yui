@@ -13,6 +13,7 @@ import {
 import { ChromecastController, listMediaFiles } from './ChromecastController';
 import { TvController } from './TvController';
 import { CHROMECAST_TOOLS } from './tools';
+import { handleCastApp } from './castAppHandler';
 import Logger from './logger';
 
 const chromecast = new ChromecastController();
@@ -107,6 +108,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         },
                     ],
                 };
+            }
+
+            case 'cast_app': {
+                const text = await withTvOn(
+                    handleCastApp((args ?? {}) as any, {
+                        netflix: (t) => chromecast.castNetflix(t),
+                        youtube: (s) => chromecast.castYoutube(s),
+                        crunchyroll: (t) => chromecast.castCrunchyroll(t),
+                        disney: (t) => chromecast.castDisney(t),
+                        prime: (t) => chromecast.castPrime(t),
+                    }),
+                );
+                return { content: [{ type: 'text', text }] };
             }
 
             case 'cast_media': {

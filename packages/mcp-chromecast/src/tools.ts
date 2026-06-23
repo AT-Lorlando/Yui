@@ -1,3 +1,5 @@
+import { CAST_APP_TOOL } from './castAppHandler';
+
 export const CHROMECAST_TOOLS = [
     // ── Cast tools (TV auto-prep is done internally) ──────────────────────────
     {
@@ -93,6 +95,7 @@ export const CHROMECAST_TOOLS = [
             required: [],
         },
     },
+    CAST_APP_TOOL,
     {
         name: 'cast_media',
         description:
