@@ -403,6 +403,35 @@ export async function runVirtualAction(
             break;
         }
 
+        case '_covers_all': {
+            // Ouvre/ferme tous les volets Somfy. position: 0 = ouvert, 100 = fermé.
+            // daylightOnly: ne rien faire la nuit (avant 7h / après 21h).
+            if (action.args.daylightOnly === true) {
+                const hour = new Date().getHours();
+                if (hour < 7 || hour >= 21) {
+                    Logger.debug('Scene _covers_all: night — skipping');
+                    break;
+                }
+            }
+            const closing = action.args.action === 'close';
+            const position =
+                typeof action.args.position === 'number'
+                    ? action.args.position
+                    : closing
+                    ? 80
+                    : 0;
+            const covers = (await callTool('list_covers', {})) as any[];
+            await Promise.allSettled(
+                (covers ?? []).map((c) =>
+                    callTool('set_cover_position', {
+                        device: c.name ?? c.label ?? c.url,
+                        position,
+                    }),
+                ),
+            );
+            break;
+        }
+
         case '_doors_lock_all': {
             await callTool('lock_door', {});
             break;
