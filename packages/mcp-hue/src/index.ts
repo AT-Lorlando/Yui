@@ -21,6 +21,7 @@ import {
     stopAllAmbiance,
 } from './GoveeAmbiance';
 import { buildHueTools } from './tools';
+import { handleLightSet, handleLightsPaletteSet } from './lightSetHandlers';
 import { discoverLights } from './discovery';
 import Logger from './logger';
 
@@ -465,6 +466,48 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         },
                     ],
                 };
+            }
+
+            case 'light_set':
+            case 'lights_palette_set': {
+                const deps = {
+                    getRoomNames: () => hue.getRoomNames(),
+                    setRoomLights: (room: string, opts: any) =>
+                        hue.setRoomLights(room, opts),
+                    setRoomPalette: (
+                        room: string,
+                        colors: string[],
+                        b?: number,
+                    ) => hue.setRoomPalette(room, colors, b),
+                    findLightByName: (n: string) => {
+                        const lc = n.toLowerCase().trim();
+                        const found = store
+                            .getAll()
+                            .find(
+                                (l) =>
+                                    l.name.toLowerCase() === lc &&
+                                    typeof l.id === 'number',
+                            );
+                        if (!found) return undefined;
+                        return { id: found.id as number, name: found.name };
+                    },
+                    setLight: async (id: number, opts: any) => {
+                        if (opts.on === false) {
+                            await hue.setLightState(id, false);
+                            return;
+                        }
+                        await hue.setLightState(id, true);
+                        if (opts.brightness !== undefined)
+                            await hue.setLightBrightness(id, opts.brightness);
+                        if (opts.color !== undefined)
+                            await hue.setLightColor(id, opts.color);
+                    },
+                };
+                const msg =
+                    name === 'light_set'
+                        ? await handleLightSet(args as any, deps)
+                        : await handleLightsPaletteSet(args as any, deps);
+                return { content: [{ type: 'text', text: msg }] };
             }
 
             default:

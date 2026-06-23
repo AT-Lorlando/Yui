@@ -1,3 +1,5 @@
+import { buildLightSetTools } from './lightSetHandlers';
+
 /**
  * Build the Hue MCP tool definitions.
  * Room and light names are injected at startup so the LLM never needs list_lights.
@@ -267,6 +269,7 @@ export function buildHueTools(roomNames: string[], lightNames: string[] = []) {
                 required: [],
             },
         },
+        ...buildLightSetTools(roomNames, lightNames),
     ];
 }
 

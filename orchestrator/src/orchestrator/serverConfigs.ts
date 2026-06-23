@@ -17,6 +17,8 @@ export const LLM_HIDDEN_TOOLS = new Set([
     'cast_wallpaper',
     'cast_video',
     'transfer_playback_to_speakers',
+    'light_set',
+    'lights_palette_set',
 ]);
 
 /**
