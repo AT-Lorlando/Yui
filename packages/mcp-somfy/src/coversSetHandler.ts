@@ -12,7 +12,7 @@ export function buildCoversSetTool(coverNames: string[]) {
     return {
         name: 'covers_set',
         description:
-            "Positionne un volet ou tous les volets (0 = ouvert, 100 = fermé). Caché du LLM — pour l'éditeur.",
+            'Positionne un volet ou tous les volets (0 = ouvert, 100 = fermé).',
         inputSchema: {
             type: 'object' as const,
             properties: {

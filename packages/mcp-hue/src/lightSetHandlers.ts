@@ -32,7 +32,7 @@ export function buildLightSetTools(
         {
             name: 'light_set',
             description:
-                "Allume/éteint une lampe, une pièce ou tout, avec luminosité et couleur. Caché du LLM — pour l'éditeur.",
+                'Allume/éteint une lampe, une pièce ou tout, avec luminosité et couleur.',
             inputSchema: {
                 type: 'object' as const,
                 properties: {
@@ -64,7 +64,7 @@ export function buildLightSetTools(
         {
             name: 'lights_palette_set',
             description:
-                "Applique un dégradé de couleurs à une pièce ou à tout. Caché du LLM — pour l'éditeur.",
+                'Applique un dégradé de couleurs à une pièce ou à tout.',
             inputSchema: {
                 type: 'object' as const,
                 properties: {

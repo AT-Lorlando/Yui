@@ -10,8 +10,7 @@ const APPS = ['netflix', 'youtube', 'crunchyroll', 'disney', 'prime'] as const;
 
 export const CAST_APP_TOOL = {
     name: 'cast_app',
-    description:
-        "Lance une app de streaming sur la TV (avec titre optionnel). Caché du LLM — pour l'éditeur.",
+    description: 'Lance une app de streaming sur la TV (avec titre optionnel).',
     inputSchema: {
         type: 'object' as const,
         properties: {

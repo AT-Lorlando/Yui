@@ -27,8 +27,7 @@ export function buildMusicPlayTool(speakerNames: string[] = []) {
     if (speakerNames.length) speaker.enum = speakerNames;
     return {
         name: 'music_play',
-        description:
-            "Lance de la musique (recherche) sur un haut-parleur. Caché du LLM — pour l'éditeur.",
+        description: 'Lance de la musique (recherche) sur un haut-parleur.',
         inputSchema: {
             type: 'object' as const,
             properties: {

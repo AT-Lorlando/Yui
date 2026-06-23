@@ -2,7 +2,7 @@ export const TV_INPUTS = ['HDMI1', 'HDMI2', 'HDMI3', 'TV', 'AV'] as const;
 
 export const TV_INPUT_TOOL = {
     name: 'tv_input',
-    description: "Change l'entrée de la TV. Caché du LLM — pour l'éditeur.",
+    description: "Change l'entrée de la TV.",
     inputSchema: {
         type: 'object' as const,
         properties: {

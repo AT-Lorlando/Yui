@@ -501,7 +501,9 @@ async function main() {
     // Populate speaker enum best-effort after auth
     try {
         const devs = await spotify.getDevices();
-        SPOTIFY_TOOL_LIST = buildSpotifyTools(devs.map((d) => d.name));
+        SPOTIFY_TOOL_LIST = buildSpotifyTools(
+            devs.map((d) => d.name).filter((n): n is string => !!n),
+        );
     } catch {
         /* keep no-enum fallback */
     }
