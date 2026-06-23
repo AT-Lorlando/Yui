@@ -11,7 +11,8 @@ import {
     McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { TahomaClient } from './TahomaClient';
-import { SOMFY_TOOLS } from './tools';
+import { buildSomfyTools } from './tools';
+import { handleCoversSet } from './coversSetHandler';
 import Logger from './logger';
 
 const host = process.env.TAHOMA_HOST ?? '';
@@ -25,13 +26,15 @@ if (!host || !token) {
 
 const tahoma = new TahomaClient(host, port, token);
 
+let SOMFY_TOOL_LIST = buildSomfyTools();
+
 const server = new Server(
     { name: 'mcp-somfy', version: '1.0.0' },
     { capabilities: { tools: {} } },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: SOMFY_TOOLS };
+    return { tools: SOMFY_TOOL_LIST };
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -208,6 +211,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
 
+            case 'covers_set': {
+                const msg = await handleCoversSet(a, {
+                    listCovers: () => tahoma.listCovers(),
+                    exec: (url, cmd, params, label) =>
+                        tahoma.exec(url, cmd, params, label),
+                });
+                return { content: [{ type: 'text', text: msg }] };
+            }
+
             default:
                 throw new McpError(
                     ErrorCode.MethodNotFound,
@@ -229,6 +241,9 @@ async function main() {
     Logger.info(`mcp-somfy: connecting to ${host}:${port}…`);
     try {
         await tahoma.fetchDevices();
+        SOMFY_TOOL_LIST = buildSomfyTools(
+            tahoma.listCovers().map((c) => c.name),
+        );
         Logger.info(`mcp-somfy: ${tahoma.listCovers().length} cover(s) ready`);
     } catch (err) {
         Logger.warn(

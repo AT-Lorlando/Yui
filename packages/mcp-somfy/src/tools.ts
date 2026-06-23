@@ -1,3 +1,5 @@
+import { buildCoversSetTool } from './coversSetHandler';
+
 export const SOMFY_TOOLS = [
     {
         name: 'list_covers',
@@ -109,3 +111,7 @@ export const SOMFY_TOOLS = [
         },
     },
 ];
+
+export function buildSomfyTools(coverNames: string[] = []) {
+    return [...SOMFY_TOOLS, buildCoversSetTool(coverNames)];
+}
