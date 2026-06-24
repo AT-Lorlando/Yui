@@ -125,6 +125,70 @@ async function run(): Promise<void> {
         });
     }
 
+    // listTasks: filters by state and project client-side
+    {
+        const { fetchFn } = fakeFetch({
+            body: [
+                { id: '1', state: 'todo', project: 'todos/Work' },
+                { id: '2', state: 'done', project: 'todos/Work' },
+                { id: '3', state: 'todo', project: 'todos/Home' },
+            ],
+        });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        const out = await c.listTasks({ state: 'todo', project: 'todos/Work' });
+        assert.deepStrictEqual(
+            out.map((t: any) => t.id),
+            ['1'],
+        );
+    }
+
+    // listTasks: no filter returns all
+    {
+        const { calls, fetchFn } = fakeFetch({
+            body: [{ id: '1' }, { id: '2' }],
+        });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        const out = await c.listTasks();
+        assert.strictEqual(calls[0].url, 'http://x/api/v1/todos');
+        assert.strictEqual(out.length, 2);
+    }
+
+    // createTask: POST /todos, undefined fields dropped
+    {
+        const { calls, fetchFn } = fakeFetch({ body: { id: '9' } });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        await c.createTask({ title: 'Buy milk', priority: 'high' });
+        assert.strictEqual(calls[0].url, 'http://x/api/v1/todos');
+        assert.deepStrictEqual(JSON.parse(calls[0].init.body), {
+            title: 'Buy milk',
+            priority: 'high',
+        });
+    }
+
+    // updateTask: PUT /todos/{id}
+    {
+        const { calls, fetchFn } = fakeFetch({ body: { id: '9' } });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        await c.updateTask('9', { state: 'done' });
+        assert.strictEqual(calls[0].url, 'http://x/api/v1/todos/9');
+        assert.strictEqual(calls[0].init.method, 'PUT');
+        assert.deepStrictEqual(JSON.parse(calls[0].init.body), {
+            state: 'done',
+        });
+    }
+
+    // deleteProject: DELETE /todos/projects/{encoded}
+    {
+        const { calls, fetchFn } = fakeFetch({ status: 204 });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        await c.deleteProject('todos/Work');
+        assert.strictEqual(
+            calls[0].url,
+            'http://x/api/v1/todos/projects/todos%2FWork',
+        );
+        assert.strictEqual(calls[0].init.method, 'DELETE');
+    }
+
     console.log('All YojiClient core tests passed');
 }
 

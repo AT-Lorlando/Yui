@@ -15,6 +15,22 @@ export interface YojiClientOptions {
     fetchFn?: FetchFn;
 }
 
+export interface CreateTaskInput {
+    title: string;
+    state?: TaskState;
+    project?: string | null;
+    parent?: string;
+    description?: string;
+    priority?: TaskPriority;
+}
+
+export interface UpdateTaskInput {
+    title?: string;
+    state?: TaskState;
+    description?: string;
+    priority?: TaskPriority;
+}
+
 export class YojiClient {
     private baseUrl: string;
     private apiKey?: string;
@@ -94,5 +110,39 @@ export class YojiClient {
     }
     syncVault(): Promise<any> {
         return this.request('POST', '/sync');
+    }
+
+    // ── Todos & projects ───────────────────────────────────────────────────────
+    async listTasks(filter?: {
+        state?: TaskState;
+        project?: string;
+    }): Promise<any[]> {
+        const tasks = await this.request<any[]>('GET', '/todos');
+        return tasks.filter(
+            (t) =>
+                (!filter?.state || t.state === filter.state) &&
+                (!filter?.project || t.project === filter.project),
+        );
+    }
+    createTask(input: CreateTaskInput): Promise<any> {
+        return this.request('POST', '/todos', input);
+    }
+    updateTask(id: string, input: UpdateTaskInput): Promise<any> {
+        return this.request('PUT', `/todos/${encodeURIComponent(id)}`, input);
+    }
+    deleteTask(id: string): Promise<void> {
+        return this.request('DELETE', `/todos/${encodeURIComponent(id)}`);
+    }
+    listProjects(): Promise<any[]> {
+        return this.request('GET', '/todos/projects');
+    }
+    createProject(name: string, description?: string): Promise<any> {
+        return this.request('POST', '/todos/projects', { name, description });
+    }
+    deleteProject(path: string): Promise<void> {
+        return this.request(
+            'DELETE',
+            `/todos/projects/${this.encodePath(path)}`,
+        );
     }
 }
