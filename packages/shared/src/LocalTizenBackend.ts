@@ -21,8 +21,8 @@ function loadToken(): string | null {
 }
 
 function saveToken(token: string): void {
-    fs.mkdirSync(path.dirname(TOKEN_FILE), { recursive: true });
-    fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token }));
+    fs.mkdirSync(path.dirname(TOKEN_FILE), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token }), { mode: 0o600 });
 }
 
 /** Contrôle TV local : WoL + WebSocket télécommande Tizen (wss://:8002). */

@@ -2,6 +2,7 @@
 import axios from 'axios';
 import http from 'http';
 import { URL } from 'url';
+import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { dataPath } from './dataPaths';
@@ -63,8 +64,8 @@ export class SmartThingsAuth {
 
     private static writeCache(c: TokenCache): void {
         const f = cacheFile();
-        fs.mkdirSync(path.dirname(f), { recursive: true });
-        fs.writeFileSync(f, JSON.stringify(c));
+        fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
+        fs.writeFileSync(f, JSON.stringify(c), { mode: 0o600 });
     }
 
     /** Access token valide depuis le cache, sinon refresh. */
@@ -100,6 +101,7 @@ export class SmartThingsAuth {
         clientSecret: string,
         redirectUri: string,
     ): Promise<{ accessToken: string; refreshToken: string }> {
+        const state = randomBytes(32).toString('base64url');
         const authorizeUrl =
             `${AUTHORIZE_URL}?` +
             new URLSearchParams({
@@ -107,11 +109,12 @@ export class SmartThingsAuth {
                 response_type: 'code',
                 redirect_uri: redirectUri,
                 scope: SCOPES,
+                state,
             }).toString();
         console.log('\nOuvre cette URL pour autoriser Yui (SmartThings):\n');
         console.log(`  ${authorizeUrl}\n`);
 
-        const code = await SmartThingsAuth.waitForCallback(redirectUri);
+        const code = await SmartThingsAuth.waitForCallback(redirectUri, state);
         const params = new URLSearchParams({
             grant_type: 'authorization_code',
             code,
@@ -130,11 +133,19 @@ export class SmartThingsAuth {
         };
     }
 
-    private static waitForCallback(redirectUri: string): Promise<string> {
+    private static waitForCallback(
+        redirectUri: string,
+        expectedState: string,
+    ): Promise<string> {
         return new Promise((resolve, reject) => {
             const parsed = new URL(redirectUri);
             const port = Number(parsed.port) || 6147;
             const callbackPath = parsed.pathname || '/callback';
+            const host =
+                parsed.hostname === 'localhost' ||
+                parsed.hostname === '127.0.0.1'
+                    ? '127.0.0.1'
+                    : '0.0.0.0';
             const server = http.createServer((req, res) => {
                 const u = new URL(req.url ?? '', `http://localhost:${port}`);
                 if (u.pathname !== callbackPath) {
@@ -152,6 +163,14 @@ export class SmartThingsAuth {
                     return;
                 }
                 if (code) {
+                    const returnedState = u.searchParams.get('state');
+                    if (returnedState !== expectedState) {
+                        res.writeHead(400);
+                        res.end('<h1>State invalide (CSRF)</h1>');
+                        server.close();
+                        reject(new Error('OAuth state mismatch (CSRF)'));
+                        return;
+                    }
                     res.writeHead(200);
                     res.end('<h1>Autorisé ! Tu peux fermer cet onglet.</h1>');
                     server.close();
@@ -161,9 +180,9 @@ export class SmartThingsAuth {
                 res.writeHead(400);
                 res.end('<h1>Code manquant</h1>');
             });
-            server.listen(port, '0.0.0.0', () => {
+            server.listen(port, host, () => {
                 console.log(
-                    `En attente du callback sur 0.0.0.0:${port}${callbackPath}`,
+                    `En attente du callback sur ${host}:${port}${callbackPath}`,
                 );
             });
             setTimeout(() => {

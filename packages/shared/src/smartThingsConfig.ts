@@ -44,8 +44,8 @@ export function loadSmartThingsCreds(): SmartThingsCreds {
 
 export function saveSmartThingsCreds(creds: SmartThingsCreds): void {
     const file = dataPath(CREDS_FILE);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(creds, null, 2));
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, JSON.stringify(creds, null, 2), { mode: 0o600 });
 }
 
 export function loadTvConfig(): TvConfig {
