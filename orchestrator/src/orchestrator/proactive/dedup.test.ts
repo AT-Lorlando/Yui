@@ -87,6 +87,30 @@ function run(): void {
         }
     }
 
+    // ── latest() ────────────────────────────────────────────────────────────────
+    {
+        const d = new Dedup(); // pas de fichier → purement en mémoire
+        assert.strictEqual(d.latest(), null, 'latest() vide → null');
+
+        d.record('weather', 1000, 'Il va pleuvoir cet après-midi.');
+        d.record('mail', 3000, 'Deux mails importants non lus.');
+        d.record('calendar', 2000, 'RDV dentiste à 15h.');
+
+        assert.deepStrictEqual(
+            d.latest(),
+            { message: 'Deux mails importants non lus.', at: 3000 },
+            'latest() = message au at le plus récent',
+        );
+
+        // un ré-arme sans message (RIEN) ne doit pas écraser le dernier message émis
+        d.record('mail', 5000);
+        assert.strictEqual(
+            d.latest()?.message,
+            'Deux mails importants non lus.',
+            'latest() ignore les entrées sans message',
+        );
+    }
+
     console.log('All dedup tests passed');
 }
 
