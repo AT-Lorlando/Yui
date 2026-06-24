@@ -74,6 +74,13 @@ async function run() {
         assert.ok(!(err instanceof TvOfflineError));
         assert.strictEqual(err.message, 'boom');
     }
+    // translate : HTTP 409 sans code → TvOfflineError aussi
+    {
+        const err = SmartThingsClient.translate({
+            response: { status: 409, data: {} },
+        });
+        assert.ok(err instanceof TvOfflineError);
+    }
     console.log('All SmartThingsClient tests passed');
 }
 

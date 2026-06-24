@@ -71,19 +71,27 @@ export class SmartThingsClient implements StDevice {
     }
 
     async getStatusRaw(): Promise<any> {
-        const r = await this.http.get(
-            `${BASE}/devices/${this.deviceId}/components/main/status`,
-            await this.headers(),
-        );
-        return r.data;
+        try {
+            const r = await this.http.get(
+                `${BASE}/devices/${this.deviceId}/components/main/status`,
+                await this.headers(),
+            );
+            return r.data;
+        } catch (e) {
+            throw SmartThingsClient.translate(e);
+        }
     }
 
     async getHealth(): Promise<'ONLINE' | 'OFFLINE'> {
-        const r = await this.http.get(
-            `${BASE}/devices/${this.deviceId}/health`,
-            await this.headers(),
-        );
-        return r.data?.state === 'ONLINE' ? 'ONLINE' : 'OFFLINE';
+        try {
+            const r = await this.http.get(
+                `${BASE}/devices/${this.deviceId}/health`,
+                await this.headers(),
+            );
+            return r.data?.state === 'ONLINE' ? 'ONLINE' : 'OFFLINE';
+        } catch (e) {
+            throw SmartThingsClient.translate(e);
+        }
     }
 
     async refresh(): Promise<void> {
