@@ -17,6 +17,7 @@ const REGISTRY: Record<string, DataCategory> = {
     // shared — durable credentials
     'firebase-service-account.json': 'shared',
     'google.json': 'shared',
+    'smartthings.json': 'shared',
     // config — hand-edited, versionable
     'settings.json': 'config',
     'integrations.json': 'config',
@@ -30,6 +31,7 @@ const REGISTRY: Record<string, DataCategory> = {
     'presence-rules.json': 'config',
     'timer-presets.json': 'config',
     'broadlink-codes.json': 'config',
+    'smartthings-tv.json': 'config',
     // state — runtime, disposable
     'amp-state.json': 'state',
     'timers.json': 'state',
@@ -42,6 +44,7 @@ const REGISTRY: Record<string, DataCategory> = {
     'memory.json': 'state',
     'fcm-token.json': 'state',
     'samsung-tv-token.json': 'state',
+    'smartthings-token.json': 'state',
     'schedules.json': 'state',
 };
 
