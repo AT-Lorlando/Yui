@@ -70,6 +70,46 @@ interface NetworkCheckResult {
     present: boolean | null;
 }
 
+interface MikrotikEntry {
+    'mac-address'?: string;
+    status?: string;
+    'last-seen'?: string;
+}
+
+/**
+ * Pure : décide si le téléphone est présent à partir des entrées ARP + bail DHCP.
+ *
+ * - ARP `reachable` = vérité temps réel (le tél. répond maintenant).
+ * - DHCP `bound` + `last-seen` récent = présence lissée (survit au WiFi
+ *   power-save qui fait passer l'ARP en `stale`/`failed` toutes les ~2 min).
+ *
+ * ⚠️ Un bail `bound` SEUL ne suffit pas : il persiste jusqu'à expiration bien
+ * après le départ du téléphone (d'où le faux positif "toujours home"). On exige
+ * donc un `last-seen` dans la fenêtre `dhcpFreshnessMs`.
+ */
+export function evaluateNetworkPresence(args: {
+    phoneMac: string;
+    arp?: MikrotikEntry | null;
+    lease?: MikrotikEntry | null;
+    dhcpFreshnessMs: number;
+}): boolean {
+    const mac = args.phoneMac.toLowerCase();
+    const macMatches = (e?: MikrotikEntry | null): boolean =>
+        e?.['mac-address']?.toLowerCase() === mac;
+
+    const arpReachable =
+        macMatches(args.arp) && args.arp?.status === 'reachable';
+
+    const lastSeen = args.lease?.['last-seen'];
+    const dhcpFresh =
+        macMatches(args.lease) &&
+        args.lease?.status === 'bound' &&
+        typeof lastSeen === 'string' &&
+        parseMikrotikDuration(lastSeen) <= args.dhcpFreshnessMs;
+
+    return arpReachable || dhcpFresh;
+}
+
 /**
  * Check if the phone is on the network via Mikrotik DHCP + ARP.
  *
@@ -81,7 +121,9 @@ interface NetworkCheckResult {
  * Using DHCP last-seen prevents the noisy "absent 2min / found / absent 2min" log
  * pattern caused by Android WiFi power-saving waking the radio briefly.
  */
-export async function checkPhoneOnNetwork(): Promise<NetworkCheckResult> {
+export async function checkPhoneOnNetwork(
+    dhcpFreshnessMs = 900_000,
+): Promise<NetworkCheckResult> {
     const auth = Buffer.from(`${MIKROTIK_USER}:${MIKROTIK_PASS}`).toString(
         'base64',
     );
@@ -111,34 +153,25 @@ export async function checkPhoneOnNetwork(): Promise<NetworkCheckResult> {
                 return fail;
             }
 
-            // DHCP: phone is associated to the network (survives WiFi power-save sleep)
-            let dhcpBound = false;
-            if (dhcpRes.ok) {
-                const leases: { 'mac-address'?: string; status?: string }[] =
-                    await dhcpRes.json();
-                const lease = leases[0];
-                dhcpBound =
-                    lease?.['mac-address']?.toLowerCase() === PHONE_MAC &&
-                    lease?.status === 'bound';
-            }
+            const lease: MikrotikEntry | null = dhcpRes.ok
+                ? ((await dhcpRes.json()) as MikrotikEntry[])[0] ?? null
+                : null;
+            const arp: MikrotikEntry | null = arpRes.ok
+                ? ((await arpRes.json()) as MikrotikEntry[])[0] ?? null
+                : null;
 
-            // ARP: real-time reachability (true only when phone is awake/responding)
-            let arpReachable = false;
-            if (arpRes.ok) {
-                const entries: { 'mac-address'?: string; status?: string }[] =
-                    await arpRes.json();
-                const entry = entries[0];
-                arpReachable =
-                    entry?.['mac-address']?.toLowerCase() === PHONE_MAC &&
-                    entry?.status === 'reachable';
-            }
-
-            // present = DHCP bound OR ARP reachable
-            const present = dhcpBound || arpReachable;
+            const present = evaluateNetworkPresence({
+                phoneMac: PHONE_MAC,
+                arp,
+                lease,
+                dhcpFreshnessMs,
+            });
 
             Logger.debug(
-                `[presence] DHCP=${dhcpBound ? 'bound' : 'absent'} ARP=${
-                    arpReachable ? 'reachable' : 'stale'
+                `[presence] ARP=${arp?.status ?? 'none'} DHCP=${
+                    lease?.status ?? 'none'
+                }/last-seen=${lease?.['last-seen'] ?? '-'} → ${
+                    present ? 'present' : 'absent'
                 }`,
             );
             return { present };
@@ -177,6 +210,7 @@ export class PresenceManager {
         null;
     private _onEvent: ((e: PresenceEventType) => void) | null = null;
     private burst: MacBurst | null = null;
+    private pollTimer: NodeJS.Timeout | null = null;
 
     onChange(cb: (p: PresenceState, n: PresenceState) => void): void {
         this._onChange = cb;
@@ -234,29 +268,34 @@ export class PresenceManager {
 
     private armBurst(): void {
         this.burst?.cancel();
-        const cfg = loadPresenceConfig().mac;
+        const cfg = loadPresenceConfig();
         this.burst = createMacBurst({
-            intervalMs: cfg.burstIntervalMs,
-            windowMs: cfg.burstWindowMs,
-            poll: async () => (await checkPhoneOnNetwork()).present,
+            intervalMs: cfg.mac.burstIntervalMs,
+            windowMs: cfg.mac.burstWindowMs,
+            poll: async () =>
+                (await checkPhoneOnNetwork(cfg.net.dhcpFreshnessMs)).present,
             onJoin: () => this.emit('network-join'),
         });
         this.burst.start();
     }
 
     start(): void {
-        Logger.info('[presence] manager started (geofence-authoritative)');
+        Logger.info(
+            '[presence] manager started (geofence + network safety-net poll)',
+        );
         void this.seedState();
+        this.startPoll();
     }
 
     /**
      * Détermine l'état courant UNE fois au démarrage via le réseau (le geofence
      * est edge-triggered et ne donne pas l'état initial). N'émet pas d'event de
      * règle : seed purement informatif, les transitions restent pilotées par le
-     * geofence.
+     * geofence / le poll.
      */
     private async seedState(): Promise<void> {
-        const { present } = await checkPhoneOnNetwork();
+        const { net } = loadPresenceConfig();
+        const { present } = await checkPhoneOnNetwork(net.dhcpFreshnessMs);
         if (present === null) {
             Logger.info(
                 '[presence] startup seed skipped (router unreachable) — state=unknown',
@@ -268,7 +307,39 @@ export class PresenceManager {
         this.setState(next);
     }
 
+    private startPoll(): void {
+        const { net } = loadPresenceConfig();
+        this.pollTimer = setInterval(
+            () => void this.pollNetwork(),
+            net.pollIntervalMs,
+        );
+        if (typeof this.pollTimer.unref === 'function') this.pollTimer.unref();
+    }
+
+    /**
+     * Filet de sécurité réseau : si le geofence rate un event (ex : l'app
+     * Android ne délivre pas l'`exit`), le poll corrige l'état tout seul. Émet
+     * arrival/departure pour que les règles de présence + la proactivité
+     * réagissent comme à un event geofence.
+     */
+    private async pollNetwork(): Promise<void> {
+        const { net } = loadPresenceConfig();
+        const { present } = await checkPhoneOnNetwork(net.dhcpFreshnessMs);
+        if (present === null) return; // routeur injoignable → on garde l'état
+        const next: PresenceState = present ? 'home' : 'away';
+        if (next === this.state) return;
+        const event: PresenceEventType =
+            next === 'home' ? 'arrival' : 'departure';
+        Logger.info(
+            `[presence] network poll → ${next} (was ${this.state}, event=${event})`,
+        );
+        this.setState(next);
+        if (event === 'departure') this.burst?.cancel();
+        this.emit(event);
+    }
+
     stop(): void {
         this.burst?.cancel();
+        if (this.pollTimer) clearInterval(this.pollTimer);
     }
 }
