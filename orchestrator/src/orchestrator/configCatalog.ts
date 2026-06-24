@@ -170,11 +170,17 @@ export const INTEGRATIONS_CATALOG: Record<string, CatalogKey[]> = {
             secret: true,
         },
     ],
-    'mcp-obsidian': [
+    'mcp-yoji': [
         {
-            key: 'OBSIDIAN_VAULT_ROOT',
-            label: 'Chemin du vault',
-            example: '/home/chuya/vault',
+            key: 'YOJI_API_URL',
+            label: "URL de l'API Yoji",
+            example: 'http://localhost:3000/api/v1',
+        },
+        {
+            key: 'YOJI_API_KEY',
+            label: 'Clé API Yoji (optionnel)',
+            example: '',
+            secret: true,
         },
     ],
     'mcp-calendar': [
