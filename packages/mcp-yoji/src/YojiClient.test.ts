@@ -77,6 +77,54 @@ async function run(): Promise<void> {
         assert.strictEqual(out, undefined);
     }
 
+    // createNote: POST /notes with {path, content}
+    {
+        const { calls, fetchFn } = fakeFetch({ body: { path: 'a.md' } });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        await c.createNote('inbox/a.md', 'hello');
+        assert.strictEqual(calls[0].url, 'http://x/api/v1/notes');
+        assert.strictEqual(calls[0].init.method, 'POST');
+        assert.deepStrictEqual(JSON.parse(calls[0].init.body), {
+            path: 'inbox/a.md',
+            content: 'hello',
+        });
+    }
+
+    // updateNote: PUT /notes/{encoded} with {content}
+    {
+        const { calls, fetchFn } = fakeFetch({ body: { path: 'a.md' } });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        await c.updateNote('inbox/a.md', 'new');
+        assert.strictEqual(calls[0].url, 'http://x/api/v1/notes/inbox%2Fa.md');
+        assert.strictEqual(calls[0].init.method, 'PUT');
+        assert.deepStrictEqual(JSON.parse(calls[0].init.body), {
+            content: 'new',
+        });
+    }
+
+    // searchNotes: GET /search?q=<encoded>
+    {
+        const { calls, fetchFn } = fakeFetch({ body: [] });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        await c.searchNotes('todo list');
+        assert.strictEqual(
+            calls[0].url,
+            'http://x/api/v1/search?q=todo%20list',
+        );
+    }
+
+    // moveNote: POST /notes/move with {from, to}
+    {
+        const { calls, fetchFn } = fakeFetch({ body: {} });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        await c.moveNote('a.md', 'archive/a.md');
+        assert.strictEqual(calls[0].url, 'http://x/api/v1/notes/move');
+        assert.deepStrictEqual(JSON.parse(calls[0].init.body), {
+            from: 'a.md',
+            to: 'archive/a.md',
+        });
+    }
+
     console.log('All YojiClient core tests passed');
 }
 

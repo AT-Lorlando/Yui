@@ -62,14 +62,37 @@ export class YojiClient {
         return (text ? JSON.parse(text) : undefined) as T;
     }
 
-    // Minimal stubs needed by the core tests; real bodies arrive in Task 3.
+    // ── Notes ────────────────────────────────────────────────────────────────
     listNotes(): Promise<any[]> {
         return this.request('GET', '/notes');
     }
     getNote(path: string): Promise<any> {
         return this.request('GET', `/notes/${this.encodePath(path)}`);
     }
+    createNote(path: string, content: string): Promise<any> {
+        return this.request('POST', '/notes', { path, content });
+    }
+    updateNote(path: string, content: string): Promise<any> {
+        return this.request('PUT', `/notes/${this.encodePath(path)}`, {
+            content,
+        });
+    }
     deleteNote(path: string): Promise<void> {
         return this.request('DELETE', `/notes/${this.encodePath(path)}`);
+    }
+    moveNote(from: string, to: string): Promise<any> {
+        return this.request('POST', '/notes/move', { from, to });
+    }
+    searchNotes(query: string): Promise<any[]> {
+        return this.request('GET', `/search?q=${encodeURIComponent(query)}`);
+    }
+    listFolders(): Promise<string[]> {
+        return this.request('GET', '/folders');
+    }
+    createFolder(path: string): Promise<any> {
+        return this.request('POST', '/folders', { path });
+    }
+    syncVault(): Promise<any> {
+        return this.request('POST', '/sync');
     }
 }
