@@ -142,9 +142,9 @@ export const SERVER_KEYWORDS: Record<string, string[]> = {
         'après-demain',
         'forecast',
     ],
-    'mcp-obsidian': [
+    'mcp-yoji': [
         'note',
-        'obsidian',
+        'yoji',
         'fichier',
         'document',
         'écris',

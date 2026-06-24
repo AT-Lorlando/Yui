@@ -53,7 +53,7 @@ export function buildServerConfigs(): McpServerConfig[] {
         mcp('mcp-timer'),
         mcp('mcp-calendar'),
         mcp('mcp-weather'),
-        mcp('mcp-obsidian'),
+        mcp('mcp-yoji'),
         mcp('mcp-gmail'),
         // mcp('mcp-browser'), // Phase 2
         {
