@@ -3,13 +3,18 @@ import assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+// Import statique (convention du projet, lancé via ts-node). Les loaders lisent
+// YUI_DATA_DIR à l'APPEL (dataRoot()), donc poser l'env dans run() avant tout
+// appel suffit — pas besoin d'import dynamique.
+import {
+    loadTvConfig,
+    saveSmartThingsCreds,
+    loadSmartThingsCreds,
+} from './smartThingsConfig';
 
 async function run() {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'st-cfg-'));
     process.env.YUI_DATA_DIR = tmp;
-    // import APRÈS avoir fixé YUI_DATA_DIR (dataPath lit l'env au runtime)
-    const { loadTvConfig, saveSmartThingsCreds, loadSmartThingsCreds } =
-        await import('./smartThingsConfig.js');
 
     // loadTvConfig → défauts quand le fichier est absent
     {
