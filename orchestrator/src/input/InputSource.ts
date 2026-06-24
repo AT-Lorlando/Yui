@@ -103,6 +103,10 @@ export interface ProactiveHandler {
     reload: () => void;
 }
 
+export type DashboardHandler = () => Promise<
+    import('../orchestrator/dashboard').DashboardData
+>;
+
 export interface ConversationsHandler {
     list: (
         scope: 'resumable' | 'all',
@@ -141,6 +145,7 @@ export interface InputSource {
         conversationsHandler?: ConversationsHandler,
         integrationsHandler?: IntegrationsHandler,
         proactiveHandler?: ProactiveHandler,
+        dashboardHandler?: DashboardHandler,
     ): Promise<void>;
     stop(): Promise<void>;
 }

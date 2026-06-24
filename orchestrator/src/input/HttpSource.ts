@@ -20,6 +20,7 @@ import {
     ConversationsHandler,
     IntegrationsHandler,
     ProactiveHandler,
+    DashboardHandler,
 } from './InputSource';
 import { loadConfig, saveConfig } from '../orchestrator/proactive/config';
 import {
@@ -131,6 +132,7 @@ export class HttpSource implements InputSource {
         conversationsHandler?: ConversationsHandler,
         integrationsHandler?: IntegrationsHandler,
         proactiveHandler?: ProactiveHandler,
+        dashboardHandler?: DashboardHandler,
     ): Promise<void> {
         const port = Number(
             process.env.ORCHESTRATOR_PORT ?? process.env.PORT ?? 4000,
@@ -142,6 +144,19 @@ export class HttpSource implements InputSource {
 
         app.get('/health', (_req: any, res: any) => {
             res.status(200).json({ status: 'ok' });
+        });
+
+        // ── Dashboard kiosque (lecture seule, sans auth — LAN) ──────────────────
+        app.get('/dashboard', async (_req: any, res: any) => {
+            if (!dashboardHandler) {
+                return res.status(503).json({ error: 'dashboard unavailable' });
+            }
+            try {
+                res.json(await dashboardHandler());
+            } catch (err: any) {
+                Logger.error(`/dashboard failed: ${err?.message ?? err}`);
+                res.status(500).json({ error: 'dashboard failed' });
+            }
         });
 
         // ── Static ringtones ───────────────────────────────────────────────────

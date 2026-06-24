@@ -39,6 +39,7 @@ import {
     storyFileExists,
 } from './orchestrator/storyArchive';
 import type { ConversationsHandler } from './input/InputSource';
+import { createDashboardProvider } from './orchestrator/dashboard';
 
 // voice/tts.py exposes a /speak endpoint on this port
 const SPEAK_PIPELINE_URL =
@@ -216,6 +217,14 @@ async function main() {
         replaceRules: (rules: any) => presenceRules.replace(rules),
     };
 
+    const dashboardProvider = createDashboardProvider({
+        callTool: (tool, args) => orchestrator.callTool(tool, args ?? {}),
+        presenceState: () => presence.getState(),
+        automations: () => loadAutomations(),
+        proactiveLastMessage: () => proactive.getLastMessage(),
+        mailQuery: proactive.getMailQuery(),
+    });
+
     const sources: InputSource[] = [new StdinSource(), new HttpSource()];
     for (const source of sources) {
         await source.start(
@@ -230,6 +239,7 @@ async function main() {
             conversationsHandler,
             { reconnect: (name: string) => orchestrator.reconnectServer(name) },
             { reload: () => proactive.reload() },
+            () => dashboardProvider(),
         );
     }
 
