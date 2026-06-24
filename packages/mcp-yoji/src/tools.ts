@@ -205,12 +205,12 @@ export const YOJI_TOOLS = [
         },
     },
     {
-        name: 'list_projects',
+        name: 'list_todo_projects',
         description: 'List all todo projects.',
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {
-        name: 'create_project',
+        name: 'create_todo_project',
         description: 'Create a todo project.',
         inputSchema: {
             type: 'object' as const,
@@ -228,7 +228,7 @@ export const YOJI_TOOLS = [
         },
     },
     {
-        name: 'delete_project',
+        name: 'delete_todo_project',
         description: 'Delete an empty project by its folder path.',
         inputSchema: {
             type: 'object' as const,

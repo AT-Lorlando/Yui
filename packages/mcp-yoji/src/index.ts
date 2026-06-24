@@ -94,9 +94,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'delete_task':
                 await yoji.deleteTask(String(a.id));
                 return msg(`Task deleted: ${a.id}`);
-            case 'list_projects':
+            case 'list_todo_projects':
                 return json(await yoji.listProjects());
-            case 'create_project': {
+            case 'create_todo_project': {
                 const project = await yoji.createProject(
                     String(a.name),
                     a.description,
@@ -105,7 +105,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     `Project created: ${project.name} (${project.path})`,
                 );
             }
-            case 'delete_project':
+            case 'delete_todo_project':
                 await yoji.deleteProject(String(a.path));
                 return msg(`Project deleted: ${a.path}`);
             default:
