@@ -1,0 +1,75 @@
+export type FetchFn = typeof fetch;
+
+export type TaskState =
+    | 'backlog'
+    | 'todo'
+    | 'in_progress'
+    | 'done'
+    | 'canceled';
+
+export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent';
+
+export interface YojiClientOptions {
+    baseUrl: string;
+    apiKey?: string;
+    fetchFn?: FetchFn;
+}
+
+export class YojiClient {
+    private baseUrl: string;
+    private apiKey?: string;
+    private fetchFn: FetchFn;
+
+    constructor(opts: YojiClientOptions) {
+        this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
+        this.apiKey = opts.apiKey;
+        this.fetchFn = opts.fetchFn ?? fetch;
+    }
+
+    /** URL-encode a repo-relative path segment by segment, encoding slashes too. */
+    encodePath(p: string): string {
+        return p.split('/').map(encodeURIComponent).join('%2F');
+    }
+
+    protected async request<T>(
+        method: string,
+        path: string,
+        body?: unknown,
+    ): Promise<T> {
+        const headers: Record<string, string> = {};
+        if (body !== undefined) headers['Content-Type'] = 'application/json';
+        if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+
+        const res = await this.fetchFn(`${this.baseUrl}${path}`, {
+            method,
+            headers,
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+        });
+
+        if (!res.ok) {
+            let detail = '';
+            try {
+                const data = (await res.json()) as any;
+                detail = data?.message || data?.error || '';
+            } catch {
+                /* no JSON body */
+            }
+            throw new Error(`HTTP ${res.status}${detail ? `: ${detail}` : ''}`);
+        }
+
+        if (res.status === 204) return undefined as T;
+        const text = await res.text();
+        return (text ? JSON.parse(text) : undefined) as T;
+    }
+
+    // Minimal stubs needed by the core tests; real bodies arrive in Task 3.
+    listNotes(): Promise<any[]> {
+        return this.request('GET', '/notes');
+    }
+    getNote(path: string): Promise<any> {
+        return this.request('GET', `/notes/${this.encodePath(path)}`);
+    }
+    deleteNote(path: string): Promise<void> {
+        return this.request('DELETE', `/notes/${this.encodePath(path)}`);
+    }
+}
