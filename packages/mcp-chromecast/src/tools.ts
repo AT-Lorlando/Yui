@@ -155,35 +155,6 @@ export const CHROMECAST_TOOLS = [
         },
     },
 
-    // ── TV power & controls ───────────────────────────────────────────────────
-    {
-        name: 'tv_on',
-        description:
-            'Turn on the TV via Wake-on-LAN and switch to Chromecast input (HDMI3). Use when the user wants to turn on the TV without casting anything yet.',
-        inputSchema: { type: 'object' as const, properties: {}, required: [] },
-    },
-    {
-        name: 'tv_off',
-        description:
-            'Stop Chromecast playback and turn off the TV. Call this when the user wants to turn off the TV or stop everything on the TV.',
-        inputSchema: { type: 'object' as const, properties: {}, required: [] },
-    },
-    {
-        name: 'tv_volume',
-        description: 'Set the TV volume (0–100).',
-        inputSchema: {
-            type: 'object' as const,
-            properties: {
-                level: {
-                    type: 'number',
-                    minimum: 0,
-                    maximum: 100,
-                    description: 'Volume level 0–100',
-                },
-            },
-            required: ['level'],
-        },
-    },
     // ── Media library (hidden from LLM — orchestrator/scenes only) ───────────
     {
         name: 'list_media',
@@ -225,21 +196,6 @@ export const CHROMECAST_TOOLS = [
                 },
             },
             required: [],
-        },
-    },
-
-    {
-        name: 'tv_mute',
-        description: 'Mute or unmute the TV.',
-        inputSchema: {
-            type: 'object' as const,
-            properties: {
-                mute: {
-                    type: 'boolean',
-                    description: 'true to mute, false to unmute',
-                },
-            },
-            required: ['mute'],
         },
     },
 ];

@@ -11,16 +11,14 @@ import {
     McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { ChromecastController, listMediaFiles } from './ChromecastController';
-import { TvController } from './TvController';
+import { LocalTizenBackend, loadTvConfig } from '@yui/shared';
 import { CHROMECAST_TOOLS } from './tools';
 import { handleCastApp } from './castAppHandler';
 import Logger from './logger';
 
 const chromecast = new ChromecastController();
-const tv = new TvController(
-    process.env.SMARTTHINGS_TV_IP ?? '10.0.0.133',
-    process.env.SMARTTHINGS_TV_MAC,
-);
+const tvCfg = loadTvConfig();
+const tv = new LocalTizenBackend(tvCfg.ip, tvCfg.mac);
 
 const server = new Server(
     { name: 'mcp-chromecast', version: '1.0.0' },
@@ -34,8 +32,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 async function withTvOn<T>(cast: Promise<T>): Promise<T> {
     const [, castResult] = await Promise.all([
         tv
-            .powerOn()
-            .catch((e) => Logger.warn(`tv.powerOn failed (continuing): ${e}`)),
+            .ensureOn()
+            .catch((e) => Logger.warn(`tv.ensureOn failed (continuing): ${e}`)),
         cast,
     ]);
     return castResult;
@@ -222,47 +220,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         {
                             type: 'text',
                             text: await withTvOn(chromecast.castVideo(file)),
-                        },
-                    ],
-                };
-            }
-
-            case 'tv_on': {
-                const msg = await tv.powerOn();
-                return { content: [{ type: 'text', text: msg }] };
-            }
-
-            case 'tv_off': {
-                // Stop Chromecast first, then power off TV in parallel
-                const [, tvMsg] = await Promise.allSettled([
-                    chromecast.castStop(),
-                    tv.powerOff(),
-                ]);
-                const msg =
-                    tvMsg.status === 'fulfilled'
-                        ? tvMsg.value
-                        : 'TV turned off.';
-                return { content: [{ type: 'text', text: msg }] };
-            }
-
-            case 'tv_volume': {
-                const level = Number((args as any).level);
-                await tv.setVolume(level);
-                return {
-                    content: [
-                        { type: 'text', text: `TV volume set to ${level}.` },
-                    ],
-                };
-            }
-
-            case 'tv_mute': {
-                const mute = Boolean((args as any).mute);
-                await tv.mute();
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: `TV ${mute ? 'muted' : 'unmuted'}.`,
                         },
                     ],
                 };
