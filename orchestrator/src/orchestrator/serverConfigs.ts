@@ -49,6 +49,7 @@ export function buildServerConfigs(): McpServerConfig[] {
         mcp('mcp-spotify'),
         mcp('mcp-linear'),
         mcp('mcp-chromecast'),
+        mcp('mcp-smartthings'),
         mcp('mcp-timer'),
         mcp('mcp-calendar'),
         mcp('mcp-weather'),

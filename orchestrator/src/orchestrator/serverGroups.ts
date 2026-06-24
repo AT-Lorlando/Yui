@@ -18,6 +18,7 @@ export const SERVER_GROUPS: ServerGroup[] = [
             'mcp-somfy',
             'mcp-spotify',
             'mcp-chromecast',
+            'mcp-smartthings',
             'mcp-timer',
         ],
         keywords: [
