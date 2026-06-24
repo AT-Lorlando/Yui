@@ -72,6 +72,17 @@ export class Dedup {
         return this.last.get(subject)?.message;
     }
 
+    /** Entrée (message non vide) au `at` le plus récent, ou null si aucune. */
+    latest(): { message: string; at: number } | null {
+        let best: { message: string; at: number } | null = null;
+        for (const e of this.last.values()) {
+            if (!e.message) continue;
+            if (!best || e.at > best.at)
+                best = { message: e.message, at: e.at };
+        }
+        return best;
+    }
+
     /**
      * Enregistre une émission. Avec `message`, mémorise ce qui a été dit. Sans
      * `message` (cas « ré-arme » après un RIEN), met à jour `at` et conserve le
