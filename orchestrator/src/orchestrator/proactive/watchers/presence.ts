@@ -55,10 +55,21 @@ export function createPresenceWatcher(deps: ProactiveDeps): Watcher {
             deps.subscribePresence((prev, next) => {
                 void (async () => {
                     try {
+                        Logger.info(
+                            `proactive[presence]: transition ${prev} → ${next}`,
+                        );
                         const events = await evaluatePresenceTransition(
                             prev,
                             next,
                             deps.deviceHandler,
+                        );
+                        Logger.info(
+                            `proactive[presence]: ${events.length} candidat(s)` +
+                                (events.length
+                                    ? ` (${events
+                                          .map((e) => e.subject)
+                                          .join(', ')})`
+                                    : ''),
                         );
                         for (const e of events) emit(e);
                     } catch (err) {

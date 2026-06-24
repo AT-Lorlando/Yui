@@ -49,9 +49,11 @@ export class TahomaClient {
 
     /** Fetch all devices from the hub and cache them. */
     async fetchDevices(): Promise<TahomaDevice[]> {
-        const res = await this.client.get<{ devices: TahomaDevice[] }>('/setup');
+        const res = await this.client.get<{ devices: TahomaDevice[] }>(
+            '/setup',
+        );
         this.deviceCache = res.data.devices ?? [];
-        Logger.info(`TaHoma: ${this.deviceCache.length} devices fetched`);
+        Logger.debug(`TaHoma: ${this.deviceCache.length} devices fetched`);
         return this.deviceCache;
     }
 
@@ -67,7 +69,10 @@ export class TahomaClient {
                     url: d.deviceURL,
                     name: d.label,
                     uiClass: d.definition.uiClass,
-                    position: closureState != null ? Number(closureState.value) : null,
+                    position:
+                        closureState != null
+                            ? Number(closureState.value)
+                            : null,
                 };
             });
     }
@@ -88,18 +93,15 @@ export class TahomaClient {
         parameters: unknown[] = [],
         label?: string,
     ): Promise<string> {
-        const res = await this.client.post<{ execId: string }>(
-            '/exec/apply',
-            {
-                label: label ?? command,
-                actions: [
-                    {
-                        deviceURL,
-                        commands: [{ name: command, parameters }],
-                    },
-                ],
-            },
-        );
+        const res = await this.client.post<{ execId: string }>('/exec/apply', {
+            label: label ?? command,
+            actions: [
+                {
+                    deviceURL,
+                    commands: [{ name: command, parameters }],
+                },
+            ],
+        });
         return res.data?.execId ?? 'ok';
     }
 

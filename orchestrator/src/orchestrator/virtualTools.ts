@@ -276,7 +276,7 @@ export async function handleVirtualTool(
     const name = toolCall.function.name;
     const args = JSON.parse(toolCall.function.arguments || '{}');
 
-    Logger.info(`Virtual tool: ${name}(${JSON.stringify(args)})`);
+    Logger.debug(`Virtual tool: ${name}(${JSON.stringify(args)})`);
 
     switch (name) {
         case 'memory_save':

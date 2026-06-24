@@ -47,6 +47,16 @@ export class DigestBuffer {
         this.save();
     }
 
+    /** Retire un sujet du buffer (ex. il vient d'être notifié en direct, pour
+     *  éviter que le digest le répète). No-op s'il n'y est pas. */
+    remove(subject: string): boolean {
+        const before = this.events.length;
+        this.events = this.events.filter((e) => e.subject !== subject);
+        const removed = this.events.length !== before;
+        if (removed) this.save();
+        return removed;
+    }
+
     size(): number {
         return this.events.length;
     }

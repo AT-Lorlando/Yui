@@ -43,6 +43,7 @@ export function createMailWatcher(
     const tick = async (emit: (c: CandidateEvent) => void): Promise<void> => {
         try {
             const events = await evaluateMail(deps.deviceHandler, cfg);
+            Logger.info(`proactive[mail]: poll → ${events.length} candidat(s)`);
             for (const e of events) emit(e);
         } catch (err) {
             Logger.warn(`proactive[mail]: ${err}`);

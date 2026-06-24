@@ -65,6 +65,12 @@ export function createCalendarWatcher(
                 cfg,
                 new Date(deps.now ? deps.now() : Date.now()),
             );
+            Logger.info(
+                `proactive[calendar]: poll → ${events.length} candidat(s)` +
+                    (events.length
+                        ? ` (${events.map((e) => e.subject).join(', ')})`
+                        : ''),
+            );
             for (const e of events) emit(e);
         } catch (err) {
             Logger.warn(`proactive[calendar]: ${err}`);

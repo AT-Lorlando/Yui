@@ -177,7 +177,7 @@ export class Orchestrator {
         ]);
 
         if (this.deviceStateSnapshot) {
-            Logger.info(`Device state:\n${this.deviceStateSnapshot}`);
+            Logger.debug(`Device state:\n${this.deviceStateSnapshot}`);
         }
     }
 
