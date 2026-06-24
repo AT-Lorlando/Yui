@@ -50,14 +50,13 @@ const DOMOTICS_TOOLS = new Set([
     'set_repeat',
     'add_to_queue',
     'get_my_playlists',
-    // Samsung TV
-    'tv_get_status',
-    'tv_power',
-    'tv_set_volume',
+    // TV (mcp-smartthings)
+    'tv_on',
+    'tv_off',
+    'tv_volume',
     'tv_mute',
     'tv_set_input',
-    'tv_prepare_chromecast',
-    'tv_launch_app',
+    'tv_status',
     // Chromecast
     'cast_youtube',
     'cast_netflix',
