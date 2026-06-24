@@ -127,13 +127,19 @@ export class SmartThingsAuth {
         );
 
         const pasted = await SmartThingsAuth.prompt(
-            "3. Colle l'URL de redirection complète (ou juste le code) : ",
+            "3. Colle l'URL de redirection COMPLÈTE depuis la barre d'adresse " +
+                '(elle contient code + state) : ',
         );
         const { code, returnedState } = SmartThingsAuth.parseCode(pasted);
         if (!code)
             throw new Error('Aucun code trouvé dans ce que tu as collé.');
-        if (returnedState && returnedState !== state)
-            throw new Error('OAuth state mismatch (CSRF) — relance le setup.');
+        // Vérif CSRF fail-closed : le state DOIT être présent et correspondre.
+        // Coller juste le code (sans state) est refusé — colle l'URL complète.
+        if (returnedState !== state)
+            throw new Error(
+                'State OAuth absent ou invalide (CSRF). Colle bien l’URL de ' +
+                    'redirection COMPLÈTE (avec ?code=…&state=…), puis relance.',
+            );
 
         const params = new URLSearchParams({
             grant_type: 'authorization_code',

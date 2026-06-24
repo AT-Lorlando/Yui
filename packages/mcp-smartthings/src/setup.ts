@@ -7,10 +7,14 @@ import axios from 'axios';
 import { SmartThingsAuth, saveSmartThingsCreds } from '@yui/shared';
 
 // Les SmartApps API_ONLY exigent un redirect HTTPS (http://localhost est rejeté
-// → 403 à l'autorisation). On utilise une page HTTPS qui réaffiche la query, et
-// l'utilisateur colle le code (flow headless, sans serveur de callback local).
+// → 403). Défaut : le domaine de SmartThings lui-même (l'émetteur a déjà le code
+// → aucun tiers ; auto-enregistré sur l'app). Après autorisation, l'utilisateur
+// copie l'URL de redirection COMPLÈTE depuis la barre d'adresse (avec code+state).
+// Ne PAS pointer vers un echo public tiers (httpbin…) : ça ferait transiter le
+// code d'autorisation par un tiers.
 const REDIRECT_URI =
-    process.env.SMARTTHINGS_REDIRECT_URI || 'https://httpbin.org/get';
+    process.env.SMARTTHINGS_REDIRECT_URI ||
+    'https://api.smartthings.com/installedapp';
 
 async function listDevices(accessToken: string) {
     const res = await axios.get('https://api.smartthings.com/v1/devices', {

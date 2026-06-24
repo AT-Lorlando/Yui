@@ -49,7 +49,7 @@ curl -s -X POST https://api.smartthings.com/v1/apps \
     "oauth": {
       "clientName": "Yui",
       "scope": ["r:devices:*", "w:devices:*", "x:devices:*"],
-      "redirectUris": ["https://httpbin.org/get"]
+      "redirectUris": ["https://api.smartthings.com/installedapp"]
     }
   }' | python3 -m json.tool
 ```
@@ -58,10 +58,14 @@ La réponse contient **`oauthClientId`** et **`oauthClientSecret`** (notés une
 seule fois). N'appelle `oauth/generate` qu'en dernier recours : chaque appel
 **rotate le secret** (invalide le précédent) et peut empiler des scopes.
 
-> ⚠️ **Le `redirectUri` doit être HTTPS.** Les apps API_ONLY **rejettent
-> `http://localhost`** (403 à l'autorisation). On utilise `https://httpbin.org/get`
-> (page qui réaffiche la query → on y lit le `code`). Si tu changes ce redirect,
-> mets le même dans `SMARTTHINGS_REDIRECT_URI` et dans l'app (PUT
+> ⚠️ **Le `redirectUri` doit être HTTPS** (les apps API_ONLY rejettent
+> `http://localhost` → 403). Le défaut `https://api.smartthings.com/installedapp`
+> est **le domaine de SmartThings lui-même** : le `code` ne transite par aucun
+> tiers (l'émetteur l'a déjà), et il est auto-enregistré sur l'app. On lit le
+> `code` dans la **barre d'adresse** du navigateur après redirection.
+> **N'utilise pas** un echo public (httpbin, webhook.site…) comme redirect : ça
+> ferait fuiter ton code d'autorisation vers un tiers. Si tu mets ton propre
+> endpoint HTTPS, aligne `SMARTTHINGS_REDIRECT_URI` et l'app (PUT
 > `/v1/apps/yui-mcp/oauth`).
 
 ### 2. Renseigner les credentials
@@ -73,7 +77,7 @@ SMARTTHINGS_CLIENT_ID=<oauthClientId>
 SMARTTHINGS_CLIENT_SECRET=<oauthClientSecret>
 # optionnel : forcer le device TV (sinon auto-détecté par type "TV")
 SMARTTHINGS_DEVICE_ID=<deviceId de la TV>
-# optionnel : surcharger le redirect HTTPS (défaut https://httpbin.org/get)
+# optionnel : surcharger le redirect HTTPS (défaut https://api.smartthings.com/installedapp)
 SMARTTHINGS_REDIRECT_URI=
 ```
 
@@ -86,12 +90,13 @@ npm run setup:smartthings
 Le script **n'ouvre pas de serveur local** : il affiche une URL d'autorisation.
 1. Ouvre-la dans un navigateur (n'importe quelle machine), autorise Yui en
    **sélectionnant la Location qui contient la TV**.
-2. Tu es redirigé vers `https://httpbin.org/get?code=...&state=...` (page qui
-   affiche la query en JSON).
-3. **Colle l'URL de redirection complète** (ou juste la valeur `code`) dans le
-   terminal.
+2. Tu es redirigé vers `https://api.smartthings.com/installedapp?code=...&state=...`
+   (la page peut afficher une erreur, peu importe).
+3. **Copie l'URL COMPLÈTE depuis la barre d'adresse** (elle contient `code` +
+   `state`) et colle-la dans le terminal.
 
-Le script échange le code, liste tes devices pour trouver la TV, et écrit
+Le script vérifie le `state` (CSRF, **fail-closed** — l'URL complète est requise),
+échange le code, liste tes devices pour trouver la TV, et écrit
 `data/shared/smartthings.json` (`{ clientId, clientSecret, refreshToken,
 deviceId }`, perms `0600`). Aucun tunnel SSH nécessaire.
 
