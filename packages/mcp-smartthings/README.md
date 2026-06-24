@@ -49,24 +49,20 @@ curl -s -X POST https://api.smartthings.com/v1/apps \
     "oauth": {
       "clientName": "Yui",
       "scope": ["r:devices:*", "w:devices:*", "x:devices:*"],
-      "redirectUris": ["http://localhost:6147/callback"]
+      "redirectUris": ["https://httpbin.org/get"]
     }
   }' | python3 -m json.tool
 ```
 
 La réponse contient **`oauthClientId`** et **`oauthClientSecret`** (notés une
-seule fois). Si le secret manque, régénère-le :
+seule fois). N'appelle `oauth/generate` qu'en dernier recours : chaque appel
+**rotate le secret** (invalide le précédent) et peut empiler des scopes.
 
-```bash
-curl -s -X POST "https://api.smartthings.com/v1/apps/yui-mcp/oauth/generate" \
-  -H "Authorization: Bearer $PAT" -H "Content-Type: application/json" \
-  -d '{"clientName":"Yui","scope":["r:devices:*","w:devices:*","x:devices:*"],"redirectUris":["http://localhost:6147/callback"]}' \
-  | python3 -m json.tool
-```
-
-> Le `redirectUris` **doit** être exactement `http://localhost:6147/callback`
-> (port utilisé par `setup:smartthings`). `localhost` est accepté par les apps
-> OAuth-In.
+> ⚠️ **Le `redirectUri` doit être HTTPS.** Les apps API_ONLY **rejettent
+> `http://localhost`** (403 à l'autorisation). On utilise `https://httpbin.org/get`
+> (page qui réaffiche la query → on y lit le `code`). Si tu changes ce redirect,
+> mets le même dans `SMARTTHINGS_REDIRECT_URI` et dans l'app (PUT
+> `/v1/apps/yui-mcp/oauth`).
 
 ### 2. Renseigner les credentials
 
@@ -77,29 +73,30 @@ SMARTTHINGS_CLIENT_ID=<oauthClientId>
 SMARTTHINGS_CLIENT_SECRET=<oauthClientSecret>
 # optionnel : forcer le device TV (sinon auto-détecté par type "TV")
 SMARTTHINGS_DEVICE_ID=<deviceId de la TV>
-# optionnel : surcharger le redirect (défaut http://localhost:6147/callback)
+# optionnel : surcharger le redirect HTTPS (défaut https://httpbin.org/get)
 SMARTTHINGS_REDIRECT_URI=
 ```
 
-### 3. Lancer le flow OAuth
+### 3. Lancer le flow OAuth (mode collage, headless-friendly)
 
 ```bash
 npm run setup:smartthings
 ```
 
-Le script ouvre le flow Authorization Code (consentement navigateur), liste tes
-devices pour trouver la TV, et écrit `data/shared/smartthings.json`
-(`{ clientId, clientSecret, refreshToken, deviceId }`, perms `0600`).
+Le script **n'ouvre pas de serveur local** : il affiche une URL d'autorisation.
+1. Ouvre-la dans un navigateur (n'importe quelle machine), autorise Yui en
+   **sélectionnant la Location qui contient la TV**.
+2. Tu es redirigé vers `https://httpbin.org/get?code=...&state=...` (page qui
+   affiche la query en JSON).
+3. **Colle l'URL de redirection complète** (ou juste la valeur `code`) dans le
+   terminal.
 
-> **Serveur headless (SSH) :** le flow a besoin d'un navigateur + du callback sur
-> `localhost:6147`. Ouvre un tunnel depuis ta machine avec navigateur :
-> ```bash
-> ssh -L 6147:localhost:6147 user@serveur
-> # puis sur le serveur : npm run setup:smartthings
-> # ouvre l'URL d'autorisation affichée dans le navigateur de ta machine ;
-> # la redirection vers localhost:6147 repart dans le tunnel jusqu'au serveur
-> ```
-> Le serveur de callback bind `127.0.0.1` (compatible `ssh -L`).
+Le script échange le code, liste tes devices pour trouver la TV, et écrit
+`data/shared/smartthings.json` (`{ clientId, clientSecret, refreshToken,
+deviceId }`, perms `0600`). Aucun tunnel SSH nécessaire.
+
+> Le `code` est à usage unique et expire vite : si l'échange échoue, relance le
+> setup pour repartir d'une URL fraîche.
 
 ## Fichiers de données
 

@@ -1,6 +1,6 @@
 // packages/shared/src/SmartThingsAuth.test.ts
 import assert from 'assert';
-import { applyTokenResponse } from './SmartThingsAuth';
+import { applyTokenResponse, SmartThingsAuth } from './SmartThingsAuth';
 
 async function run() {
     const base = {
@@ -26,6 +26,24 @@ async function run() {
     {
         const { creds } = applyTokenResponse(base, { access_token: 'AT2' }, 0);
         assert.strictEqual(creds.refreshToken, 'OLD');
+    }
+    // parseCode : URL de redirection collée → extrait code + state
+    {
+        const r = SmartThingsAuth.parseCode(
+            'https://httpbin.org/get?code=ABC123&state=xyz',
+        );
+        assert.strictEqual(r.code, 'ABC123');
+        assert.strictEqual(r.returnedState, 'xyz');
+    }
+    // parseCode : code brut collé (pas une URL) → code, state null
+    {
+        const r = SmartThingsAuth.parseCode('  RAWCODE  ');
+        assert.strictEqual(r.code, 'RAWCODE');
+        assert.strictEqual(r.returnedState, null);
+    }
+    // parseCode : entrée vide → code null
+    {
+        assert.strictEqual(SmartThingsAuth.parseCode('   ').code, null);
     }
     console.log('All SmartThingsAuth tests passed');
 }

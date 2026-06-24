@@ -6,8 +6,11 @@ dotenv.config({ path: resolve(__dirname, '../../../.env') });
 import axios from 'axios';
 import { SmartThingsAuth, saveSmartThingsCreds } from '@yui/shared';
 
+// Les SmartApps API_ONLY exigent un redirect HTTPS (http://localhost est rejeté
+// → 403 à l'autorisation). On utilise une page HTTPS qui réaffiche la query, et
+// l'utilisateur colle le code (flow headless, sans serveur de callback local).
 const REDIRECT_URI =
-    process.env.SMARTTHINGS_REDIRECT_URI || 'http://localhost:6147/callback';
+    process.env.SMARTTHINGS_REDIRECT_URI || 'https://httpbin.org/get';
 
 async function listDevices(accessToken: string) {
     const res = await axios.get('https://api.smartthings.com/v1/devices', {
@@ -28,15 +31,15 @@ async function main() {
     if (!clientId || !clientSecret) {
         console.error(
             'SMARTTHINGS_CLIENT_ID et SMARTTHINGS_CLIENT_SECRET doivent être dans .env.\n\n' +
-                'Étapes :\n' +
-                '  1. Installe le CLI SmartThings (npm i -g @smartthings/cli) ou va sur le developer workspace.\n' +
-                `  2. Crée un client OAuth (redirect URI = ${REDIRECT_URI}, scopes r:devices:* x:devices:*).\n` +
-                '  3. Mets dans .env :\n' +
+                'Étapes (voir packages/mcp-smartthings/README.md pour le détail) :\n' +
+                "  1. Crée une app OAuth-In via l'API REST (le CLI est buggé) avec\n" +
+                `     un redirect HTTPS = ${REDIRECT_URI} et scopes r:devices:* w:devices:* x:devices:*.\n` +
+                '  2. Mets dans .env :\n' +
                 '     SMARTTHINGS_CLIENT_ID=...\n' +
                 '     SMARTTHINGS_CLIENT_SECRET=...\n' +
-                '     SMARTTHINGS_REDIRECT_URI=http://<host>:6147/callback (optionnel)\n' +
+                '     SMARTTHINGS_REDIRECT_URI=https://httpbin.org/get (optionnel, défaut)\n' +
                 '     SMARTTHINGS_DEVICE_ID=... (optionnel — sinon choisi dans la liste affichée)\n' +
-                '  4. Relance : npm run setup:smartthings',
+                '  3. Relance : npm run setup:smartthings',
         );
         process.exit(1);
     }

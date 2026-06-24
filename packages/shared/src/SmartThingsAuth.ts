@@ -1,7 +1,7 @@
 // packages/shared/src/SmartThingsAuth.ts
 import axios from 'axios';
-import http from 'http';
 import { URL } from 'url';
+import * as readline from 'readline';
 import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -95,7 +95,13 @@ export class SmartThingsAuth {
         return out.cache.accessToken;
     }
 
-    /** Flow Authorization Code (setup). Renvoie access + refresh tokens. */
+    /**
+     * Flow Authorization Code en mode "coller le code" (headless-friendly).
+     * Les SmartApps API_ONLY rejettent les redirects non-HTTPS (donc pas de
+     * `http://localhost` ni de serveur de callback local) : l'utilisateur
+     * autorise dans un navigateur via un redirect HTTPS, puis colle l'URL de
+     * redirection (ou juste le code) dans le terminal. Renvoie access + refresh.
+     */
     static async startAuthFlow(
         clientId: string,
         clientSecret: string,
@@ -111,10 +117,24 @@ export class SmartThingsAuth {
                 scope: SCOPES,
                 state,
             }).toString();
-        console.log('\nOuvre cette URL pour autoriser Yui (SmartThings):\n');
+        console.log(
+            '\n1. Ouvre cette URL dans un navigateur et autorise Yui ' +
+                '(sélectionne la Location qui contient la TV) :\n',
+        );
         console.log(`  ${authorizeUrl}\n`);
+        console.log(
+            `2. Tu seras redirigé vers ${redirectUri} avec ?code=...&state=...\n`,
+        );
 
-        const code = await SmartThingsAuth.waitForCallback(redirectUri, state);
+        const pasted = await SmartThingsAuth.prompt(
+            "3. Colle l'URL de redirection complète (ou juste le code) : ",
+        );
+        const { code, returnedState } = SmartThingsAuth.parseCode(pasted);
+        if (!code)
+            throw new Error('Aucun code trouvé dans ce que tu as collé.');
+        if (returnedState && returnedState !== state)
+            throw new Error('OAuth state mismatch (CSRF) — relance le setup.');
+
         const params = new URLSearchParams({
             grant_type: 'authorization_code',
             code,
@@ -133,62 +153,36 @@ export class SmartThingsAuth {
         };
     }
 
-    private static waitForCallback(
-        redirectUri: string,
-        expectedState: string,
-    ): Promise<string> {
-        return new Promise((resolve, reject) => {
-            const parsed = new URL(redirectUri);
-            const port = Number(parsed.port) || 6147;
-            const callbackPath = parsed.pathname || '/callback';
-            const host =
-                parsed.hostname === 'localhost' ||
-                parsed.hostname === '127.0.0.1'
-                    ? '127.0.0.1'
-                    : '0.0.0.0';
-            const server = http.createServer((req, res) => {
-                const u = new URL(req.url ?? '', `http://localhost:${port}`);
-                if (u.pathname !== callbackPath) {
-                    res.writeHead(404);
-                    res.end('Not found');
-                    return;
-                }
-                const code = u.searchParams.get('code');
-                const error = u.searchParams.get('error');
-                if (error) {
-                    res.writeHead(400);
-                    res.end('<h1>Autorisation refusée</h1>');
-                    server.close();
-                    reject(new Error(`Authorization denied: ${error}`));
-                    return;
-                }
-                if (code) {
-                    const returnedState = u.searchParams.get('state');
-                    if (returnedState !== expectedState) {
-                        res.writeHead(400);
-                        res.end('<h1>State invalide (CSRF)</h1>');
-                        server.close();
-                        reject(new Error('OAuth state mismatch (CSRF)'));
-                        return;
-                    }
-                    res.writeHead(200);
-                    res.end('<h1>Autorisé ! Tu peux fermer cet onglet.</h1>');
-                    server.close();
-                    resolve(code);
-                    return;
-                }
-                res.writeHead(400);
-                res.end('<h1>Code manquant</h1>');
+    /**
+     * Extrait `code` (+ `state`) d'une URL de redirection collée. Si l'entrée
+     * n'est pas une URL, elle est traitée comme le code brut. Pure (testable).
+     */
+    static parseCode(input: string): {
+        code: string | null;
+        returnedState: string | null;
+    } {
+        const trimmed = input.trim();
+        try {
+            const u = new URL(trimmed);
+            return {
+                code: u.searchParams.get('code'),
+                returnedState: u.searchParams.get('state'),
+            };
+        } catch {
+            return { code: trimmed || null, returnedState: null };
+        }
+    }
+
+    private static prompt(question: string): Promise<string> {
+        return new Promise((resolve) => {
+            const rl = readline.createInterface({
+                input: process.stdin,
+                output: process.stdout,
             });
-            server.listen(port, host, () => {
-                console.log(
-                    `En attente du callback sur ${host}:${port}${callbackPath}`,
-                );
+            rl.question(question, (answer) => {
+                rl.close();
+                resolve(answer);
             });
-            setTimeout(() => {
-                server.close();
-                reject(new Error('Authorization timed out after 2 minutes'));
-            }, 120_000);
         });
     }
 }
