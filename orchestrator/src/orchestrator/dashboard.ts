@@ -48,12 +48,11 @@ export interface DashboardDeps {
 const BLOCK_TIMEOUT_MS = 5000;
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-    return Promise.race([
-        p,
-        new Promise<T>((_, rej) =>
-            setTimeout(() => rej(new Error('dashboard block timeout')), ms),
-        ),
-    ]);
+    let tid: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<T>((_, rej) => {
+        tid = setTimeout(() => rej(new Error('dashboard block timeout')), ms);
+    });
+    return Promise.race([p, timeout]).finally(() => clearTimeout(tid));
 }
 
 /** Exécute fn ; renvoie null sur toute erreur ou timeout (jamais de throw). */
@@ -103,6 +102,10 @@ function buildWeather(
     forecast: unknown,
 ): DashboardWeather | null {
     if (!isObj(current)) return null;
+    const num = (v: unknown): number => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+    };
     const fc =
         isObj(forecast) && Array.isArray(forecast.forecast)
             ? (forecast.forecast as Array<Record<string, unknown>>)
@@ -111,19 +114,25 @@ function buildWeather(
         current: {
             city: String(current.city ?? ''),
             condition: String(current.condition ?? ''),
-            temp: Number(current.temperature_c ?? 0),
-            feels: Number(current.feels_like_c ?? current.temperature_c ?? 0),
+            temp: num(current.temperature_c),
+            feels: num(
+                current.feels_like_c !== undefined
+                    ? current.feels_like_c
+                    : current.temperature_c,
+            ),
         },
         forecast: fc.slice(0, 5).map((f) => ({
             date: String(f.date ?? ''),
             condition: String(f.condition ?? ''),
-            min: Number(f.temp_min_c ?? 0),
-            max: Number(f.temp_max_c ?? 0),
+            min: num(f.temp_min_c),
+            max: num(f.temp_max_c),
             rainProb:
                 f.precipitation_prob === undefined ||
                 f.precipitation_prob === null
                     ? null
-                    : Number(f.precipitation_prob),
+                    : Number.isFinite(Number(f.precipitation_prob))
+                    ? Number(f.precipitation_prob)
+                    : null,
         })),
     };
 }
@@ -152,9 +161,14 @@ function countLightsOn(result: unknown): number | null {
 
 function doorsLocked(result: unknown): boolean | null {
     if (!Array.isArray(result) || result.length === 0) return null;
-    return (result as Array<Record<string, unknown>>).every(
-        (d) => d.stateName === 'locked',
-    );
+    return (result as Array<Record<string, unknown>>).every((d) => {
+        const sn =
+            (d as Record<string, unknown>).stateName ??
+            (isObj(d.state)
+                ? (d.state as Record<string, unknown>).stateName
+                : undefined);
+        return sn === 'locked';
+    });
 }
 
 /** Prochaine occurrence d'une automation activée (cron ou delay), ou null. */
@@ -214,9 +228,14 @@ export async function buildDashboard(
         agenda = { next: upcoming[0] ?? null, today: todayEvents };
     }
 
-    const presenceState = deps.presenceState();
+    let presenceStateValue = 'unknown';
+    try {
+        presenceStateValue = deps.presenceState();
+    } catch {
+        /* keep 'unknown' */
+    }
     const presence = {
-        state: presenceState,
+        state: presenceStateValue,
         lightsOn: countLightsOn(lightsRaw),
         doorLocked: doorsLocked(doorsRaw),
     };

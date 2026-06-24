@@ -70,11 +70,11 @@ const MAIL_HITS =
     '2 résultat(s) pour "is:important is:unread" :\n\n[1]\nDe: Banque\nObjet: Relevé';
 const MAIL_EMPTY = 'Aucun email pour la recherche : "is:important is:unread"';
 const LIGHTS = [
-    { id: '1', name: 'Salon', on: true },
-    { id: '2', name: 'Cuisine', on: false },
-    { id: '3', name: 'Bureau', on: true },
+    { id: '1', name: 'Salon', state: { on: true } },
+    { id: '2', name: 'Cuisine', state: { on: false } },
+    { id: '3', name: 'Bureau', state: { on: true } },
 ];
-const DOORS = [{ id: 'd1', name: 'Entrée', stateName: 'locked' }];
+const DOORS = [{ id: 'd1', name: 'Entrée', state: { stateName: 'locked' } }];
 
 function makeDeps(over: Partial<DashboardDeps> = {}): DashboardDeps {
     const callTool = async (name: string): Promise<unknown> => {
