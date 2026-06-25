@@ -22,7 +22,10 @@ export interface DashboardEvent {
 
 export interface DashboardData {
     weather: DashboardWeather | null;
-    agenda: { next: DashboardEvent | null; today: DashboardEvent[] } | null;
+    agenda:
+        | { judged: import('./agendaSecretary').AgendaData }
+        | { fallback: { next: DashboardEvent | null; today: DashboardEvent[] } }
+        | null;
     mail: { count: number; text: string } | null;
     automation: { name: string; at: string } | null; // at = ISO
     presence: {
@@ -43,6 +46,7 @@ export interface DashboardDeps {
     automations: () => Automation[];
     proactiveLastMessage: () => { message: string; at: number } | null;
     mailQuery?: string;
+    judgedAgenda: () => Promise<import('./agendaSecretary').AgendaData | null>;
 }
 
 const BLOCK_TIMEOUT_MS = 5000;
@@ -217,15 +221,20 @@ export async function buildDashboard(
     const weather =
         weatherRaw === null ? null : buildWeather(weatherRaw, forecastRaw);
 
+    const judged = await safe(() => deps.judgedAgenda());
     let agenda: DashboardData['agenda'] = null;
-    if (today !== null || week !== null) {
+    if (judged) {
+        agenda = { judged };
+    } else if (today !== null || week !== null) {
         const todayEvents = flattenAgenda(today);
         const weekEvents = flattenAgenda(week);
         const nowKey = new Date().toISOString().slice(0, 16); // "YYYY-MM-DDTHH:MM"
         const upcoming = weekEvents
             .filter((e) => eventKey(e) >= nowKey)
             .sort((a, b) => eventKey(a).localeCompare(eventKey(b)));
-        agenda = { next: upcoming[0] ?? null, today: todayEvents };
+        agenda = {
+            fallback: { next: upcoming[0] ?? null, today: todayEvents },
+        };
     }
 
     let presenceStateValue = 'unknown';

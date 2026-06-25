@@ -22,6 +22,7 @@ import {
     savePresenceConfig,
 } from './orchestrator/presenceConfig';
 import { createPresenceRulesEngine } from './orchestrator/presenceRules';
+import { AgendaSecretary } from './orchestrator/agendaSecretary';
 import {
     listScenes,
     createScene,
@@ -217,12 +218,18 @@ async function main() {
         replaceRules: (rules: any) => presenceRules.replace(rules),
     };
 
+    const agendaSecretary = new AgendaSecretary({
+        callTool: (tool, args) => orchestrator.callTool(tool, args ?? {}),
+        complete: (system, user) => orchestrator.complete(system, user),
+    });
+
     const dashboardProvider = createDashboardProvider({
         callTool: (tool, args) => orchestrator.callTool(tool, args ?? {}),
         presenceState: () => presence.getState(),
         automations: () => loadAutomations(),
         proactiveLastMessage: () => proactive.getLastMessage(),
         mailQuery: proactive.getMailQuery(),
+        judgedAgenda: () => agendaSecretary.getAgenda(),
     });
 
     const sources: InputSource[] = [new StdinSource(), new HttpSource()];

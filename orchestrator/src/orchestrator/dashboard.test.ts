@@ -113,6 +113,7 @@ function makeDeps(over: Partial<DashboardDeps> = {}): DashboardDeps {
             at: 1750000000000,
         }),
         mailQuery: 'is:important is:unread',
+        judgedAgenda: async () => null, // défaut : repli chronologique
         ...over,
     };
 }
@@ -126,11 +127,13 @@ async function run(): Promise<void> {
         assert.strictEqual(d.weather!.forecast.length, 2);
         assert.strictEqual(d.weather!.forecast[1].rainProb, 80);
 
-        assert.ok(d.agenda, 'agenda présent');
-        assert.strictEqual(d.agenda!.today.length, 1);
-        assert.strictEqual(d.agenda!.today[0].title, 'Standup');
-        assert.ok(d.agenda!.next, 'next event présent');
-        assert.strictEqual(d.agenda!.next!.title, 'Dentiste');
+        assert.ok(
+            d.agenda && 'fallback' in d.agenda,
+            'agenda en repli quand judgedAgenda=null',
+        );
+        assert.strictEqual(d.agenda.fallback.today.length, 1);
+        assert.strictEqual(d.agenda.fallback.today[0].title, 'Standup');
+        assert.strictEqual(d.agenda.fallback.next!.title, 'Dentiste');
 
         assert.ok(d.mail, 'mail présent');
         assert.strictEqual(d.mail!.count, 2);
@@ -175,6 +178,35 @@ async function run(): Promise<void> {
         assert.strictEqual(d.weather, null, 'weather KO → null');
         assert.ok(d.agenda, 'agenda toujours présent malgré météo KO');
         assert.ok(d.mail, 'mail toujours présent');
+    }
+
+    // ── agenda jugé (judgedAgenda renvoie des données) ─────────────────────────
+    {
+        const judged = {
+            briefing: 'Call à 10h.',
+            items: [
+                {
+                    id: 'e1',
+                    title: 'Call Acme',
+                    date: '2026-06-24',
+                    start: '10:00',
+                    allDay: false,
+                    location: 'Visio',
+                    category: 'call',
+                    categoryLabel: null,
+                    importance: 80,
+                    note: null,
+                    detail: 'full',
+                },
+            ],
+            judgedAt: '2026-06-24T08:00:00.000Z',
+        };
+        const d = await buildDashboard(
+            makeDeps({ judgedAgenda: async () => judged as any }),
+        );
+        assert.ok(d.agenda && 'judged' in d.agenda, 'agenda en mode jugé');
+        assert.strictEqual(d.agenda.judged.items[0].category, 'call');
+        assert.strictEqual(d.agenda.judged.briefing, 'Call à 10h.');
     }
 
     console.log('dashboard.test.ts OK');
