@@ -3,6 +3,8 @@ import {
     buildSecretaryPrompt,
     parseJudgment,
     eventsHash,
+    fetchAgendaEvents,
+    AgendaSecretary,
     type AgendaEvent,
 } from './agendaSecretary';
 
@@ -142,6 +144,140 @@ async function run(): Promise<void> {
             eventsHash(changed),
             'hash change si event change',
         );
+    }
+
+    // ── fetchAgendaEvents : normalise get_schedule ──────────────────────────────
+    {
+        const calls: any[] = [];
+        const callTool = async (name: string, args?: any) => {
+            calls.push({ name, args });
+            return {
+                start: '2026-06-25',
+                end: '2026-08-24',
+                days: [
+                    {
+                        date: '2026-06-25',
+                        events: [
+                            {
+                                id: 'e1',
+                                title: 'Call Acme',
+                                date: '2026-06-25',
+                                all_day: false,
+                                start: '10:00',
+                                location: 'Visio',
+                                attendees: ['acme@x.com'],
+                            },
+                        ],
+                    },
+                    {
+                        date: '2026-07-10',
+                        events: [
+                            {
+                                id: 'e2',
+                                title: 'Vacances',
+                                date: '2026-07-10',
+                                all_day: true,
+                                location: null,
+                            },
+                        ],
+                    },
+                ],
+            };
+        };
+        const evs = await fetchAgendaEvents(
+            callTool,
+            new Date('2026-06-25T08:00:00Z'),
+        );
+        assert.strictEqual(calls[0].name, 'get_schedule');
+        assert.strictEqual(calls[0].args.startDate, '2026-06-25');
+        assert.strictEqual(
+            calls[0].args.endDate,
+            '2026-08-24',
+            'endDate = +60 j',
+        );
+        assert.strictEqual(evs.length, 2);
+        assert.deepStrictEqual(evs[0].attendees, ['acme@x.com']);
+        assert.strictEqual(evs[1].allDay, true);
+        assert.deepStrictEqual(evs[1].attendees, [], 'attendees absents → []');
+    }
+
+    // ── AgendaSecretary : cache + null-sans-cache ───────────────────────────────
+    {
+        const SCHED = {
+            days: [
+                {
+                    date: '2026-06-25',
+                    events: [
+                        {
+                            id: 'e1',
+                            title: 'Call',
+                            date: '2026-06-25',
+                            all_day: false,
+                            start: '10:00',
+                        },
+                    ],
+                },
+            ],
+        };
+        let completeCalls = 0;
+        const okJudgment = JSON.stringify({
+            briefing: 'b',
+            items: [
+                {
+                    id: 'e1',
+                    title: 'Call',
+                    date: '2026-06-25',
+                    start: '10:00',
+                    allDay: false,
+                    location: null,
+                    category: 'call',
+                    categoryLabel: null,
+                    importance: 70,
+                    note: null,
+                    detail: 'full',
+                },
+            ],
+            judgedAt: '2026-06-25T08:00:00.000Z',
+        });
+
+        // cas nominal + cache
+        {
+            const sec = new AgendaSecretary({
+                callTool: async () => SCHED,
+                complete: async () => {
+                    completeCalls++;
+                    return okJudgment;
+                },
+                ttlMs: 60_000,
+            });
+            const now = new Date('2026-06-25T08:00:00Z');
+            const a = await sec.getAgenda(now);
+            assert.ok(a && a.items[0].category === 'call');
+            assert.strictEqual(completeCalls, 1);
+            await sec.getAgenda(new Date('2026-06-25T08:00:30Z')); // même events, dans le TTL
+            assert.strictEqual(completeCalls, 1, 'cache: pas de 2e appel LLM');
+        }
+
+        // échec LLM → null, pas de mise en cache (retry)
+        {
+            let n = 0;
+            const sec = new AgendaSecretary({
+                callTool: async () => SCHED,
+                complete: async () => {
+                    n++;
+                    throw new Error('llm down');
+                },
+            });
+            assert.strictEqual(
+                await sec.getAgenda(new Date('2026-06-25T08:00:00Z')),
+                null,
+            );
+            assert.strictEqual(
+                await sec.getAgenda(new Date('2026-06-25T08:00:01Z')),
+                null,
+            );
+            assert.strictEqual(n, 2, 'échec non caché → re-tenté');
+        }
     }
 
     console.log('agendaSecretary (pure units) OK');

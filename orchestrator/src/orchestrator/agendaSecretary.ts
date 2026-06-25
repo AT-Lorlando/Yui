@@ -171,3 +171,117 @@ export function eventsHash(events: AgendaEvent[]): string {
         .join('\n');
     return createHash('sha1').update(key).digest('hex');
 }
+
+// ── Récupération des événements ────────────────────────────────────────────────
+
+type CallTool = (
+    name: string,
+    args?: Record<string, unknown>,
+) => Promise<unknown>;
+
+const HORIZON_DAYS = 60;
+
+function ymd(d: Date): string {
+    return d.toISOString().slice(0, 10);
+}
+
+function isObj(v: unknown): v is Record<string, unknown> {
+    return typeof v === 'object' && v !== null;
+}
+
+/** Récupère et normalise les événements aujourd'hui → +60 j via get_schedule. */
+export async function fetchAgendaEvents(
+    callTool: CallTool,
+    now: Date,
+): Promise<AgendaEvent[]> {
+    const startDate = ymd(now);
+    const end = new Date(now.getTime() + HORIZON_DAYS * 86_400_000);
+    const endDate = ymd(end);
+
+    const res = await callTool('get_schedule', {
+        startDate,
+        endDate,
+        maxResults: 100,
+    });
+    if (!isObj(res) || !Array.isArray(res.days)) return [];
+
+    const out: AgendaEvent[] = [];
+    for (const day of res.days as Array<Record<string, unknown>>) {
+        const events = Array.isArray(day.events) ? day.events : [];
+        for (const ev of events as Array<Record<string, unknown>>) {
+            if (ev.cancelled === true) continue;
+            out.push({
+                id: str(ev.id) || `${str(day.date)}-${str(ev.title)}`,
+                title: str(ev.title) || '(Sans titre)',
+                date: str(ev.date) || str(day.date),
+                start: typeof ev.start === 'string' ? ev.start : null,
+                allDay: ev.all_day === true,
+                location: strOrNull(ev.location),
+                attendees: Array.isArray(ev.attendees)
+                    ? (ev.attendees as unknown[])
+                          .map((a) => str(a))
+                          .filter(Boolean)
+                    : [],
+            });
+        }
+    }
+    return out;
+}
+
+// ── Service caché ──────────────────────────────────────────────────────────────
+
+export interface AgendaSecretaryDeps {
+    callTool: CallTool;
+    complete: (system: string, user: string) => Promise<string>;
+    ttlMs?: number;
+}
+
+const DEFAULT_TTL_MS = 30 * 60_000;
+
+export class AgendaSecretary {
+    private cache: { hash: string; data: AgendaData; at: number } | null = null;
+    private inflight: Promise<AgendaData | null> | null = null;
+    private readonly ttlMs: number;
+
+    constructor(private deps: AgendaSecretaryDeps) {
+        this.ttlMs = deps.ttlMs ?? DEFAULT_TTL_MS;
+    }
+
+    async getAgenda(now: Date = new Date()): Promise<AgendaData | null> {
+        if (this.inflight) return this.inflight;
+        this.inflight = this.compute(now).finally(() => {
+            this.inflight = null;
+        });
+        return this.inflight;
+    }
+
+    private async compute(now: Date): Promise<AgendaData | null> {
+        let events: AgendaEvent[];
+        try {
+            events = await fetchAgendaEvents(this.deps.callTool, now);
+        } catch {
+            return null;
+        }
+        const hash = eventsHash(events);
+
+        if (
+            this.cache &&
+            this.cache.hash === hash &&
+            now.getTime() - this.cache.at < this.ttlMs
+        ) {
+            return this.cache.data;
+        }
+
+        const { system, user } = buildSecretaryPrompt(events, now);
+        let data: AgendaData | null;
+        try {
+            data = parseJudgment(await this.deps.complete(system, user));
+        } catch {
+            return null; // LLM KO → null, pas de mise en cache
+        }
+        if (!data) return null; // JSON invalide → null, pas de mise en cache
+
+        this.cache = { hash, data, at: now.getTime() };
+        return data;
+    }
+}
