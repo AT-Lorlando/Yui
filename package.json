@@ -6,11 +6,11 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces && tsc -p tsconfig.json && npm run build:app",
+    "build": "npm run build -w @yui/shared && npm run build --workspaces && tsc -p tsconfig.json && npm run build:app",
     "build:app": "npm run build:web --prefix mobile",
     "build:apk": "npm run build:apk --prefix mobile && mkdir -p assets/apk && cp mobile/android/app/build/outputs/apk/debug/app-debug.apk assets/apk/yui.apk",
     "build:orchestrator": "tsc -p tsconfig.json",
-    "build:packages": "npm run build --workspaces",
+    "build:packages": "npm run build -w @yui/shared && npm run build --workspaces",
     "dev:app": "npm run dev:web --prefix mobile",
     "dev:orchestrator_": "npm run build:packages && PORT=4000 npx ts-node -P tsconfig.json orchestrator/src/main.ts",
     "dev:orchestrator": "PORT=4000 npx ts-node -P tsconfig.json orchestrator/src/main.ts",
