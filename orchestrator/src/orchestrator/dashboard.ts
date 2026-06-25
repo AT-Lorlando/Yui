@@ -221,6 +221,9 @@ export async function buildDashboard(
     const weather =
         weatherRaw === null ? null : buildWeather(weatherRaw, forecastRaw);
 
+    // safe() bounds the judged-agenda call by BLOCK_TIMEOUT_MS; if the LLM is slow it returns
+    // null and the dashboard shows the chronological fallback for that poll — the AgendaSecretary
+    // keeps computing in the background and the next poll picks up the cached judged result.
     const judged = await safe(() => deps.judgedAgenda());
     let agenda: DashboardData['agenda'] = null;
     if (judged) {

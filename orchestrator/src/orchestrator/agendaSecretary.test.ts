@@ -165,7 +165,9 @@ async function run(): Promise<void> {
                                 all_day: false,
                                 start: '10:00',
                                 location: 'Visio',
-                                attendees: ['acme@x.com'],
+                                attendees: [
+                                    { name: 'Acme', response: 'accepted' },
+                                ],
                             },
                         ],
                     },
@@ -196,7 +198,7 @@ async function run(): Promise<void> {
             'endDate = +60 j',
         );
         assert.strictEqual(evs.length, 2);
-        assert.deepStrictEqual(evs[0].attendees, ['acme@x.com']);
+        assert.deepStrictEqual(evs[0].attendees, ['Acme']);
         assert.strictEqual(evs[1].allDay, true);
         assert.deepStrictEqual(evs[1].attendees, [], 'attendees absents → []');
     }

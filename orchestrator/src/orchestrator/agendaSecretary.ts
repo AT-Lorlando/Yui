@@ -165,7 +165,7 @@ export function eventsHash(events: AgendaEvent[]): string {
             (e) =>
                 `${e.id}|${e.title}|${e.date}|${e.start ?? ''}|${e.allDay}|${
                     e.location ?? ''
-                }`,
+                }|${e.attendees.join(',')}`,
         )
         .sort()
         .join('\n');
@@ -219,7 +219,11 @@ export async function fetchAgendaEvents(
                 location: strOrNull(ev.location),
                 attendees: Array.isArray(ev.attendees)
                     ? (ev.attendees as unknown[])
-                          .map((a) => str(a))
+                          .map((a) =>
+                              isObj(a)
+                                  ? str((a as Record<string, unknown>).name)
+                                  : str(a),
+                          )
                           .filter(Boolean)
                     : [],
             });
