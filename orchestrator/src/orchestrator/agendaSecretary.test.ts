@@ -13,6 +13,7 @@ const EVENTS: AgendaEvent[] = [
         id: 'e1',
         title: 'Call Acme',
         date: '2026-06-25',
+        endDate: null,
         start: '10:00',
         allDay: false,
         location: 'Visio',
@@ -22,6 +23,7 @@ const EVENTS: AgendaEvent[] = [
         id: 'e2',
         title: 'Vacances',
         date: '2026-07-10',
+        endDate: '2026-07-24',
         start: null,
         allDay: true,
         location: null,
@@ -45,6 +47,11 @@ async function run(): Promise<void> {
             'user: events sérialisés',
         );
         assert.ok(user.includes('2026-06-25'), 'user: date présente');
+        // un événement journée multi-jour expose sa plage + son nombre de jours
+        assert.ok(
+            user.includes('→ 2026-07-24') && /\(15 jours\)/.test(user),
+            'user: plage multi-jour + nb jours (durée visible par le LLM)',
+        );
     }
 
     // ── parseJudgment : JSON valide (même entouré de texte) ─────────────────────
@@ -178,6 +185,7 @@ async function run(): Promise<void> {
                                 id: 'e2',
                                 title: 'Vacances',
                                 date: '2026-07-10',
+                                end_date: '2026-07-24',
                                 all_day: true,
                                 location: null,
                             },
@@ -199,7 +207,13 @@ async function run(): Promise<void> {
         );
         assert.strictEqual(evs.length, 2);
         assert.deepStrictEqual(evs[0].attendees, ['Acme']);
+        assert.strictEqual(evs[0].endDate, null, 'pas de end_date → null');
         assert.strictEqual(evs[1].allDay, true);
+        assert.strictEqual(
+            evs[1].endDate,
+            '2026-07-24',
+            'end_date multi-jour capturé',
+        );
         assert.deepStrictEqual(evs[1].attendees, [], 'attendees absents → []');
     }
 

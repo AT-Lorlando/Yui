@@ -3,11 +3,20 @@ import { createHash } from 'crypto';
 export interface AgendaEvent {
     id: string;
     title: string;
-    date: string; // YYYY-MM-DD
+    date: string; // YYYY-MM-DD (jour de début)
+    endDate: string | null; // YYYY-MM-DD dernier jour inclus si multi-jour, sinon null
     start: string | null; // "HH:MM" ou null (journée entière)
     allDay: boolean;
     location: string | null;
     attendees: string[];
+}
+
+/** Nombre de jours (inclus) entre deux dates YYYY-MM-DD ; >= 1. */
+function spanDays(start: string, end: string): number {
+    const d1 = new Date(start + 'T00:00:00Z').getTime();
+    const d2 = new Date(end + 'T00:00:00Z').getTime();
+    if (!Number.isFinite(d1) || !Number.isFinite(d2)) return 1;
+    return Math.max(1, Math.round((d2 - d1) / 86_400_000) + 1);
 }
 
 export type AgendaCategory =
@@ -66,6 +75,9 @@ export function buildSecretaryPrompt(
         '- importance : entier 0-100 (un call client > un afterwork > un week-end off).\n' +
         '- note : courte phrase utile de secrétaire (ou null).\n' +
         '- detail : "full" (heure+lieu+participants+note), "normal" (heure+lieu), "minimal" (titre+jour).\n' +
+        'Un événement journée entière indiqué sur PLUSIEURS jours (plage "→ … (N jours)") : ' +
+        'sa DURÉE prime — un séjour de plusieurs jours est des vacances, pas un week-end ' +
+        '(un week-end = samedi-dimanche, ~2 jours).\n' +
         'Rédige aussi un "briefing" de 1-2 phrases, ton de secrétaire, en français.\n' +
         'Réponds STRICTEMENT en JSON, sans texte autour, selon ce schéma :\n' +
         '{"briefing": string, "items": [{"id": string, "title": string, "date": "YYYY-MM-DD", ' +
@@ -73,14 +85,18 @@ export function buildSecretaryPrompt(
         '"categoryLabel": string|null, "importance": number, "note": string|null, "detail": string}], ' +
         '"judgedAt": string}';
 
-    const lines = events.map(
-        (e) =>
-            `- [${e.id}] ${e.title} | ${e.date}${
-                e.allDay ? ' (journée)' : ` ${e.start ?? ''}`
-            }` +
+    const lines = events.map((e) => {
+        const span =
+            e.endDate && e.endDate !== e.date
+                ? ` → ${e.endDate} (${spanDays(e.date, e.endDate)} jours)`
+                : '';
+        const when = e.allDay ? `${span} (journée)` : ` ${e.start ?? ''}`;
+        return (
+            `- [${e.id}] ${e.title} | ${e.date}${when}` +
             `${e.location ? ` | lieu: ${e.location}` : ''}` +
-            `${e.attendees.length ? ` | avec: ${e.attendees.join(', ')}` : ''}`,
-    );
+            `${e.attendees.length ? ` | avec: ${e.attendees.join(', ')}` : ''}`
+        );
+    });
     const user =
         `Date/heure actuelle : ${now.toISOString()}\n` +
         `Événements (${events.length}) :\n${lines.join('\n')}`;
@@ -163,9 +179,9 @@ export function eventsHash(events: AgendaEvent[]): string {
     const key = events
         .map(
             (e) =>
-                `${e.id}|${e.title}|${e.date}|${e.start ?? ''}|${e.allDay}|${
-                    e.location ?? ''
-                }|${e.attendees.join(',')}`,
+                `${e.id}|${e.title}|${e.date}|${e.endDate ?? ''}|${
+                    e.start ?? ''
+                }|${e.allDay}|${e.location ?? ''}|${e.attendees.join(',')}`,
         )
         .sort()
         .join('\n');
@@ -214,6 +230,7 @@ export async function fetchAgendaEvents(
                 id: str(ev.id) || `${str(day.date)}-${str(ev.title)}`,
                 title: str(ev.title) || '(Sans titre)',
                 date: str(ev.date) || str(day.date),
+                endDate: strOrNull(ev.end_date),
                 start: typeof ev.start === 'string' ? ev.start : null,
                 allDay: ev.all_day === true,
                 location: strOrNull(ev.location),
