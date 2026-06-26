@@ -8,6 +8,7 @@ export interface AgendaEvent {
     start: string | null; // "HH:MM" ou null (journée entière)
     allDay: boolean;
     location: string | null;
+    description: string | null; // note/description de l'event (contexte pour le LLM)
     attendees: string[];
 }
 
@@ -44,6 +45,7 @@ export interface AgendaItem {
     id: string;
     title: string;
     date: string;
+    endDate: string | null; // dernier jour inclus si multi-jour (durée des vacances), sinon null
     start: string | null;
     allDay: boolean;
     location: string | null;
@@ -78,6 +80,11 @@ export function buildSecretaryPrompt(
         'Un événement journée entière indiqué sur PLUSIEURS jours (plage "→ … (N jours)") : ' +
         'sa DURÉE prime — un séjour de plusieurs jours est des vacances, pas un week-end ' +
         '(un week-end = samedi-dimanche, ~2 jours).\n' +
+        'Sers-toi de la description ("desc:") d\'un événement pour mieux le juger ' +
+        '(lieu, contexte) et enrichir ta note.\n' +
+        'Pour les réunions professionnelles répétitives/génériques (ex. plusieurs ' +
+        '"Professional meeting"), ne retiens QUE celles de la semaine en cours — ou de la ' +
+        'semaine prochaine si on est samedi ou dimanche ; ignore les occurrences plus lointaines.\n' +
         'Rédige aussi un "briefing" de 1-2 phrases, ton de secrétaire, en français.\n' +
         'Réponds STRICTEMENT en JSON, sans texte autour, selon ce schéma :\n' +
         '{"briefing": string, "items": [{"id": string, "title": string, "date": "YYYY-MM-DD", ' +
@@ -94,7 +101,10 @@ export function buildSecretaryPrompt(
         return (
             `- [${e.id}] ${e.title} | ${e.date}${when}` +
             `${e.location ? ` | lieu: ${e.location}` : ''}` +
-            `${e.attendees.length ? ` | avec: ${e.attendees.join(', ')}` : ''}`
+            `${
+                e.attendees.length ? ` | avec: ${e.attendees.join(', ')}` : ''
+            }` +
+            `${e.description ? ` | desc: ${e.description.slice(0, 120)}` : ''}`
         );
     });
     const user =
@@ -154,6 +164,7 @@ export function parseJudgment(llmText: string): AgendaData | null {
             id: str(e.id),
             title: str(e.title) || '(Sans titre)',
             date: str(e.date),
+            endDate: typeof e.endDate === 'string' ? e.endDate : null,
             start: typeof e.start === 'string' ? e.start : null,
             allDay: e.allDay === true,
             location: strOrNull(e.location),
@@ -181,7 +192,9 @@ export function eventsHash(events: AgendaEvent[]): string {
             (e) =>
                 `${e.id}|${e.title}|${e.date}|${e.endDate ?? ''}|${
                     e.start ?? ''
-                }|${e.allDay}|${e.location ?? ''}|${e.attendees.join(',')}`,
+                }|${e.allDay}|${e.location ?? ''}|${
+                    e.description ?? ''
+                }|${e.attendees.join(',')}`,
         )
         .sort()
         .join('\n');
@@ -234,6 +247,7 @@ export async function fetchAgendaEvents(
                 start: typeof ev.start === 'string' ? ev.start : null,
                 allDay: ev.all_day === true,
                 location: strOrNull(ev.location),
+                description: strOrNull(ev.note),
                 attendees: Array.isArray(ev.attendees)
                     ? (ev.attendees as unknown[])
                           .map((a) =>
@@ -301,6 +315,15 @@ export class AgendaSecretary {
             return null; // LLM KO → null, pas de mise en cache
         }
         if (!data) return null; // JSON invalide → null, pas de mise en cache
+
+        // Le LLM ne renvoie pas endDate : on le réinjecte depuis les events source
+        // (par id) pour que le front puisse afficher la durée des séjours/vacances.
+        const byId = new Map(events.map((e) => [e.id, e]));
+        for (const item of data.items) {
+            if (item.endDate == null) {
+                item.endDate = byId.get(item.id)?.endDate ?? null;
+            }
+        }
 
         this.cache = { hash, data, at: now.getTime() };
         return data;

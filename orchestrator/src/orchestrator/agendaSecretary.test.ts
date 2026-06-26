@@ -17,6 +17,7 @@ const EVENTS: AgendaEvent[] = [
         start: '10:00',
         allDay: false,
         location: 'Visio',
+        description: null,
         attendees: ['acme@x.com'],
     },
     {
@@ -27,6 +28,7 @@ const EVENTS: AgendaEvent[] = [
         start: null,
         allDay: true,
         location: null,
+        description: 'Chez Bastien à Lyon',
         attendees: [],
     },
 ];
@@ -52,6 +54,16 @@ async function run(): Promise<void> {
             user.includes('→ 2026-07-24') && /\(15 jours\)/.test(user),
             'user: plage multi-jour + nb jours (durée visible par le LLM)',
         );
+        assert.ok(
+            user.includes('desc: Chez Bastien à Lyon'),
+            'user: description sérialisée pour le LLM',
+        );
+        assert.ok(
+            /semaine/i.test(system) &&
+                /professionnelle|professional/i.test(system),
+            'system: règle réunions pro = semaine en cours',
+        );
+        assert.ok(/desc/i.test(system), 'system: consigne usage description');
     }
 
     // ── parseJudgment : JSON valide (même entouré de texte) ─────────────────────
@@ -188,6 +200,7 @@ async function run(): Promise<void> {
                                 end_date: '2026-07-24',
                                 all_day: true,
                                 location: null,
+                                note: 'Séjour Lyon',
                             },
                         ],
                     },
@@ -208,11 +221,17 @@ async function run(): Promise<void> {
         assert.strictEqual(evs.length, 2);
         assert.deepStrictEqual(evs[0].attendees, ['Acme']);
         assert.strictEqual(evs[0].endDate, null, 'pas de end_date → null');
+        assert.strictEqual(evs[0].description, null, 'pas de note → null');
         assert.strictEqual(evs[1].allDay, true);
         assert.strictEqual(
             evs[1].endDate,
             '2026-07-24',
             'end_date multi-jour capturé',
+        );
+        assert.strictEqual(
+            evs[1].description,
+            'Séjour Lyon',
+            'note (description) capturée',
         );
         assert.deepStrictEqual(evs[1].attendees, [], 'attendees absents → []');
     }
@@ -228,6 +247,7 @@ async function run(): Promise<void> {
                             id: 'e1',
                             title: 'Call',
                             date: '2026-06-25',
+                            end_date: '2026-06-27',
                             all_day: false,
                             start: '10:00',
                         },
@@ -269,6 +289,11 @@ async function run(): Promise<void> {
             const now = new Date('2026-06-25T08:00:00Z');
             const a = await sec.getAgenda(now);
             assert.ok(a && a.items[0].category === 'call');
+            assert.strictEqual(
+                a!.items[0].endDate,
+                '2026-06-27',
+                'endDate réinjecté depuis l’event source (par id)',
+            );
             assert.strictEqual(completeCalls, 1);
             await sec.getAgenda(new Date('2026-06-25T08:00:30Z')); // même events, dans le TTL
             assert.strictEqual(completeCalls, 1, 'cache: pas de 2e appel LLM');
