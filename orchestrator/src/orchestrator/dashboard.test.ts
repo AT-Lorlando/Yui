@@ -28,16 +28,21 @@ const FORECAST = {
         },
     ],
 };
+// Dates relatives à aujourd'hui : "next" filtre sur `new Date()` dans buildDashboard,
+// donc Dentiste doit rester dans le futur quelle que soit la date d'exécution.
+const ymd = (d: Date): string => d.toISOString().slice(0, 10);
+const TODAY_STR = ymd(new Date());
+const NEXT_STR = ymd(new Date(Date.now() + 2 * 86_400_000));
 const TODAY = {
-    start: '2026-06-24',
-    end: '2026-06-24',
+    start: TODAY_STR,
+    end: TODAY_STR,
     days: [
         {
-            date: '2026-06-24',
+            date: TODAY_STR,
             events: [
                 {
                     title: 'Standup',
-                    date: '2026-06-24',
+                    date: TODAY_STR,
                     all_day: false,
                     start: '09:30',
                     end: '10:00',
@@ -48,15 +53,15 @@ const TODAY = {
     ],
 };
 const WEEK = {
-    start: '2026-06-24',
-    end: '2026-06-30',
+    start: TODAY_STR,
+    end: NEXT_STR,
     days: [
         {
-            date: '2026-06-26',
+            date: NEXT_STR,
             events: [
                 {
                     title: 'Dentiste',
-                    date: '2026-06-26',
+                    date: NEXT_STR,
                     all_day: false,
                     start: '15:00',
                     end: '15:45',
