@@ -80,6 +80,32 @@ const LIGHTS = [
     { id: '3', name: 'Bureau', state: { on: true } },
 ];
 const DOORS = [{ id: 'd1', name: 'Entrée', state: { stateName: 'locked' } }];
+const TASKS = [
+    {
+        title: 'Done thing',
+        state: 'done',
+        project: 'todos/Personal',
+        priority: 'high',
+    },
+    {
+        title: 'Faire les courses',
+        state: 'todo',
+        project: 'todos/Personal',
+        priority: 'low',
+    },
+    {
+        title: 'Refacto X',
+        state: 'in_progress',
+        project: 'todos/Personal',
+        priority: 'medium',
+    },
+    {
+        title: 'Annulé',
+        state: 'canceled',
+        project: 'todos/Personal',
+        priority: 'none',
+    },
+];
 
 function makeDeps(over: Partial<DashboardDeps> = {}): DashboardDeps {
     const callTool = async (name: string): Promise<unknown> => {
@@ -98,6 +124,8 @@ function makeDeps(over: Partial<DashboardDeps> = {}): DashboardDeps {
                 return LIGHTS;
             case 'list_doors':
                 return DOORS;
+            case 'list_tasks':
+                return TASKS;
             default:
                 throw new Error(`unexpected tool ${name}`);
         }
@@ -212,6 +240,37 @@ async function run(): Promise<void> {
         assert.ok(d.agenda && 'judged' in d.agenda, 'agenda en mode jugé');
         assert.strictEqual(d.agenda.judged.items[0].category, 'call');
         assert.strictEqual(d.agenda.judged.briefing, 'Call à 10h.');
+    }
+
+    // ── todos : projet défini → tâches ouvertes triées (in_progress puis priorité) ─
+    {
+        const d = await buildDashboard(
+            makeDeps({ todoProject: 'todos/Personal' }),
+        );
+        assert.ok(d.todos, 'todos présent quand todoProject défini');
+        // done + canceled exclus → 2 ouvertes
+        assert.strictEqual(
+            d.todos.items.length,
+            2,
+            'seules les tâches ouvertes',
+        );
+        assert.strictEqual(
+            d.todos.items[0].title,
+            'Refacto X',
+            'in_progress avant todo',
+        );
+        assert.ok(
+            d.todos.items.every(
+                (t) => t.state !== 'done' && t.state !== 'canceled',
+            ),
+            'pas de done/canceled',
+        );
+    }
+
+    // ── todos : pas de projet → null (module masqué) ───────────────────────────
+    {
+        const d = await buildDashboard(makeDeps());
+        assert.strictEqual(d.todos, null, 'pas de todoProject → todos null');
     }
 
     console.log('dashboard.test.ts OK');

@@ -9,6 +9,7 @@ export interface AgendaEvent {
     allDay: boolean;
     location: string | null;
     description: string | null; // note/description de l'event (contexte pour le LLM)
+    durationMin: number | null; // durée en minutes (events horaires), sinon null
     attendees: string[];
 }
 
@@ -26,6 +27,7 @@ export type AgendaCategory =
     | 'afterwork'
     | 'weekend'
     | 'vacation'
+    | 'holiday'
     | 'perso'
     | 'autre';
 
@@ -35,6 +37,7 @@ const CATEGORIES: AgendaCategory[] = [
     'afterwork',
     'weekend',
     'vacation',
+    'holiday',
     'perso',
     'autre',
 ];
@@ -46,6 +49,7 @@ export interface AgendaItem {
     title: string;
     date: string;
     endDate: string | null; // dernier jour inclus si multi-jour (durée des vacances), sinon null
+    durationMin: number | null; // durée en minutes (events horaires), sinon null
     start: string | null;
     allDay: boolean;
     location: string | null;
@@ -77,14 +81,16 @@ export function buildSecretaryPrompt(
         '- importance : entier 0-100 (un call client > un afterwork > un week-end off).\n' +
         '- note : courte phrase utile de secrétaire (ou null).\n' +
         '- detail : "full" (heure+lieu+participants+note), "normal" (heure+lieu), "minimal" (titre+jour).\n' +
+        'Les jours fériés (ex. fête nationale, Assomption, Noël, 1er mai) → category "holiday".\n' +
         'Un événement journée entière indiqué sur PLUSIEURS jours (plage "→ … (N jours)") : ' +
         'sa DURÉE prime — un séjour de plusieurs jours est des vacances, pas un week-end ' +
         '(un week-end = samedi-dimanche, ~2 jours).\n' +
         'Sers-toi de la description ("desc:") d\'un événement pour mieux le juger ' +
         '(lieu, contexte) et enrichir ta note.\n' +
-        'Pour les réunions professionnelles répétitives/génériques (ex. plusieurs ' +
-        '"Professional meeting"), ne retiens QUE celles de la semaine en cours — ou de la ' +
-        'semaine prochaine si on est samedi ou dimanche ; ignore les occurrences plus lointaines.\n' +
+        'Pour les réunions professionnelles (ex. "Professional meeting", meetings pro) : ' +
+        'ne retiens QUE celles de la semaine analysée — la semaine en cours, étendue à la ' +
+        'semaine prochaine UNIQUEMENT si on est vendredi, samedi ou dimanche. Ignore toute ' +
+        'réunion pro plus lointaine dans le temps.\n' +
         'Rédige aussi un "briefing" de 1-2 phrases, ton de secrétaire, en français.\n' +
         'Réponds STRICTEMENT en JSON, sans texte autour, selon ce schéma :\n' +
         '{"briefing": string, "items": [{"id": string, "title": string, "date": "YYYY-MM-DD", ' +
@@ -165,6 +171,8 @@ export function parseJudgment(llmText: string): AgendaData | null {
             title: str(e.title) || '(Sans titre)',
             date: str(e.date),
             endDate: typeof e.endDate === 'string' ? e.endDate : null,
+            durationMin:
+                typeof e.durationMin === 'number' ? e.durationMin : null,
             start: typeof e.start === 'string' ? e.start : null,
             allDay: e.allDay === true,
             location: strOrNull(e.location),
@@ -248,6 +256,10 @@ export async function fetchAgendaEvents(
                 allDay: ev.all_day === true,
                 location: strOrNull(ev.location),
                 description: strOrNull(ev.note),
+                durationMin:
+                    typeof ev.duration_min === 'number'
+                        ? ev.duration_min
+                        : null,
                 attendees: Array.isArray(ev.attendees)
                     ? (ev.attendees as unknown[])
                           .map((a) =>
@@ -320,9 +332,10 @@ export class AgendaSecretary {
         // (par id) pour que le front puisse afficher la durée des séjours/vacances.
         const byId = new Map(events.map((e) => [e.id, e]));
         for (const item of data.items) {
-            if (item.endDate == null) {
-                item.endDate = byId.get(item.id)?.endDate ?? null;
-            }
+            const src = byId.get(item.id);
+            if (item.endDate == null) item.endDate = src?.endDate ?? null;
+            if (item.durationMin == null)
+                item.durationMin = src?.durationMin ?? null;
         }
 
         this.cache = { hash, data, at: now.getTime() };

@@ -17,6 +17,16 @@ import Logger from './logger';
 const baseUrl = process.env.YOJI_API_URL ?? 'http://localhost:3000/api/v1';
 const apiKey = process.env.YOJI_API_KEY;
 
+// Yoji tourne souvent derrière un cert auto-signé sur le LAN (ex. yoji.home.arpa).
+// Ce process ne parle qu'au serveur Yoji : on autorise, sur opt-in explicite, à
+// ne pas vérifier le certificat TLS. Contenu à mcp-yoji uniquement.
+if (process.env.YOJI_INSECURE_TLS === 'true') {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    Logger.warn(
+        'YOJI_INSECURE_TLS=true → vérification du certificat TLS désactivée pour mcp-yoji (LAN).',
+    );
+}
+
 const yoji = new YojiClient({ baseUrl, apiKey });
 
 const server = new Server(

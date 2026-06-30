@@ -14,6 +14,7 @@ const EVENTS: AgendaEvent[] = [
         title: 'Call Acme',
         date: '2026-06-25',
         endDate: null,
+        durationMin: 60,
         start: '10:00',
         allDay: false,
         location: 'Visio',
@@ -25,6 +26,7 @@ const EVENTS: AgendaEvent[] = [
         title: 'Vacances',
         date: '2026-07-10',
         endDate: '2026-07-24',
+        durationMin: null,
         start: null,
         allDay: true,
         location: null,
@@ -183,6 +185,7 @@ async function run(): Promise<void> {
                                 date: '2026-06-25',
                                 all_day: false,
                                 start: '10:00',
+                                duration_min: 60,
                                 location: 'Visio',
                                 attendees: [
                                     { name: 'Acme', response: 'accepted' },
@@ -221,6 +224,7 @@ async function run(): Promise<void> {
         assert.strictEqual(evs.length, 2);
         assert.deepStrictEqual(evs[0].attendees, ['Acme']);
         assert.strictEqual(evs[0].endDate, null, 'pas de end_date → null');
+        assert.strictEqual(evs[0].durationMin, 60, 'duration_min capturé');
         assert.strictEqual(evs[0].description, null, 'pas de note → null');
         assert.strictEqual(evs[1].allDay, true);
         assert.strictEqual(

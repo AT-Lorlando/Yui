@@ -34,6 +34,9 @@ export interface DashboardData {
         doorLocked: boolean | null;
     } | null;
     proactive: { message: string; at: string } | null;
+    todos: {
+        items: Array<{ title: string; state: string; priority: string }>;
+    } | null;
     generatedAt: string;
 }
 
@@ -47,6 +50,40 @@ export interface DashboardDeps {
     proactiveLastMessage: () => { message: string; at: number } | null;
     mailQuery?: string;
     judgedAgenda: () => Promise<import('./agendaSecretary').AgendaData | null>;
+    /** Projet Yoji dont on affiche les tâches ouvertes (ex. "todos/Personal"). */
+    todoProject?: string;
+}
+
+const OPEN_TODO_STATES = new Set(['todo', 'in_progress']);
+const TODO_PRIORITY_RANK: Record<string, number> = {
+    urgent: 0,
+    high: 1,
+    medium: 2,
+    low: 3,
+    none: 4,
+};
+
+/** Filtre les tâches Yoji ouvertes, trie (in_progress puis priorité), cap à 8. */
+function parseTodos(
+    result: unknown,
+): { items: Array<{ title: string; state: string; priority: string }> } | null {
+    if (!Array.isArray(result)) return null;
+    const open = (result as Array<Record<string, unknown>>)
+        .map((t) => ({
+            title: String(t.title ?? ''),
+            state: String(t.state ?? ''),
+            priority: String(t.priority ?? 'none') || 'none',
+        }))
+        .filter((t) => t.title && OPEN_TODO_STATES.has(t.state));
+    if (open.length === 0) return null;
+    open.sort((a, b) => {
+        if (a.state !== b.state) return a.state === 'in_progress' ? -1 : 1;
+        return (
+            (TODO_PRIORITY_RANK[a.priority] ?? 9) -
+            (TODO_PRIORITY_RANK[b.priority] ?? 9)
+        );
+    });
+    return { items: open.slice(0, 8) };
 }
 
 const BLOCK_TIMEOUT_MS = 5000;
@@ -203,20 +240,33 @@ function nextAutomation(
 export async function buildDashboard(
     deps: DashboardDeps,
 ): Promise<DashboardData> {
-    const [weatherRaw, forecastRaw, today, week, mailRaw, lightsRaw, doorsRaw] =
-        await Promise.all([
-            safe(() => deps.callTool('get_current_weather')),
-            safe(() => deps.callTool('get_forecast', { days: 5 })),
-            safe(() => deps.callTool('get_today')),
-            safe(() => deps.callTool('get_week')),
-            deps.mailQuery
-                ? safe(() =>
-                      deps.callTool('search_emails', { query: deps.mailQuery }),
-                  )
-                : Promise.resolve(null),
-            safe(() => deps.callTool('list_lights')),
-            safe(() => deps.callTool('list_doors')),
-        ]);
+    const [
+        weatherRaw,
+        forecastRaw,
+        today,
+        week,
+        mailRaw,
+        lightsRaw,
+        doorsRaw,
+        todosRaw,
+    ] = await Promise.all([
+        safe(() => deps.callTool('get_current_weather')),
+        safe(() => deps.callTool('get_forecast', { days: 5 })),
+        safe(() => deps.callTool('get_today')),
+        safe(() => deps.callTool('get_week')),
+        deps.mailQuery
+            ? safe(() =>
+                  deps.callTool('search_emails', { query: deps.mailQuery }),
+              )
+            : Promise.resolve(null),
+        safe(() => deps.callTool('list_lights')),
+        safe(() => deps.callTool('list_doors')),
+        deps.todoProject
+            ? safe(() =>
+                  deps.callTool('list_tasks', { project: deps.todoProject }),
+              )
+            : Promise.resolve(null),
+    ]);
 
     const weather =
         weatherRaw === null ? null : buildWeather(weatherRaw, forecastRaw);
@@ -263,6 +313,7 @@ export async function buildDashboard(
         proactive: last
             ? { message: last.message, at: new Date(last.at).toISOString() }
             : null,
+        todos: parseTodos(todosRaw),
         generatedAt: new Date().toISOString(),
     };
 }
