@@ -12,25 +12,14 @@ export interface MacBurstConfig {
     burstIntervalMs: number;
     burstWindowMs: number;
 }
-export interface NetPollConfig {
-    /** Intervalle du poll réseau filet de sécurité (auto-correction de l'état). */
-    pollIntervalMs: number;
-    /**
-     * Fenêtre de fraîcheur du `last-seen` DHCP : au-delà, un bail encore `bound`
-     * n'est plus considéré comme une présence (le bail survit au départ du tél.).
-     */
-    dhcpFreshnessMs: number;
-}
 export interface PresenceConfig {
     geofence: GeofenceConfig;
     mac: MacBurstConfig;
-    net: NetPollConfig;
 }
 
 const DEFAULTS: PresenceConfig = {
     geofence: { enabled: true, radiusM: 150 },
     mac: { burstIntervalMs: 15000, burstWindowMs: 300000 },
-    net: { pollIntervalMs: 120000, dhcpFreshnessMs: 900000 },
 };
 
 function clampNum(
@@ -50,7 +39,6 @@ export function mergePresenceConfig(raw: unknown): PresenceConfig {
     const r = (raw ?? {}) as Record<string, any>;
     const g = (r.geofence ?? {}) as Record<string, unknown>;
     const m = (r.mac ?? {}) as Record<string, unknown>;
-    const n = (r.net ?? {}) as Record<string, unknown>;
     return {
         geofence: {
             enabled:
@@ -73,20 +61,6 @@ export function mergePresenceConfig(raw: unknown): PresenceConfig {
                 DEFAULTS.mac.burstWindowMs,
             ),
         },
-        net: {
-            pollIntervalMs: clampNum(
-                n.pollIntervalMs,
-                30000,
-                600000,
-                DEFAULTS.net.pollIntervalMs,
-            ),
-            dhcpFreshnessMs: clampNum(
-                n.dhcpFreshnessMs,
-                120000,
-                3600000,
-                DEFAULTS.net.dhcpFreshnessMs,
-            ),
-        },
     };
 }
 
@@ -102,7 +76,6 @@ export function savePresenceConfig(
     patch: {
         geofence?: Partial<GeofenceConfig>;
         mac?: Partial<MacBurstConfig>;
-        net?: Partial<NetPollConfig>;
     },
     file = CONFIG_FILE,
 ): PresenceConfig {
@@ -110,7 +83,6 @@ export function savePresenceConfig(
     const next = mergePresenceConfig({
         geofence: { ...cur.geofence, ...patch.geofence },
         mac: { ...cur.mac, ...patch.mac },
-        net: { ...cur.net, ...patch.net },
     });
     fs.writeFileSync(file, JSON.stringify(next, null, 2));
     return next;

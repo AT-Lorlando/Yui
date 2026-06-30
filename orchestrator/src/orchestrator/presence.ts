@@ -210,7 +210,6 @@ export class PresenceManager {
         null;
     private _onEvent: ((e: PresenceEventType) => void) | null = null;
     private burst: MacBurst | null = null;
-    private pollTimer: NodeJS.Timeout | null = null;
 
     onChange(cb: (p: PresenceState, n: PresenceState) => void): void {
         this._onChange = cb;
@@ -272,19 +271,15 @@ export class PresenceManager {
         this.burst = createMacBurst({
             intervalMs: cfg.mac.burstIntervalMs,
             windowMs: cfg.mac.burstWindowMs,
-            poll: async () =>
-                (await checkPhoneOnNetwork(cfg.net.dhcpFreshnessMs)).present,
+            poll: async () => (await checkPhoneOnNetwork()).present,
             onJoin: () => this.emit('network-join'),
         });
         this.burst.start();
     }
 
     start(): void {
-        Logger.info(
-            '[presence] manager started (geofence + network safety-net poll)',
-        );
+        Logger.info('[presence] manager started (geofence-authoritative)');
         void this.seedState();
-        this.startPoll();
     }
 
     /**
@@ -294,8 +289,7 @@ export class PresenceManager {
      * geofence / le poll.
      */
     private async seedState(): Promise<void> {
-        const { net } = loadPresenceConfig();
-        const { present } = await checkPhoneOnNetwork(net.dhcpFreshnessMs);
+        const { present } = await checkPhoneOnNetwork();
         if (present === null) {
             Logger.info(
                 '[presence] startup seed skipped (router unreachable) — state=unknown',
@@ -307,39 +301,7 @@ export class PresenceManager {
         this.setState(next);
     }
 
-    private startPoll(): void {
-        const { net } = loadPresenceConfig();
-        this.pollTimer = setInterval(
-            () => void this.pollNetwork(),
-            net.pollIntervalMs,
-        );
-        if (typeof this.pollTimer.unref === 'function') this.pollTimer.unref();
-    }
-
-    /**
-     * Filet de sécurité réseau : si le geofence rate un event (ex : l'app
-     * Android ne délivre pas l'`exit`), le poll corrige l'état tout seul. Émet
-     * arrival/departure pour que les règles de présence + la proactivité
-     * réagissent comme à un event geofence.
-     */
-    private async pollNetwork(): Promise<void> {
-        const { net } = loadPresenceConfig();
-        const { present } = await checkPhoneOnNetwork(net.dhcpFreshnessMs);
-        if (present === null) return; // routeur injoignable → on garde l'état
-        const next: PresenceState = present ? 'home' : 'away';
-        if (next === this.state) return;
-        const event: PresenceEventType =
-            next === 'home' ? 'arrival' : 'departure';
-        Logger.info(
-            `[presence] network poll → ${next} (was ${this.state}, event=${event})`,
-        );
-        this.setState(next);
-        if (event === 'departure') this.burst?.cancel();
-        this.emit(event);
-    }
-
     stop(): void {
         this.burst?.cancel();
-        if (this.pollTimer) clearInterval(this.pollTimer);
     }
 }

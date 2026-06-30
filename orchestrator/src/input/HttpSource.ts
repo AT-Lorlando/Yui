@@ -1077,6 +1077,9 @@ export class HttpSource implements InputSource {
                     .status(400)
                     .json({ error: "transition must be 'enter' or 'exit'" });
             }
+            Logger.info(
+                `[presence] geofence webhook reçu: ${transition} (ip=${req.ip})`,
+            );
             if (!presenceHandler) {
                 return res.status(503).json({ error: 'presence unavailable' });
             }
