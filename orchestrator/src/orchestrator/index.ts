@@ -22,6 +22,7 @@ import {
     ToolCallResult,
 } from './virtualTools';
 import { runScene, runVirtualAction, isVirtualSceneTool } from './scenes';
+import { sendNotification } from './notify';
 import { animationManager } from './animation/animationManager';
 import type { McpServerConfig, CollectedTool } from './types';
 import {
@@ -343,6 +344,7 @@ export class Orchestrator {
     ): Promise<void> {
         const sceneRunner = (id: string) =>
             runScene(id, (tool, args) => this.callTool(tool, args), {
+                notify: (msg) => sendNotification(msg),
                 callToolRaw: (tool, args) => this.callToolRaw(tool, args),
             });
 
@@ -682,6 +684,7 @@ export class Orchestrator {
         // Route to in-process virtual tools first (scene_trigger, _lights_*, …)
         const sceneRunner = (id: string) =>
             runScene(id, (tool, a) => this.callTool(tool, a), {
+                notify: (msg) => sendNotification(msg),
                 callToolRaw: (tool, a) => this.callToolRaw(tool, a),
             });
         const virtual = await handleVirtualTool(
