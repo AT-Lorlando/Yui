@@ -714,7 +714,10 @@ export class Orchestrator {
             await runVirtualAction(
                 { tool: toolName, args },
                 (t, a) => this.callTool(t, a),
-                {},
+                {
+                    notify: (msg) => sendNotification(msg),
+                    callToolRaw: (t, a) => this.callToolRaw(t, a),
+                },
             );
             return null;
         }
