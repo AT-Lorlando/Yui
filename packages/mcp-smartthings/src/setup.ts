@@ -2,6 +2,12 @@
 import dotenv from 'dotenv';
 import { resolve } from 'path';
 dotenv.config({ path: resolve(__dirname, '../../../.env') });
+// Lancé via `npm run setup -w packages/mcp-smartthings`, le cwd est le dossier du
+// package → dataPath() écrirait sous packages/mcp-smartthings/data/ au lieu de la
+// racine (où l'orchestrateur lit). On ancre le data dir sur la racine du repo.
+if (!process.env.YUI_DATA_DIR) {
+    process.env.YUI_DATA_DIR = resolve(__dirname, '../../../data');
+}
 
 import axios from 'axios';
 import { SmartThingsAuth, saveSmartThingsCreds } from '@yui/shared';

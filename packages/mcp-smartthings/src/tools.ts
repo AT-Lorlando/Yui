@@ -78,6 +78,18 @@ export function buildSmartThingsTools(inputs: string[]) {
                 required: [],
             },
         },
+        {
+            // Caché du LLM (voir LLM_HIDDEN_TOOLS) — variante structurée de tv_status
+            // pour le dashboard : renvoie du JSON { power, volume, muted, input, inputs }.
+            name: 'tv_get_status',
+            description:
+                'État TV structuré (JSON) pour le dashboard : { power, volume, muted, input, inputs }.',
+            inputSchema: {
+                type: 'object' as const,
+                properties: {},
+                required: [],
+            },
+        },
     ];
 }
 

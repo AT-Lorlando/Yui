@@ -80,6 +80,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 if (s.muted) parts.push('son coupé');
                 return text(parts.join(', ') + '.');
             }
+            case 'tv_get_status': {
+                // Statut structuré pour le dashboard (parsé en objet par callToolInner).
+                const s = await tv.status();
+                return text(
+                    JSON.stringify({ ...s, inputs: loadTvConfig().inputs }),
+                );
+            }
             default:
                 throw new McpError(
                     ErrorCode.MethodNotFound,

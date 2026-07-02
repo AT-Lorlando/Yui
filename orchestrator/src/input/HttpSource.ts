@@ -548,26 +548,14 @@ export class HttpSource implements InputSource {
                 }
             });
 
-            // ── TV ────────────────────────────────────────────────────────────
+            // ── TV (mcp-smartthings : WoL + SmartThings cloud) ────────────────
             dev.get('/tv', call('tv_get_status'));
-            dev.post('/tv/on', async (_req: any, res: any) => {
-                try {
-                    res.json(await deviceHandler('tv_power', { state: 'on' }));
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.post('/tv/off', async (_req: any, res: any) => {
-                try {
-                    res.json(await deviceHandler('tv_power', { state: 'off' }));
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
+            dev.post('/tv/on', call('tv_on'));
+            dev.post('/tv/off', call('tv_off'));
             dev.patch('/tv/volume', async (req: any, res: any) => {
                 try {
                     res.json(
-                        await deviceHandler('tv_set_volume', {
+                        await deviceHandler('tv_volume', {
                             level: +req.body.level,
                         }),
                     );
@@ -585,6 +573,17 @@ export class HttpSource implements InputSource {
             dev.post('/tv/unmute', async (_req: any, res: any) => {
                 try {
                     res.json(await deviceHandler('tv_mute', { mute: false }));
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.post('/tv/input', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('tv_set_input', {
+                            source: req.body.source,
+                        }),
+                    );
                 } catch (e: any) {
                     res.status(500).json({ error: e.message });
                 }
