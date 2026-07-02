@@ -118,6 +118,20 @@ export const CHROMECAST_TOOLS = [
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {
+        name: 'cast_dashboard',
+        description:
+            "Afficher le tableau de bord (dashboard) sur la TV : lance l'app Fully Kiosk " +
+            "sur la Google TV. La TV s'allume et bascule sur HDMI3 automatiquement. " +
+            "Fully s'ouvre sur sa page de démarrage (le dashboard). À utiliser quand " +
+            "l'utilisateur demande d'afficher le dashboard / tableau de bord / l'accueil " +
+            'sur la télé, ou de lancer Fully.',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {},
+            required: [],
+        },
+    },
+    {
         name: 'find_show',
         description:
             'Trouver sur quelle plateforme de streaming regarder une série, un film ou un animé ' +

@@ -37,6 +37,7 @@
     "setup:smartthings": "npm run setup -w packages/mcp-smartthings",
     "dev:smartthings": "npx ts-node packages/mcp-smartthings/src/index.ts",
     "dev:chromecast": "npx ts-node packages/mcp-chromecast/src/index.ts",
+    "setup:atv": "npm run setup -w packages/mcp-chromecast",
     "setup:google": "npm run setup -w packages/mcp-calendar",
     "setup:calendar": "npm run setup:google",
     "dev:calendar": "npx ts-node packages/mcp-calendar/src/index.ts",

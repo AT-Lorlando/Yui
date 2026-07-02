@@ -46,6 +46,8 @@ const REGISTRY: Record<string, DataCategory> = {
     'samsung-tv-token.json': 'state',
     'smartthings-token.json': 'state',
     'schedules.json': 'state',
+    'atv-cert.pem': 'state',
+    'atv-key.pem': 'state',
 };
 
 /** Base data directory. Override with YUI_DATA_DIR; defaults to <cwd>/data. */

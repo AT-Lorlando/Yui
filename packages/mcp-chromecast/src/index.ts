@@ -14,9 +14,11 @@ import { ChromecastController, listMediaFiles } from './ChromecastController';
 import { LocalTizenBackend, loadTvConfig } from '@yui/shared';
 import { CHROMECAST_TOOLS } from './tools';
 import { handleCastApp } from './castAppHandler';
+import { FullyClient } from './FullyClient';
 import Logger from './logger';
 
 const chromecast = new ChromecastController();
+const fully = new FullyClient();
 const tvCfg = loadTvConfig();
 const tv = new LocalTizenBackend(tvCfg.ip, tvCfg.mac);
 
@@ -137,6 +139,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 return {
                     content: [
                         { type: 'text', text: await chromecast.castStop() },
+                    ],
+                };
+            }
+
+            case 'cast_dashboard': {
+                // Comme les cast_* : TV allumée + HDMI3 (withTvOn) en parallèle du
+                // lancement de l'app Fully sur la Google TV via Android TV Remote.
+                // (Fully affiche son URL de démarrage = le dashboard.)
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: await withTvOn(chromecast.launchFully()),
+                        },
                     ],
                 };
             }
