@@ -471,6 +471,40 @@ export class HttpSource implements InputSource {
                 }
             });
 
+            // ── Rooms (grouped light control) ────────────────────────────────
+            dev.post('/rooms/:room/lights', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('set_lights', {
+                            target: req.params.room,
+                            ...(req.body?.on !== undefined
+                                ? { on: !!req.body.on }
+                                : {}),
+                            ...(req.body?.brightness !== undefined
+                                ? { brightness: +req.body.brightness }
+                                : {}),
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+            dev.post('/rooms/:room/palette', async (req: any, res: any) => {
+                try {
+                    res.json(
+                        await deviceHandler('set_room_palette', {
+                            room: req.params.room,
+                            colors: req.body?.colors,
+                            ...(req.body?.brightness !== undefined
+                                ? { brightness: +req.body.brightness }
+                                : {}),
+                        }),
+                    );
+                } catch (e: any) {
+                    res.status(500).json({ error: e.message });
+                }
+            });
+
             // ── Doors ─────────────────────────────────────────────────────────
             dev.get('/doors', call('list_doors'));
             dev.post('/doors/:id/lock', async (req: any, res: any) => {
