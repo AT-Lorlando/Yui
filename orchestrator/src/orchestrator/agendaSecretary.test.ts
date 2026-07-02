@@ -66,6 +66,14 @@ async function run(): Promise<void> {
             'system: règle réunions pro = semaine en cours',
         );
         assert.ok(/desc/i.test(system), 'system: consigne usage description');
+        assert.ok(
+            /countdown/i.test(system),
+            'system: consigne countdown (dans X jours)',
+        );
+        assert.ok(
+            /psy|m[ée]decin/i.test(system) && /perso/i.test(system),
+            'system: rendez-vous perso → category perso',
+        );
     }
 
     // ── parseJudgment : JSON valide (même entouré de texte) ─────────────────────
@@ -98,6 +106,64 @@ async function run(): Promise<void> {
         assert.strictEqual(data!.items.length, 1);
         assert.strictEqual(data!.items[0].category, 'call');
         assert.strictEqual(data!.items[0].importance, 80);
+        assert.strictEqual(
+            data!.items[0].countdown,
+            false,
+            'call sans flag countdown → false',
+        );
+    }
+
+    // ── parseJudgment : countdown explicite + repli vacances/férié ──────────────
+    {
+        const llm = JSON.stringify({
+            briefing: 'x',
+            items: [
+                {
+                    id: 'a',
+                    title: 'Anniv Bastien',
+                    date: '2026-07-01',
+                    start: null,
+                    allDay: true,
+                    category: 'perso',
+                    importance: 60,
+                    detail: 'minimal',
+                    countdown: true,
+                },
+                {
+                    id: 'b',
+                    title: 'Vacances',
+                    date: '2026-07-10',
+                    allDay: true,
+                    category: 'vacation',
+                    importance: 90,
+                    detail: 'normal',
+                    // pas de countdown → doit être true par repli (vacances)
+                },
+                {
+                    id: 'c',
+                    title: 'Psy',
+                    date: '2026-07-02',
+                    start: '18:00',
+                    allDay: false,
+                    category: 'perso',
+                    importance: 40,
+                    detail: 'normal',
+                },
+            ],
+            judgedAt: '2026-06-25T08:00:00.000Z',
+        });
+        const data = parseJudgment(llm)!;
+        assert.strictEqual(data.items[0].countdown, true, 'anniv → countdown');
+        assert.strictEqual(
+            data.items[1].countdown,
+            true,
+            'vacances sans flag → countdown par repli',
+        );
+        assert.strictEqual(
+            data.items[2].countdown,
+            false,
+            'psy (routine) → pas de countdown',
+        );
     }
 
     // ── parseJudgment : normalisation (catégorie inconnue → autre, importance clampée) ─

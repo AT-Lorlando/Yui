@@ -230,6 +230,7 @@ async function main() {
         proactiveLastMessage: () => proactive.getLastMessage(),
         mailQuery: proactive.getMailQuery(),
         judgedAgenda: () => agendaSecretary.getAgenda(),
+        agendaPending: () => agendaSecretary.isPending(),
         todoProject: process.env.DASHBOARD_TODO_PROJECT ?? 'todos/Personal',
     });
 

@@ -185,7 +185,28 @@ async function run(): Promise<void> {
         assert.ok(d.proactive, 'proactive présent');
         assert.strictEqual(d.proactive!.message, 'Pense à fermer les volets.');
 
+        assert.strictEqual(d.agendaPending, false, 'pas de pending par défaut');
+
         assert.ok(typeof d.generatedAt === 'string');
+    }
+
+    // ── agenda en cours d'analyse : judged=null + agendaPending() → flag remonté ──
+    {
+        const d = await buildDashboard(
+            makeDeps({
+                judgedAgenda: async () => null,
+                agendaPending: () => true,
+            }),
+        );
+        assert.strictEqual(
+            d.agendaPending,
+            true,
+            'analyse en cours → agendaPending true',
+        );
+        assert.ok(
+            d.agenda && 'fallback' in d.agenda,
+            'repli affiché pendant l’analyse',
+        );
     }
 
     // ── mail vide → null (module masqué côté front) ─────────────────────────────

@@ -58,6 +58,7 @@ export interface AgendaItem {
     importance: number; // 0-100
     note: string | null;
     detail: AgendaDetail;
+    countdown: boolean; // affichage "dans X jours" (événement attendu : fête, anniv, vacances…)
 }
 
 export interface AgendaData {
@@ -81,7 +82,13 @@ export function buildSecretaryPrompt(
         '- importance : entier 0-100 (un call client > un afterwork > un week-end off).\n' +
         '- note : courte phrase utile de secrétaire (ou null).\n' +
         '- detail : "full" (heure+lieu+participants+note), "normal" (heure+lieu), "minimal" (titre+jour).\n' +
+        "- countdown : true SEULEMENT pour un événement qu'on attend et qu'on décompte " +
+        '(vacances, anniversaire, fête, mariage, jour férié, concert, voyage…) ; false pour ' +
+        'un rendez-vous de routine (psy, médecin, dentiste, coiffeur, réunion, call).\n' +
         'Les jours fériés (ex. fête nationale, Assomption, Noël, 1er mai) → category "holiday".\n' +
+        'Les rendez-vous personnels (médecin, psy, dentiste, coiffeur, sport, rendez-vous ' +
+        'perso divers) → category "perso" (JAMAIS "autre" ni "meeting-pro"). Ne mets "autre" ' +
+        "que pour un événement qui n'entre vraiment dans aucune autre catégorie.\n" +
         'Un événement journée entière indiqué sur PLUSIEURS jours (plage "→ … (N jours)") : ' +
         'sa DURÉE prime — un séjour de plusieurs jours est des vacances, pas un week-end ' +
         '(un week-end = samedi-dimanche, ~2 jours).\n' +
@@ -95,7 +102,8 @@ export function buildSecretaryPrompt(
         'Réponds STRICTEMENT en JSON, sans texte autour, selon ce schéma :\n' +
         '{"briefing": string, "items": [{"id": string, "title": string, "date": "YYYY-MM-DD", ' +
         '"start": string|null, "allDay": boolean, "location": string|null, "category": string, ' +
-        '"categoryLabel": string|null, "importance": number, "note": string|null, "detail": string}], ' +
+        '"categoryLabel": string|null, "importance": number, "note": string|null, "detail": string, ' +
+        '"countdown": boolean}], ' +
         '"judgedAt": string}';
 
     const lines = events.map((e) => {
@@ -184,6 +192,11 @@ export function parseJudgment(llmText: string): AgendaData | null {
             importance: clampImportance(e.importance),
             note: strOrNull(e.note),
             detail: normDetail(e.detail),
+            // Le LLM décide, avec repli : vacances / fériés se décomptent par défaut.
+            countdown:
+                e.countdown === true ||
+                category === 'vacation' ||
+                category === 'holiday',
         };
     });
 
@@ -292,6 +305,14 @@ export class AgendaSecretary {
 
     constructor(private deps: AgendaSecretaryDeps) {
         this.ttlMs = deps.ttlMs ?? DEFAULT_TTL_MS;
+    }
+
+    /**
+     * Une analyse est en cours et aucun résultat n'est encore disponible à afficher
+     * (premier calcul LLM long). Le front affiche alors un loader plutôt que le repli.
+     */
+    isPending(): boolean {
+        return this.inflight !== null && this.cache === null;
     }
 
     async getAgenda(now: Date = new Date()): Promise<AgendaData | null> {

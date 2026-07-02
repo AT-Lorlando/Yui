@@ -26,6 +26,8 @@ export interface DashboardData {
         | { judged: import('./agendaSecretary').AgendaData }
         | { fallback: { next: DashboardEvent | null; today: DashboardEvent[] } }
         | null;
+    /** Analyse LLM de l'agenda en cours, pas encore de résultat (→ loader côté front). */
+    agendaPending: boolean;
     mail: { count: number; text: string } | null;
     automation: { name: string; at: string } | null; // at = ISO
     presence: {
@@ -50,6 +52,8 @@ export interface DashboardDeps {
     proactiveLastMessage: () => { message: string; at: number } | null;
     mailQuery?: string;
     judgedAgenda: () => Promise<import('./agendaSecretary').AgendaData | null>;
+    /** true si l'analyse LLM de l'agenda tourne sans résultat encore disponible. */
+    agendaPending?: () => boolean;
     /** Projet Yoji dont on affiche les tâches ouvertes (ex. "todos/Personal"). */
     todoProject?: string;
 }
@@ -275,6 +279,8 @@ export async function buildDashboard(
     // null and the dashboard shows the chronological fallback for that poll — the AgendaSecretary
     // keeps computing in the background and the next poll picks up the cached judged result.
     const judged = await safe(() => deps.judgedAgenda());
+    // Pas de résultat jugé mais l'analyse tourne encore → on le signale au front (loader).
+    const agendaPending = judged ? false : deps.agendaPending?.() ?? false;
     let agenda: DashboardData['agenda'] = null;
     if (judged) {
         agenda = { judged };
@@ -307,6 +313,7 @@ export async function buildDashboard(
     return {
         weather,
         agenda,
+        agendaPending,
         mail: parseMail(mailRaw),
         automation: nextAutomation(deps.automations()),
         presence,
