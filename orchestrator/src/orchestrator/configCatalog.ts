@@ -211,12 +211,4 @@ export const INTEGRATIONS_CATALOG: Record<string, CatalogKey[]> = {
             secret: true,
         },
     ],
-    'mcp-linear': [
-        {
-            key: 'LINEAR_API_KEY',
-            label: 'Clé API Linear',
-            example: '',
-            secret: true,
-        },
-    ],
 };

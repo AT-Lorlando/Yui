@@ -197,7 +197,7 @@ export const SERVER_GROUPS: ServerGroup[] = [
     },
     {
         name: 'secretariat',
-        servers: ['mcp-gmail', 'mcp-linear', 'mcp-yoji'],
+        servers: ['mcp-gmail', 'mcp-yoji'],
         keywords: [
             // email
             'email',
@@ -216,15 +216,9 @@ export const SERVER_GROUPS: ServerGroup[] = [
             'corbeille',
             'non lu',
             'marque',
-            // linear / dev
-            'linear',
-            'ticket',
-            'issue',
+            // yoji todos / tâches
             'tâche',
             'projet',
-            'koya',
-            'bug',
-            // yoji todos
             'todo',
             'todolist',
         ],

@@ -22,7 +22,7 @@ export const LLM_HIDDEN_TOOLS = new Set([
     'lights_palette_set',
     'covers_set',
     'music_play',
-    'tv_input',
+    'tv_get_status',
 ]);
 
 /**
@@ -47,7 +47,6 @@ export function buildServerConfigs(): McpServerConfig[] {
         mcp('mcp-nuki'),
         mcp('mcp-somfy'),
         mcp('mcp-spotify'),
-        mcp('mcp-linear'),
         mcp('mcp-chromecast'),
         mcp('mcp-smartthings'),
         mcp('mcp-timer'),

@@ -59,15 +59,6 @@ export const SERVER_KEYWORDS: Record<string, string[]> = {
         'shuffle',
         'repeat',
     ],
-    'mcp-linear': [
-        'linear',
-        'ticket',
-        'issue',
-        'tâche',
-        'projet',
-        'koya',
-        'bug',
-    ],
     'mcp-chromecast': [
         'tv',
         'télé',
@@ -90,6 +81,9 @@ export const SERVER_KEYWORDS: Record<string, string[]> = {
         'stream',
         'vidéo',
         'anime',
+        'dashboard',
+        'tableau',
+        'accueil',
     ],
     'mcp-smartthings': [
         'tv',
