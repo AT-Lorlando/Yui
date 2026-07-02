@@ -15,6 +15,7 @@ import {
     type OutputChannel,
 } from './automations';
 import { listScenes } from './scenes';
+import { readAllDeviceStates } from './deviceConditions';
 
 export interface ToolCallResult {
     id: string;
@@ -279,6 +280,14 @@ export async function handleVirtualTool(
     Logger.debug(`Virtual tool: ${name}(${JSON.stringify(args)})`);
 
     switch (name) {
+        // Snapshot des états device pour l'app (éditeur de conditions).
+        // Jamais exposé au LLM (absent de getVirtualTools).
+        case '_device_states': {
+            if (!callTool) return { id: toolCall.id, content: '{}' };
+            const states = await readAllDeviceStates(callTool);
+            return { id: toolCall.id, content: JSON.stringify(states) };
+        }
+
         case 'memory_save':
             saveMemory(args.namespace, args.key, args.value, args.priority);
             return {

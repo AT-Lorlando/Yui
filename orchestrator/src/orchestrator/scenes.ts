@@ -6,6 +6,11 @@ import { dataPath } from '@yui/shared';
 import type { PresenceState } from './presence';
 import type { AnimationEffect, FloatingConfig } from './animation/types';
 import { animationManager } from './animation/animationManager';
+import {
+    createStateReader,
+    type DeviceSubject,
+    type StateReader,
+} from './deviceConditions';
 
 // ── Scene conditions ───────────────────────────────────────────────────────────
 
@@ -16,13 +21,19 @@ import { animationManager } from './animation/animationManager';
  * Examples:
  *   { "hourBetween": [6, 22] }          → true if 6h ≤ now < 22h
  *   { "presence": "home" }              → true if user is home
+ *   { "device": "amp", "is": "off" }    → true if the amp is off
  *   { "and": [...] }                    → all sub-conditions true
  *   { "or": [...] }                     → at least one true
  *   { "not": { "presence": "away" } }   → negation
+ *
+ * Device subjects/states (see deviceConditions.ts):
+ *   amp: on/off · music: playing/stopped · tv: on/off ·
+ *   lights: on/off · door: locked/unlocked
  */
 export type SceneCondition =
     | { hourBetween: [number, number] }
     | { presence: PresenceState }
+    | { device: DeviceSubject; is: string }
     | { and: SceneCondition[] }
     | { or: SceneCondition[] }
     | { not: SceneCondition };
@@ -210,16 +221,22 @@ export interface SceneContext {
     notify?: NotifyFn;
     /** Guard-free tool path for animation loops (avoids self-cancel). */
     callToolRaw?: CallTool;
+    /**
+     * Lecteur d'états device avec cache, créé au premier besoin par runActions
+     * et partagé par toute l'exécution (branches _if incluses).
+     */
+    stateReader?: StateReader;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ── Condition evaluation ───────────────────────────────────────────────────────
 
-function evaluateCondition(
+async function evaluateCondition(
     condition: SceneCondition,
     context: SceneContext,
-): boolean {
+    callTool: CallTool,
+): Promise<boolean> {
     const now = new Date();
     const hour = now.getHours();
 
@@ -232,14 +249,27 @@ function evaluateCondition(
     if ('presence' in condition) {
         return context.presenceState === condition.presence;
     }
+    if ('device' in condition) {
+        if (!context.stateReader) {
+            context.stateReader = createStateReader(callTool);
+        }
+        const state = await context.stateReader(condition.device);
+        return state === condition.is;
+    }
     if ('and' in condition) {
-        return condition.and.every((c) => evaluateCondition(c, context));
+        for (const c of condition.and) {
+            if (!(await evaluateCondition(c, context, callTool))) return false;
+        }
+        return true;
     }
     if ('or' in condition) {
-        return condition.or.some((c) => evaluateCondition(c, context));
+        for (const c of condition.or) {
+            if (await evaluateCondition(c, context, callTool)) return true;
+        }
+        return false;
     }
     if ('not' in condition) {
-        return !evaluateCondition(condition.not, context);
+        return !(await evaluateCondition(condition.not, context, callTool));
     }
     return true;
 }
@@ -422,6 +452,33 @@ export async function runVirtualAction(
             break;
         }
 
+        case '_if': {
+            // Bloc conditionnel : { condition, then: SceneAction[], else?: SceneAction[] }
+            // Évalue une fois puis exécute la branche via le runner standard
+            // (delays, conditions par action et _if imbriqués fonctionnent).
+            const condition = action.args.condition as
+                | SceneCondition
+                | undefined;
+            const thenActions = (action.args.then ?? []) as SceneAction[];
+            const elseActions = (action.args.else ?? []) as SceneAction[];
+            const pass = condition
+                ? await evaluateCondition(condition, context, callTool)
+                : true;
+            Logger.info(
+                `Scene _if: condition ${JSON.stringify(condition)} → ${
+                    pass ? 'then' : 'else'
+                } (${(pass ? thenActions : elseActions).length} actions)`,
+            );
+            await runActions(
+                'state',
+                pass ? thenActions : elseActions,
+                '_if',
+                callTool,
+                context,
+            );
+            break;
+        }
+
         case '_notify': {
             const message = action.args.message as string;
             if (context.notify) {
@@ -469,7 +526,11 @@ async function runActions(
     for (const action of actions) {
         // Evaluate condition — skip action if false
         if (action.condition) {
-            const pass = evaluateCondition(action.condition, context);
+            const pass = await evaluateCondition(
+                action.condition,
+                context,
+                callTool,
+            );
             if (!pass) {
                 Logger.debug(
                     `Scene "${sceneName}" [${phase}]: skipped ${action.tool} (condition false)`,
@@ -519,6 +580,8 @@ export async function runActionList(
     callTool: CallTool,
     context: SceneContext = {},
 ): Promise<void> {
+    // Cache d'états frais pour cette exécution (toggle = évaluer l'état du moment)
+    context.stateReader = createStateReader(callTool);
     await runActions('state', actions, label, callTool, context);
 }
 
@@ -532,6 +595,9 @@ async function runSceneInternal(
         return { success: false, error: `Scene "${sceneId}" not found` };
 
     const animCall = context.callToolRaw ?? callTool;
+
+    // Cache d'états frais pour cette exécution (toggle = évaluer l'état du moment)
+    context.stateReader = createStateReader(callTool);
 
     Logger.info(
         `Running scene "${scene.name}" ` +
