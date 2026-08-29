@@ -19,16 +19,24 @@ export function startSeeder(accessToken: string): void {
     const bin = process.env.LIBRESPOT_PATH || 'librespot';
 
     const args = [
-        '--name', SEEDER_NAME,
-        '--backend', 'pipe',
-        '--bitrate', '96',
+        '--name',
+        SEEDER_NAME,
+        '--backend',
+        'pipe',
+        '--bitrate',
+        '96',
         '--disable-audio-cache',
-        '--access-token', accessToken,
+        '--access-token',
+        accessToken,
         '--disable-discovery',
     ];
 
     Logger.info(`Starting librespot seeder as "${SEEDER_NAME}"`);
-    Logger.debug(`${bin} ${args.filter((_, i) => args[i - 1] !== '--access-token').join(' ')}`);
+    Logger.debug(
+        `${bin} ${args
+            .filter((_, i) => args[i - 1] !== '--access-token')
+            .join(' ')}`,
+    );
 
     librespotProcess = spawn(bin, args, {
         stdio: ['ignore', 'pipe', 'pipe'],

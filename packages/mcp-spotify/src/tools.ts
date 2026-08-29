@@ -1,7 +1,28 @@
-import { buildMusicPlayTool } from './musicPlayHandler';
+/**
+ * play_music gains the same speaker enum as its hidden twin music_play —
+ * scenes already passed `speakerName`, it was just being dropped on the floor.
+ */
+function withSpeaker(tool: any, speakerNames: string[]) {
+    const speakerName: Record<string, unknown> = {
+        type: 'string',
+        title: 'Enceinte',
+        description: 'Enceinte cible (défaut : enceinte par défaut).',
+    };
+    if (speakerNames.length) speakerName.enum = speakerNames;
+    return {
+        ...tool,
+        inputSchema: {
+            ...tool.inputSchema,
+            properties: { ...tool.inputSchema.properties, speakerName },
+        },
+    };
+}
 
 export function buildSpotifyTools(speakerNames: string[] = []) {
-    return [...SPOTIFY_TOOLS, buildMusicPlayTool(speakerNames)];
+    const withEnum = new Set(['play_music', 'play_liked_tracks']);
+    return SPOTIFY_TOOLS.map((t) =>
+        withEnum.has(t.name) ? withSpeaker(t, speakerNames) : t,
+    );
 }
 
 export const SPOTIFY_TOOLS = [
@@ -31,6 +52,32 @@ export const SPOTIFY_TOOLS = [
                 },
             },
             required: [],
+        },
+    },
+    {
+        name: 'play_liked_tracks',
+        description:
+            'Joue les Titres likés de Jérémy (sa bibliothèque Spotify) en aléatoire. ' +
+            'À utiliser pour "mets ma musique", "lance mes titres likés", "joue mes sons". ' +
+            'NE PAS utiliser play_playlist pour ça — les titres likés ne sont pas une playlist.',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {
+                speakerName: {
+                    type: 'string',
+                    title: 'Enceinte',
+                    description:
+                        'Enceinte cible (défaut : enceinte par défaut).',
+                },
+                limit: {
+                    type: 'number',
+                    title: 'Nb de titres',
+                    description:
+                        'Nombre de titres à mettre en file (défaut 50).',
+                    minimum: 1,
+                    maximum: 100,
+                },
+            },
         },
     },
     {
@@ -219,6 +266,7 @@ export const SPOTIFY_TOOLS = [
             'Transfère la lecture Spotify active (ex. depuis le téléphone) vers les enceintes du salon (WiiM). No-op si rien ne joue.',
         inputSchema: {
             type: 'object' as const,
+            'x-audience': ['system'],
             properties: {
                 speaker: {
                     type: 'string',

@@ -42,7 +42,9 @@ export function wakeUpSpeaker(
                 if (err) {
                     clearTimeout(timeout);
                     client.close();
-                    Logger.warn(`Cast launch on ${host} failed: ${err.message}`);
+                    Logger.warn(
+                        `Cast launch on ${host} failed: ${err.message}`,
+                    );
                     reject(err);
                     return;
                 }
@@ -68,7 +70,9 @@ export function wakeUpSpeaker(
 
                 conn.send({ type: 'CONNECT' });
 
-                Logger.debug(`Sending setCredentials to Spotify receiver on ${host}`);
+                Logger.debug(
+                    `Sending setCredentials to Spotify receiver on ${host}`,
+                );
                 spotifyChannel.send({
                     type: 'setCredentials',
                     credentials: accessToken,
@@ -81,8 +85,13 @@ export function wakeUpSpeaker(
                 };
 
                 spotifyChannel.on('message', (data: any) => {
-                    Logger.debug(`Spotify Cast message: ${JSON.stringify(data)}`);
-                    if (data.type === 'credentialsSet' || data.type === 'credentialsSets') {
+                    Logger.debug(
+                        `Spotify Cast message: ${JSON.stringify(data)}`,
+                    );
+                    if (
+                        data.type === 'credentialsSet' ||
+                        data.type === 'credentialsSets'
+                    ) {
                         clearTimeout(timeout);
                         Logger.info(`Spotify Cast credentials set on ${host}`);
                         resolve(closeSession);
@@ -90,7 +99,11 @@ export function wakeUpSpeaker(
                     if (data.type === 'credentialsError') {
                         clearTimeout(timeout);
                         client.close();
-                        reject(new Error(`credentialsError: ${JSON.stringify(data)}`));
+                        reject(
+                            new Error(
+                                `credentialsError: ${JSON.stringify(data)}`,
+                            ),
+                        );
                     }
                 });
 
@@ -132,40 +145,51 @@ export function castStream(
         client.connect(host, () => {
             Logger.debug(`Cast connected to ${host} for stream`);
 
-            client.launch(DefaultMediaReceiver, (err: Error | null, player: any) => {
-                if (err) {
-                    clearTimeout(timeout);
-                    client.close();
-                    reject(err);
-                    return;
-                }
-
-                const media = {
-                    contentId: streamUrl,
-                    contentType,
-                    streamType: 'LIVE',
-                    metadata: {
-                        type: 0,
-                        metadataType: 0,
-                        title: 'Yui',
-                    },
-                };
-
-                player.load(media, { autoplay: true }, (loadErr: Error | null) => {
-                    clearTimeout(timeout);
-                    if (loadErr) {
+            client.launch(
+                DefaultMediaReceiver,
+                (err: Error | null, player: any) => {
+                    if (err) {
+                        clearTimeout(timeout);
                         client.close();
-                        reject(loadErr);
+                        reject(err);
                         return;
                     }
 
-                    Logger.info(`Streaming audio to Cast device at ${host}`);
-                    resolve(() => {
-                        client.close();
-                        Logger.debug(`Cast stream session to ${host} closed`);
-                    });
-                });
-            });
+                    const media = {
+                        contentId: streamUrl,
+                        contentType,
+                        streamType: 'LIVE',
+                        metadata: {
+                            type: 0,
+                            metadataType: 0,
+                            title: 'Yui',
+                        },
+                    };
+
+                    player.load(
+                        media,
+                        { autoplay: true },
+                        (loadErr: Error | null) => {
+                            clearTimeout(timeout);
+                            if (loadErr) {
+                                client.close();
+                                reject(loadErr);
+                                return;
+                            }
+
+                            Logger.info(
+                                `Streaming audio to Cast device at ${host}`,
+                            );
+                            resolve(() => {
+                                client.close();
+                                Logger.debug(
+                                    `Cast stream session to ${host} closed`,
+                                );
+                            });
+                        },
+                    );
+                },
+            );
         });
     });
 }

@@ -53,14 +53,20 @@ export function startStreamer(accessToken: string): void {
 
     // librespot: output raw S16LE PCM to stdout
     const librespotArgs = [
-        '--name', SEEDER_NAME,
-        '--backend', 'pipe',
-        '--format', 'S16',
-        '--bitrate', '160',
+        '--name',
+        SEEDER_NAME,
+        '--backend',
+        'pipe',
+        '--format',
+        'S16',
+        '--bitrate',
+        '160',
         '--disable-audio-cache',
-        '--access-token', accessToken,
+        '--access-token',
+        accessToken,
         '--disable-discovery',
-        '--initial-volume', '100',
+        '--initial-volume',
+        '100',
     ];
 
     Logger.info(`Starting librespot streamer as "${SEEDER_NAME}"`);
@@ -84,11 +90,23 @@ export function startStreamer(accessToken: string): void {
 
     // ffmpeg: PCM S16LE 44100Hz stereo → MP3 stream
     const ffmpegArgs = [
-        '-loglevel', 'error',
-        '-f', 's16le', '-ar', '44100', '-ac', '2',
-        '-i', 'pipe:0',
-        '-codec:a', 'libmp3lame', '-q:a', '2',
-        '-f', 'mp3', 'pipe:1',
+        '-loglevel',
+        'error',
+        '-f',
+        's16le',
+        '-ar',
+        '44100',
+        '-ac',
+        '2',
+        '-i',
+        'pipe:0',
+        '-codec:a',
+        'libmp3lame',
+        '-q:a',
+        '2',
+        '-f',
+        'mp3',
+        'pipe:1',
     ];
 
     ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
@@ -125,13 +143,15 @@ export function startStreamer(accessToken: string): void {
         }
 
         activeClients++;
-        Logger.debug(`Cast client connected to stream (total: ${activeClients})`);
+        Logger.debug(
+            `Cast client connected to stream (total: ${activeClients})`,
+        );
 
         res.writeHead(200, {
             'Content-Type': 'audio/mpeg',
             'Transfer-Encoding': 'chunked',
             'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
+            Connection: 'keep-alive',
         });
 
         // Pipe broadcast to this client
@@ -167,7 +187,9 @@ export function stopStreamer(): void {
 
 /** Wait until librespot registers as a Spotify Connect device */
 export async function waitForSeederDevice(
-    getDevices: () => Promise<Array<{ id?: string | null; name?: string | null }>>,
+    getDevices: () => Promise<
+        Array<{ id?: string | null; name?: string | null }>
+    >,
     maxWaitMs = 15000,
 ): Promise<string | undefined> {
     const deadline = Date.now() + maxWaitMs;

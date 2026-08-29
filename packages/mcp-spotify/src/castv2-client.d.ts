@@ -3,7 +3,10 @@ declare module 'castv2-client' {
 
     export class Client extends EventEmitter {
         connect(host: string, callback: () => void): void;
-        launch(app: any, callback: (err: Error | null, player: any) => void): void;
+        launch(
+            app: any,
+            callback: (err: Error | null, player: any) => void,
+        ): void;
         close(): void;
     }
 

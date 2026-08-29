@@ -12,7 +12,8 @@ import type { SpeakerEntity } from '@yui/shared';
 import { discoverSpeakers } from './discovery';
 
 const ROOT_ENV_PATH = path.resolve(__dirname, '../../../.env');
-const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || 'http://localhost:6145/callback';
+const REDIRECT_URI =
+    process.env.SPOTIFY_REDIRECT_URI || 'http://localhost:6145/callback';
 
 function updateEnvFile(key: string, value: string): void {
     let content = '';
@@ -73,7 +74,9 @@ async function setupAuth() {
     const me = await api.getMe();
     console.log(`\n=== Auth complete ===`);
     console.log(`Account: ${me.body.display_name} (${me.body.email})`);
-    console.log('\nRun "npm run setup:spotify:speakers" to discover and link speakers.');
+    console.log(
+        '\nRun "npm run setup:spotify:speakers" to discover and link speakers.',
+    );
 }
 
 async function setupSpeakers() {
@@ -103,7 +106,11 @@ async function setupSpeakers() {
     console.log(`Speakers: ${speakers.length}`);
     for (const s of speakers) {
         const linked = s.spotifyDeviceId ? ' (Spotify linked)' : '';
-        console.log(`  - ${s.name}${s.deviceModel ? ` (${s.deviceModel})` : ''}${linked}`);
+        console.log(
+            `  - ${s.name}${
+                s.deviceModel ? ` (${s.deviceModel})` : ''
+            }${linked}`,
+        );
     }
 
     const unlinked = speakers.filter((s) => !s.spotifyDeviceId);

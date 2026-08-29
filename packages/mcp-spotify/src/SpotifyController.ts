@@ -155,12 +155,16 @@ export class SpotifyController {
      * then fall back to the artist's top tracks.
      * Returns a context URI (playlist) or track URIs.
      */
-    async getArtistRadio(
-        artistName: string,
-    ): Promise<{ uri?: string; uris?: string[]; label: string; artistName: string }> {
+    async getArtistRadio(artistName: string): Promise<{
+        uri?: string;
+        uris?: string[];
+        label: string;
+        artistName: string;
+    }> {
         // Find the artist
         const artists = await this.search(artistName, 'artist');
-        if (artists.length === 0) throw new Error(`Artist "${artistName}" not found on Spotify`);
+        if (artists.length === 0)
+            throw new Error(`Artist "${artistName}" not found on Spotify`);
         const artist = artists[0];
 
         // Try "This Is {artist}" (Spotify's curated essential playlist)
@@ -171,24 +175,41 @@ export class SpotifyController {
                 p.name.toLowerCase().includes(artist.name.toLowerCase()),
         );
         if (thisIsMatch) {
-            Logger.debug(`Artist radio for "${artist.name}": using "This Is" playlist`);
-            return { uri: thisIsMatch.uri, label: `"${thisIsMatch.name}" playlist`, artistName: artist.name };
+            Logger.debug(
+                `Artist radio for "${artist.name}": using "This Is" playlist`,
+            );
+            return {
+                uri: thisIsMatch.uri,
+                label: `"${thisIsMatch.name}" playlist`,
+                artistName: artist.name,
+            };
         }
 
         // Try "{artist} Radio" playlist
-        const radioSearch = await this.search(`${artist.name} Radio`, 'playlist');
-        const radioMatch = radioSearch.find(
-            (p) => p.name.toLowerCase().includes(artist.name.toLowerCase()),
+        const radioSearch = await this.search(
+            `${artist.name} Radio`,
+            'playlist',
+        );
+        const radioMatch = radioSearch.find((p) =>
+            p.name.toLowerCase().includes(artist.name.toLowerCase()),
         );
         if (radioMatch) {
-            Logger.debug(`Artist radio for "${artist.name}": using radio playlist`);
-            return { uri: radioMatch.uri, label: `"${radioMatch.name}" playlist`, artistName: artist.name };
+            Logger.debug(
+                `Artist radio for "${artist.name}": using radio playlist`,
+            );
+            return {
+                uri: radioMatch.uri,
+                label: `"${radioMatch.name}" playlist`,
+                artistName: artist.name,
+            };
         }
 
         // Fall back to artist top tracks
         const topRes = await this.api.getArtistTopTracks(artist.id, 'FR');
         const uris = topRes.body.tracks.map((t) => t.uri);
-        Logger.debug(`Artist radio for "${artist.name}": using ${uris.length} top tracks`);
+        Logger.debug(
+            `Artist radio for "${artist.name}": using ${uris.length} top tracks`,
+        );
         return { uris, label: `top tracks`, artistName: artist.name };
     }
 
@@ -235,6 +256,24 @@ export class SpotifyController {
         const data = await this.api.refreshAccessToken();
         this.api.setAccessToken(data.body.access_token);
         Logger.info('Spotify access token refreshed');
+    }
+
+    /**
+     * URIs des titres likés (bibliothèque « Titres likés »), plus récents
+     * d'abord. Nécessite le scope user-library-read.
+     */
+    async getSavedTrackUris(max = 100): Promise<string[]> {
+        const uris: string[] = [];
+        for (let offset = 0; offset < max; offset += 50) {
+            const res = await this.api.getMySavedTracks({
+                limit: Math.min(50, max - offset),
+                offset,
+            });
+            const items = res.body.items ?? [];
+            uris.push(...items.map((i) => i.track.uri));
+            if (items.length < 50) break;
+        }
+        return uris;
     }
 
     async transferPlayback(deviceId: string): Promise<void> {

@@ -14,7 +14,6 @@ import { SpotifyAuth } from './SpotifyAuth';
 import { SpotifyController } from './SpotifyController';
 import { AmpController } from './AmpController';
 import { buildSpotifyTools } from './tools';
-import { handleMusicPlay } from './musicPlayHandler';
 import { resolveSpeakerDevice } from './resolveDevice';
 import Logger from './logger';
 
@@ -63,8 +62,27 @@ async function playOnSpeaker(
         return { content: [{ type: 'text', text: description }] };
     }
 
-    const devices = await spotify.getDevices();
-    const device = resolveSpeakerDevice(devices, speakerName);
+    // La liste Spotify Connect est paresseuse : une enceinte qui sort de veille
+    // (WiiM notamment) peut mettre quelques secondes à y réapparaître. Sans ces
+    // relectures, la scène allumait l'ampli puis échouait en silence sur
+    // "device not found" — symptôme : ampli allumé, pas de musique.
+    let device:
+        | Awaited<ReturnType<typeof spotify.getDevices>>[number]
+        | undefined;
+    let devices: Awaited<ReturnType<typeof spotify.getDevices>> = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1500));
+        devices = await spotify.getDevices();
+        device = resolveSpeakerDevice(devices, speakerName);
+        if (device?.id) break;
+        Logger.warn(
+            `Speaker "${speakerName}" absent de Spotify Connect (essai ${
+                attempt + 1
+            }/3) — devices: ${
+                devices.map((d) => d.name).join(', ') || 'aucun'
+            }`,
+        );
+    }
 
     if (!device?.id) {
         const names =
@@ -76,7 +94,7 @@ async function playOnSpeaker(
             content: [
                 {
                     type: 'text',
-                    text: `Device "${speakerName}" not found. Available: ${names}.`,
+                    text: `Device "${speakerName}" not found after 3 attempts. Available: ${names}.`,
                 },
             ],
             isError: true,
@@ -84,7 +102,25 @@ async function playOnSpeaker(
     }
 
     await spotify.transferPlayback(device.id);
-    const description = await playFn(device.id);
+    // Le transfert n'est pas synchrone côté Spotify : un play immédiat peut
+    // tomber sur 404 "Device not found". Une reprise suffit en pratique.
+    let description: string;
+    try {
+        description = await playFn(device.id);
+    } catch (err: any) {
+        if (
+            err?.statusCode === 404 ||
+            /NO_ACTIVE_DEVICE|not found/i.test(String(err?.message))
+        ) {
+            Logger.warn(
+                'play après transfert a échoué (404) — nouvelle tentative dans 1.5s',
+            );
+            await new Promise((r) => setTimeout(r, 1500));
+            description = await playFn(device.id);
+        } else {
+            throw err;
+        }
+    }
     return { content: [{ type: 'text', text: description }] };
 }
 
@@ -112,9 +148,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'play_music': {
                 const query = (args as any)?.query as string | undefined;
                 const uri = (args as any)?.uri as string | undefined;
+                const speakerName = (args as any)?.speakerName as
+                    | string
+                    | undefined;
 
                 return await playOnSpeaker(
-                    DEFAULT_SPEAKER,
+                    speakerName || DEFAULT_SPEAKER,
                     async (deviceId) => {
                         if (uri) {
                             await spotify.playUri(uri, deviceId);
@@ -135,6 +174,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         }
                         await spotify.play(deviceId);
                         return `Playback resumed.`;
+                    },
+                );
+            }
+
+            case 'play_liked_tracks': {
+                const speakerName = (args as any)?.speakerName as
+                    | string
+                    | undefined;
+                const limit = Math.min(
+                    100,
+                    Math.max(1, Number((args as any)?.limit ?? 50)),
+                );
+                return await playOnSpeaker(
+                    speakerName || DEFAULT_SPEAKER,
+                    async (deviceId) => {
+                        let uris: string[];
+                        try {
+                            uris = await spotify.getSavedTrackUris(100);
+                        } catch (err: any) {
+                            if (err?.statusCode === 403) {
+                                throw new Error(
+                                    "Le token Spotify n'a pas le scope user-library-read — " +
+                                        'relancer `npm run setup:spotify` pour ré-autoriser.',
+                                );
+                            }
+                            throw err;
+                        }
+                        if (!uris.length)
+                            throw new Error('Aucun titre liké trouvé.');
+                        // Mélange (Fisher-Yates) — l'API joue les uris dans l'ordre donné.
+                        for (let i = uris.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [uris[i], uris[j]] = [uris[j], uris[i]];
+                        }
+                        await spotify.playUris(uris.slice(0, limit), deviceId);
+                        return `Lecture aléatoire de ${Math.min(
+                            uris.length,
+                            limit,
+                        )} titres likés.`;
                     },
                 );
             }
@@ -437,20 +515,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         },
                     ],
                 };
-            }
-
-            case 'music_play': {
-                const msg = await handleMusicPlay((args ?? {}) as any, {
-                    defaultSpeaker: DEFAULT_SPEAKER,
-                    getDevices: () => spotify.getDevices(),
-                    resolveSpeaker: (devs, name) =>
-                        resolveSpeakerDevice(devs, name),
-                    transfer: (id) => spotify.transferPlayback(id),
-                    search: (q, t) => spotify.search(q, (t as any) ?? 'track'),
-                    playUri: (uri, id) => spotify.playUri(uri, id),
-                    play: (id) => spotify.play(id),
-                });
-                return { content: [{ type: 'text', text: msg }] };
             }
 
             default:

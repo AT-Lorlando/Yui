@@ -13,7 +13,9 @@ export async function discoverSpeakers(
     try {
         spotifyDevices = await spotify.getDevices();
         Logger.debug(
-            `Spotify Connect devices: ${spotifyDevices.map((d) => d.name).join(', ')}`,
+            `Spotify Connect devices: ${spotifyDevices
+                .map((d) => d.name)
+                .join(', ')}`,
         );
     } catch (error) {
         Logger.warn(`Could not fetch Spotify devices: ${error}`);
@@ -30,8 +32,7 @@ export async function discoverSpeakers(
     const now = new Date().toISOString();
     const entities: SpeakerEntity[] = bonjourDevices.map((device) => {
         const matched = spotifyDevices.find(
-            (sd) =>
-                sd.name?.toLowerCase() === device.name.toLowerCase(),
+            (sd) => sd.name?.toLowerCase() === device.name.toLowerCase(),
         );
 
         const spotifyDeviceId =
@@ -62,7 +63,9 @@ export async function discoverSpeakers(
                 ...prev,
                 state: { reachable: false },
             });
-            Logger.debug(`Keeping previously known speaker "${prev.name}" (unreachable)`);
+            Logger.debug(
+                `Keeping previously known speaker "${prev.name}" (unreachable)`,
+            );
         }
     }
 
@@ -70,7 +73,9 @@ export async function discoverSpeakers(
     store.saveSnapshot();
     Logger.info(
         `Speaker discovery complete: ${entities.length} speaker(s) cached ` +
-            `(${entities.filter((e) => e.spotifyDeviceId).length} matched to Spotify, ` +
+            `(${
+                entities.filter((e) => e.spotifyDeviceId).length
+            } matched to Spotify, ` +
             `${entities.filter((e) => !e.state.reachable).length} unreachable)`,
     );
 }
@@ -90,15 +95,12 @@ function scanBonjour(): Promise<BonjourDevice[]> {
         const browser = instance.find({ type: 'googlecast' });
 
         browser.on('up', (service) => {
-            const friendlyName =
-                service.txt?.fn || service.name || 'Unknown';
+            const friendlyName = service.txt?.fn || service.name || 'Unknown';
             const model = service.txt?.md;
 
             if (
                 !devices.some(
-                    (d) =>
-                        d.name === friendlyName &&
-                        d.host === service.host,
+                    (d) => d.name === friendlyName && d.host === service.host,
                 )
             ) {
                 devices.push({
@@ -108,7 +110,9 @@ function scanBonjour(): Promise<BonjourDevice[]> {
                     model,
                 });
                 Logger.debug(
-                    `Bonjour: found ${friendlyName} (${model ?? 'unknown'}) at ${service.host}:${service.port}`,
+                    `Bonjour: found ${friendlyName} (${
+                        model ?? 'unknown'
+                    }) at ${service.host}:${service.port}`,
                 );
             }
         });

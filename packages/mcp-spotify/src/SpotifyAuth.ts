@@ -9,6 +9,10 @@ const SCOPES = [
     'user-read-playback-state',
     'user-read-currently-playing',
     'streaming',
+    // Titres likés (play_liked_tracks) + playlists privées (play_playlist).
+    // Token d'avant ce scope → relancer `npm run setup:spotify`.
+    'user-library-read',
+    'playlist-read-private',
 ];
 
 export class SpotifyAuth {
