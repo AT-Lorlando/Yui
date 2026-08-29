@@ -16,6 +16,7 @@ import {
 } from './automations';
 import { listScenes } from './scenes';
 import { readAllDeviceStates } from './deviceConditions';
+import { sendNotification } from './notify';
 
 export interface ToolCallResult {
     id: string;
@@ -211,6 +212,29 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
                     type: 'object',
                     properties: { id: { type: 'string' } },
                     required: ['id'],
+                },
+            },
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'notify_user',
+                description:
+                    'Envoie une notification push sur le téléphone de Jérémy. ' +
+                    "À utiliser quand il demande explicitement d'être notifié/prévenu " +
+                    '("envoie-moi une notif", "préviens-moi sur mon téléphone"), ou pour ' +
+                    "lui transmettre une information importante quand il n'est pas à " +
+                    "l'appartement (la voix ne le joindra pas). " +
+                    'Message court et direct — pas de markdown.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        message: {
+                            type: 'string',
+                            description: 'Contenu de la notification',
+                        },
+                    },
+                    required: ['message'],
                 },
             },
         },
@@ -423,6 +447,21 @@ export async function handleVirtualTool(
             return {
                 id: toolCall.id,
                 content: msg ?? `Automation "${args.id}" introuvable.`,
+            };
+        }
+
+        case 'notify_user': {
+            const message = String(args.message ?? '').trim();
+            if (!message) {
+                return {
+                    id: toolCall.id,
+                    content: 'Erreur : message vide.',
+                };
+            }
+            await sendNotification(message);
+            return {
+                id: toolCall.id,
+                content: `Notification envoyée : "${message}"`,
             };
         }
 
