@@ -123,24 +123,6 @@ export const INTEGRATIONS_CATALOG: Record<string, CatalogKey[]> = {
             example: '10.0.0.192',
         },
     ],
-    'mcp-samsung': [
-        {
-            key: 'SMARTTHINGS_TV_IP',
-            label: 'IP TV Samsung',
-            example: '10.0.0.133',
-        },
-        {
-            key: 'SMARTTHINGS_TV_MAC',
-            label: 'MAC TV (WoL)',
-            example: 'AA:BB:CC:DD:EE:FF',
-        },
-        {
-            key: 'SMARTTHINGS_TOKEN',
-            label: 'Token SmartThings',
-            example: '',
-            secret: true,
-        },
-    ],
     'mcp-somfy': [
         { key: 'TAHOMA_HOST', label: 'IP box Tahoma', example: '10.0.0.60' },
         { key: 'TAHOMA_PORT', label: 'Port Tahoma', example: '8443' },

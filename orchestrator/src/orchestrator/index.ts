@@ -35,9 +35,9 @@ import {
 } from './deviceState';
 
 export type { McpServerConfig, CollectedTool };
-export { buildServerConfigs, LLM_HIDDEN_TOOLS } from './serverConfigs';
-import { LLM_HIDDEN_TOOLS, buildServerConfigs } from './serverConfigs';
-import { annotateHidden } from './toolsHidden';
+export { buildServerConfigs } from './serverConfigs';
+import { buildServerConfigs } from './serverConfigs';
+import { toolAudience, isLlmVisible } from './toolAudience';
 
 /** Max messages kept in the rolling conversation buffer (user + assistant pairs). */
 const HISTORY_MAX = 10;
@@ -320,7 +320,7 @@ export class Orchestrator {
         const tools = [
             ...getVirtualTools(),
             ...filterToolsForOrder(order, this.collectedTools, groups)
-                .filter((ct) => !LLM_HIDDEN_TOOLS.has(ct.tool.name))
+                .filter((ct) => isLlmVisible(ct.tool.inputSchema))
                 .map((ct) => ({
                     type: 'function' as const,
                     function: {
@@ -766,15 +766,22 @@ export class Orchestrator {
         name: string;
         description: string;
         inputSchema: Record<string, unknown>;
+        audience: string[];
         hidden: boolean;
     }[] {
-        const tools = this.collectedTools.map((ct) => ({
-            serverName: ct.serverName,
-            name: ct.tool.name,
-            description: ct.tool.description,
-            inputSchema: ct.tool.inputSchema as Record<string, unknown>,
-        }));
-        return annotateHidden(tools, LLM_HIDDEN_TOOLS);
+        return this.collectedTools.map((ct) => {
+            const schema = ct.tool.inputSchema as Record<string, unknown>;
+            const audience = toolAudience(schema);
+            return {
+                serverName: ct.serverName,
+                name: ct.tool.name,
+                description: ct.tool.description,
+                inputSchema: schema,
+                audience,
+                // Compat app : « caché » = pas proposé au LLM.
+                hidden: !audience.includes('llm'),
+            };
+        });
     }
 
     async *simulate(

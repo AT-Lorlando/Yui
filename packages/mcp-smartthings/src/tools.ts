@@ -86,6 +86,7 @@ export function buildSmartThingsTools(inputs: string[]) {
                 'État TV structuré (JSON) pour le dashboard : { power, volume, muted, input, inputs }.',
             inputSchema: {
                 type: 'object' as const,
+                'x-audience': ['system'],
                 properties: {},
                 required: [],
             },

@@ -1,5 +1,3 @@
-import { buildCoversSetTool } from './coversSetHandler';
-
 export const SOMFY_TOOLS = [
     {
         name: 'list_covers',
@@ -112,6 +110,28 @@ export const SOMFY_TOOLS = [
     },
 ];
 
+/**
+ * Injecte l'enum des volets découverts dans chaque champ `device` — le picker
+ * de l'app rend alors un select, et le LLM ne peut plus inventer un nom.
+ */
 export function buildSomfyTools(coverNames: string[] = []) {
-    return [...SOMFY_TOOLS, buildCoversSetTool(coverNames)];
+    if (!coverNames.length) return SOMFY_TOOLS;
+    return SOMFY_TOOLS.map((tool) => {
+        const props = tool.inputSchema.properties as Record<string, any>;
+        if (!props?.device) return tool;
+        return {
+            ...tool,
+            inputSchema: {
+                ...tool.inputSchema,
+                properties: {
+                    ...props,
+                    device: {
+                        ...props.device,
+                        title: 'Volet',
+                        enum: coverNames,
+                    },
+                },
+            },
+        };
+    });
 }

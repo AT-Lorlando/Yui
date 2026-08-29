@@ -3,29 +3,6 @@ import type { McpServerConfig } from './types';
 import { applyIntegrations, loadIntegrations } from './integrations';
 
 /**
- * Tools that are callable via the HTTP API (e.g. mobile app) but must NOT
- * appear in the LLM's tool list. The LLM uses higher-level wrappers instead
- * (e.g. set_lights, set_room_palette) — individual light tools are for
- * direct programmatic control only.
- */
-export const LLM_HIDDEN_TOOLS = new Set([
-    'turn_on_light',
-    'turn_off_light',
-    'set_brightness',
-    'set_color',
-    'list_media',
-    'cast_wallpaper',
-    'cast_video',
-    'cast_app',
-    'transfer_playback_to_speakers',
-    'light_set',
-    'lights_palette_set',
-    'covers_set',
-    'music_play',
-    'tv_get_status',
-]);
-
-/**
  * Builds the list of MCP server configurations.
  * In production (compiled .js) uses pre-built packages to avoid ts-node overhead.
  * In dev (ts-node) runs source directly so changes are picked up immediately.

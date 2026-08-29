@@ -12,7 +12,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { TahomaClient } from './TahomaClient';
 import { buildSomfyTools } from './tools';
-import { handleCoversSet } from './coversSetHandler';
 import Logger from './logger';
 
 const host = process.env.TAHOMA_HOST ?? '';
@@ -209,15 +208,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         },
                     ],
                 };
-            }
-
-            case 'covers_set': {
-                const msg = await handleCoversSet(a, {
-                    listCovers: () => tahoma.listCovers(),
-                    exec: (url, cmd, params, label) =>
-                        tahoma.exec(url, cmd, params, label),
-                });
-                return { content: [{ type: 'text', text: msg }] };
             }
 
             default:
