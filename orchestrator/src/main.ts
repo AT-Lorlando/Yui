@@ -126,6 +126,8 @@ async function main() {
         list: () => orchestrator.getTools(),
         call: (name: string, args: Record<string, unknown>) =>
             orchestrator.callTool(name, args),
+        callRaw: (name: string, args: Record<string, unknown>) =>
+            orchestrator.callToolRaw(name, args),
     };
 
     // Presence manager — detects departure (MAC) and arrival (GPS)
@@ -186,6 +188,7 @@ async function main() {
     // Hue remotes — listen to bridge SSE for button + dial events
     const hueRemotes = await initHueRemotes({
         callTool: (name, args) => orchestrator.callTool(name, args),
+        presenceState: () => presence.getState(),
     });
 
     const presenceRules = createPresenceRulesEngine({

@@ -49,6 +49,11 @@ export interface ToolsHandler {
         hidden: boolean;
     }[];
     call: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+    /**
+     * Appel sans la garde d'annulation d'animation. Réservé aux aperçus
+     * d'animation : leurs propres écritures ne doivent pas s'auto-annuler.
+     */
+    callRaw?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface AutomationsHandler {

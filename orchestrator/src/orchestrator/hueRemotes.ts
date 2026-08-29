@@ -4,6 +4,11 @@ import * as path from 'path';
 import Logger from '../logger';
 import { dataPath } from '@yui/shared';
 import { hueRequest } from './animation/hueV2';
+import { evaluateSceneCondition } from './scenes';
+import type { SceneCondition } from './scenes';
+import { createStateReader } from './deviceConditions';
+import { migrateLegacyActions } from './legacyActions';
+import type { PresenceState } from './presence';
 
 /**
  * Hue v2 SSE watcher — dispatches remote button/dial events to scenes & tools.
@@ -73,6 +78,13 @@ export interface RemoteAction {
     tool: string;
     args?: Record<string, unknown>;
     delayMs?: number;
+    /**
+     * Même condition que dans une scène. Évaluée sur l'état lu **au début de
+     * l'appui** : deux actions opposées sur le même bouton ("éteins si allumé",
+     * "allume si éteint") se comportent donc comme une bascule, la première
+     * n'influençant pas la condition de la seconde.
+     */
+    condition?: SceneCondition;
 }
 
 export interface ButtonConfig {
@@ -105,6 +117,8 @@ export interface RemotesSnapshot {
 
 export interface HueRemotesDeps {
     callTool: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+    /** Pour les conditions de présence des bindings. */
+    presenceState?: () => PresenceState;
 }
 
 const CONFIG_PATH = dataPath('hue-remotes.json');
@@ -127,6 +141,20 @@ function loadConfig(): void {
             return;
         }
         config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+        // Bindings enregistrés avec d'anciens noms d'actions → canoniques.
+        for (const dev of Object.values(config)) {
+            for (const btn of Object.values(dev.buttons ?? {})) {
+                if (btn.shortPress) {
+                    for (const [k, seq] of Object.entries(btn.shortPress)) {
+                        btn.shortPress[k] = migrateLegacyActions(seq);
+                    }
+                }
+                if (btn.longPress)
+                    btn.longPress = migrateLegacyActions(btn.longPress);
+                if (btn.longRelease)
+                    btn.longRelease = migrateLegacyActions(btn.longRelease);
+            }
+        }
         Logger.info(
             `[hue-remotes] config loaded: ${
                 Object.keys(config).length
@@ -256,21 +284,55 @@ async function setRoomDimming(room: string, value: number): Promise<void> {
 
 const MULTI_PRESS_WINDOW_MS = 400;
 
+/**
+ * Fenêtre de debounce d'un bouton. La fenêtre n'a de raison d'être que si le
+ * bouton a des bindings multi-appui (2×, 3×…) : sinon attendre 400 ms avant
+ * chaque action ne fait qu'ajouter de la latence perceptible.
+ */
+export function multiPressWindow(btnCfg?: ButtonConfig): number {
+    const counts = Object.keys(btnCfg?.shortPress ?? {});
+    return counts.some((k) => Number(k) > 1) ? MULTI_PRESS_WINDOW_MS : 0;
+}
+
 interface PressBuffer {
     count: number;
     timer: NodeJS.Timeout;
 }
 const pressBuffers = new Map<string, PressBuffer>(); // key: device|btn
 
-async function runActions(
+/** Exporté pour les tests — exécute une séquence de binding. */
+export async function runActions(
     actions: RemoteAction[],
     deps: HueRemotesDeps,
 ): Promise<void> {
+    // Un lecteur d'état par appui : chaque sujet n'est lu qu'une fois et toutes
+    // les actions de la séquence voient le même instantané.
+    const context = {
+        presenceState: deps.presenceState?.(),
+        stateReader: createStateReader((t, a) => deps.callTool(t, a ?? {})),
+    };
     for (const a of actions) {
         if (a.delayMs && a.delayMs > 0) {
             await new Promise((r) => setTimeout(r, a.delayMs));
         }
         try {
+            if (a.condition) {
+                const pass = await evaluateSceneCondition(
+                    a.condition,
+                    context,
+                    (t, args) => deps.callTool(t, args ?? {}),
+                );
+                if (!pass) {
+                    Logger.info(
+                        `[hue-remotes] ${
+                            a.tool
+                        } ignoré — condition ${JSON.stringify(
+                            a.condition,
+                        )} fausse`,
+                    );
+                    continue;
+                }
+            }
             await deps.callTool(a.tool, a.args ?? {});
         } catch (e) {
             Logger.warn(`[hue-remotes] tool ${a.tool} failed: ${e}`);
@@ -284,6 +346,18 @@ function dispatchShortPress(
     deps: HueRemotesDeps,
 ): void {
     const key = `${deviceName}|${controlId}`;
+    const btnCfg = config[deviceName]?.buttons?.[String(controlId)];
+
+    // Pas de binding multi-appui → déclenchement immédiat, zéro latence.
+    if (multiPressWindow(btnCfg) === 0) {
+        pressBuffers.set(key, {
+            count: 1,
+            timer: setTimeout(() => {}, 0),
+        });
+        fireShortPress(deviceName, controlId, deps);
+        return;
+    }
+
     const existing = pressBuffers.get(key);
 
     if (existing) {
@@ -501,6 +575,11 @@ function cleanActionList(raw: any): RemoteAction[] {
         if (a.args && typeof a.args === 'object') cleaned.args = a.args;
         if (typeof a.delayMs === 'number' && a.delayMs > 0) {
             cleaned.delayMs = Math.round(a.delayMs);
+        }
+        // La condition est éditable dans l'app : sans ce passage explicite,
+        // elle était supprimée à l'enregistrement (whitelist de champs).
+        if (a.condition && typeof a.condition === 'object') {
+            cleaned.condition = a.condition as SceneCondition;
         }
         out.push(cleaned);
     }

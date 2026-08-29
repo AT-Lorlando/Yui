@@ -11,6 +11,7 @@ import {
     type DeviceSubject,
     type StateReader,
 } from './deviceConditions';
+import { migrateLegacyActions } from './legacyActions';
 
 // ── Scene conditions ───────────────────────────────────────────────────────────
 
@@ -22,6 +23,10 @@ import {
  *   { "hourBetween": [6, 22] }          → true if 6h ≤ now < 22h
  *   { "presence": "home" }              → true if user is home
  *   { "device": "amp", "is": "off" }    → true if the amp is off
+ *   { "device": "lights", "target": "Salon", "is": "on" }
+ *                                       → true if at least one Salon lamp is on
+ *                                         (target = a room or a lamp name;
+ *                                          omitted = the whole flat)
  *   { "and": [...] }                    → all sub-conditions true
  *   { "or": [...] }                     → at least one true
  *   { "not": { "presence": "away" } }   → negation
@@ -33,7 +38,7 @@ import {
 export type SceneCondition =
     | { hourBetween: [number, number] }
     | { presence: PresenceState }
-    | { device: DeviceSubject; is: string }
+    | { device: DeviceSubject; target?: string; is: string }
     | { and: SceneCondition[] }
     | { or: SceneCondition[] }
     | { not: SceneCondition };
@@ -76,6 +81,8 @@ export interface SceneAction {
      *   _lights_all_color       { color: string (hex), brightness?: number }
      *   _lights_palette         { colors: string[], brightness?: number }
      *     → applies set_room_palette per room with the given colors
+     *   _lights_toggle          { target?: string, brightness?, color? }
+     *     → reads the real state of the target (room or lamp) and inverts it
      *   _doors_lock_all
      *   _notify                 { message: string }
      *   _run_scene              { id: string }
@@ -137,7 +144,16 @@ function ensureDataDir(): void {
 function loadScenes(): Scene[] {
     try {
         if (!fs.existsSync(SCENES_FILE)) return [];
-        return JSON.parse(fs.readFileSync(SCENES_FILE, 'utf-8')) as Scene[];
+        const scenes = JSON.parse(
+            fs.readFileSync(SCENES_FILE, 'utf-8'),
+        ) as Scene[];
+        // Traduit les noms d'actions legacy (light_set, …) sans réécrire le
+        // fichier — la config n'est pas versionnée, prod la garde telle quelle.
+        return scenes.map((sc) => ({
+            ...sc,
+            setup: migrateLegacyActions(sc.setup),
+            state: migrateLegacyActions(sc.state),
+        }));
     } catch {
         return [];
     }
@@ -232,7 +248,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ── Condition evaluation ───────────────────────────────────────────────────────
 
-async function evaluateCondition(
+export async function evaluateSceneCondition(
     condition: SceneCondition,
     context: SceneContext,
     callTool: CallTool,
@@ -253,7 +269,10 @@ async function evaluateCondition(
         if (!context.stateReader) {
             context.stateReader = createStateReader(callTool);
         }
-        const state = await context.stateReader(condition.device);
+        const state = await context.stateReader(
+            condition.device,
+            condition.target,
+        );
         return state === condition.is;
     }
     if ('and' in condition) {
@@ -273,6 +292,9 @@ async function evaluateCondition(
     }
     return true;
 }
+
+/** Alias interne — l'export porte un nom explicite pour les autres modules. */
+const evaluateCondition = evaluateSceneCondition;
 
 // ── $fn resolution ────────────────────────────────────────────────────────────
 
@@ -378,6 +400,39 @@ export async function runVirtualAction(
                 ...(action.args.brightness !== undefined
                     ? { brightness: action.args.brightness }
                     : {}),
+            });
+            break;
+        }
+
+        case '_lights_toggle': {
+            // Bascule d'après l'état réel : si la cible est allumée on éteint,
+            // sinon on allume. C'est le "j'appuie encore sur le même bouton"
+            // des télécommandes, sans avoir à écrire de condition.
+            const target = action.args.target as string | undefined;
+            const brightness = action.args.brightness as number | undefined;
+            const color = action.args.color as string | undefined;
+            if (!context.stateReader) {
+                context.stateReader = createStateReader(callTool);
+            }
+            const state = await context.stateReader('lights', target);
+            const turnOn = state !== 'on';
+            Logger.info(
+                `Scene _lights_toggle: ${target ?? 'tout'} est ${state} → ${
+                    turnOn ? 'allumage' : 'extinction'
+                }`,
+            );
+            if (!target || target.toLowerCase() === 'all') {
+                await callTool(
+                    turnOn ? 'turn_on_all_lights' : 'turn_off_all_lights',
+                    turnOn && brightness !== undefined ? { brightness } : {},
+                );
+                break;
+            }
+            await callTool('set_lights', {
+                target,
+                on: turnOn,
+                ...(turnOn && brightness !== undefined ? { brightness } : {}),
+                ...(turnOn && color !== undefined ? { color } : {}),
             });
             break;
         }

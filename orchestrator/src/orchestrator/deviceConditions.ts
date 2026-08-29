@@ -31,9 +31,26 @@ function readAmpState(): string {
     }
 }
 
+/**
+ * Les lumières d'une cible : une pièce, une lampe nommée, ou tout
+ * l'appartement si `target` est absent. La comparaison est celle de
+ * set_lights (pièce d'abord, puis nom exact, puis nom partiel) pour qu'une
+ * condition et l'action qu'elle garde parlent bien du même périmètre.
+ */
+function lightsOfTarget(lights: any[], target?: string): any[] {
+    if (!target || target.toLowerCase() === 'all') return lights;
+    const lc = target.toLowerCase().trim();
+    const byRoom = lights.filter((l) => (l?.room ?? '').toLowerCase() === lc);
+    if (byRoom.length) return byRoom;
+    const exact = lights.filter((l) => (l?.name ?? '').toLowerCase() === lc);
+    if (exact.length) return exact;
+    return lights.filter((l) => (l?.name ?? '').toLowerCase().includes(lc));
+}
+
 export async function readDeviceState(
     subject: DeviceSubject,
     callTool: CallTool,
+    target?: string,
 ): Promise<string> {
     try {
         switch (subject) {
@@ -48,9 +65,16 @@ export async function readDeviceState(
                 return s?.power === 'on' || s?.on === true ? 'on' : 'off';
             }
             case 'lights': {
-                const lights = (await callTool('list_lights', {})) as any[];
-                return Array.isArray(lights) &&
-                    lights.some((l) => l?.state?.on === true || l?.on === true)
+                const all = (await callTool('list_lights', {})) as any[];
+                if (!Array.isArray(all)) return 'unknown';
+                const lights = lightsOfTarget(all, target);
+                // Cible inconnue (pièce renommée, lampe retirée) : 'unknown'
+                // plutôt que 'off', sinon une condition "éteint" passerait à
+                // tort et l'action se déclencherait sans raison.
+                if (!lights.length) return 'unknown';
+                return lights.some(
+                    (l) => l?.state?.on === true || l?.on === true,
+                )
                     ? 'on'
                     : 'off';
             }
@@ -76,12 +100,13 @@ export async function readDeviceState(
  * même si plusieurs actions/branches le testent.
  */
 export function createStateReader(callTool: CallTool) {
-    const cache = new Map<DeviceSubject, Promise<string>>();
-    return (subject: DeviceSubject): Promise<string> => {
-        let p = cache.get(subject);
+    const cache = new Map<string, Promise<string>>();
+    return (subject: DeviceSubject, target?: string): Promise<string> => {
+        const key = `${subject}:${target ?? ''}`;
+        let p = cache.get(key);
         if (!p) {
-            p = readDeviceState(subject, callTool);
-            cache.set(subject, p);
+            p = readDeviceState(subject, callTool, target);
+            cache.set(key, p);
         }
         return p;
     };
@@ -89,16 +114,42 @@ export function createStateReader(callTool: CallTool) {
 
 export type StateReader = ReturnType<typeof createStateReader>;
 
-/** Snapshot complet pour l'app (tool virtuel _device_states). */
+/**
+ * Snapshot complet pour l'app (tool virtuel _device_states).
+ * En plus des sujets globaux, une entrée `lights:<pièce|lampe>` par cible
+ * connue — c'est ce qui alimente le « Actuellement : allumé » de l'éditeur
+ * quand la condition vise une pièce précise.
+ */
 export async function readAllDeviceStates(
     callTool: CallTool,
-): Promise<Record<DeviceSubject, string>> {
+): Promise<Record<string, string>> {
     const subjects = Object.keys(DEVICE_SUBJECTS) as DeviceSubject[];
     const values = await Promise.all(
         subjects.map((s) => readDeviceState(s, callTool)),
     );
-    return Object.fromEntries(subjects.map((s, i) => [s, values[i]])) as Record<
-        DeviceSubject,
-        string
-    >;
+    const out: Record<string, string> = Object.fromEntries(
+        subjects.map((s, i) => [s, values[i]]),
+    );
+
+    try {
+        const lights = (await callTool('list_lights', {})) as any[];
+        if (Array.isArray(lights)) {
+            const targets = new Set<string>();
+            for (const l of lights) {
+                if (l?.room) targets.add(String(l.room));
+                if (l?.name) targets.add(String(l.name));
+            }
+            for (const t of targets) {
+                const group = lightsOfTarget(lights, t);
+                out[`lights:${t}`] = group.some(
+                    (l) => l?.state?.on === true || l?.on === true,
+                )
+                    ? 'on'
+                    : 'off';
+            }
+        }
+    } catch (err) {
+        Logger.warn(`readAllDeviceStates: per-target lights failed: ${err}`);
+    }
+    return out;
 }

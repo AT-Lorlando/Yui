@@ -424,11 +424,15 @@ export class HttpSource implements InputSource {
             // (via callTool → cancelIfAffected), unlike N per-light requests.
             dev.post('/lights/off-all', call('turn_off_all_lights'));
             dev.post('/lights/on-all', call('turn_on_all_lights'));
+            // Ids are numeric for Hue, strings ("g:1") for Govee — keep the
+            // raw value when it isn't a plain number.
+            const lightId = (raw: string): string | number =>
+                /^\d+$/.test(raw) ? Number(raw) : raw;
             dev.post('/lights/:id/on', async (req: any, res: any) => {
                 try {
                     res.json(
                         await deviceHandler('turn_on_light', {
-                            lightId: +req.params.id,
+                            lightId: lightId(req.params.id),
                         }),
                     );
                 } catch (e: any) {
@@ -439,7 +443,7 @@ export class HttpSource implements InputSource {
                 try {
                     res.json(
                         await deviceHandler('turn_off_light', {
-                            lightId: +req.params.id,
+                            lightId: lightId(req.params.id),
                         }),
                     );
                 } catch (e: any) {
@@ -450,7 +454,7 @@ export class HttpSource implements InputSource {
                 try {
                     res.json(
                         await deviceHandler('set_brightness', {
-                            lightId: +req.params.id,
+                            lightId: lightId(req.params.id),
                             brightness: +req.body.brightness,
                         }),
                     );
@@ -462,7 +466,7 @@ export class HttpSource implements InputSource {
                 try {
                     res.json(
                         await deviceHandler('set_color', {
-                            lightId: +req.params.id,
+                            lightId: lightId(req.params.id),
                             color: req.body.color,
                         }),
                     );
@@ -482,6 +486,9 @@ export class HttpSource implements InputSource {
                                 : {}),
                             ...(req.body?.brightness !== undefined
                                 ? { brightness: +req.body.brightness }
+                                : {}),
+                            ...(req.body?.colorTemp !== undefined
+                                ? { colorTemp: +req.body.colorTemp }
                                 : {}),
                         }),
                     );
@@ -780,12 +787,17 @@ export class HttpSource implements InputSource {
                 next();
             });
 
+            // Les écritures d'une animation passent par le chemin raw : sinon
+            // chaque image déclenche la garde d'annulation et l'aperçu se
+            // coupe tout seul dès la première.
+            const animCall = toolsHandler?.callRaw ?? deviceHandler;
+
             // Preview an intro once (no persistence).
             anim.post('/animations/preview', async (req: any, res: any) => {
                 try {
                     await animationManager.playIntro(
                         req.body?.intro ?? [],
-                        deviceHandler,
+                        animCall,
                     );
                     res.json({ success: true });
                 } catch (e: any) {
@@ -798,7 +810,7 @@ export class HttpSource implements InputSource {
                 try {
                     await animationManager.startFloating(
                         req.body?.floating,
-                        deviceHandler,
+                        animCall,
                     );
                     res.json({ success: true });
                 } catch (e: any) {

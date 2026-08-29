@@ -16,7 +16,7 @@ const MIN_TICK_MS = 800;
 // hung bridge request can never block the off/colour command that follows.
 const DRAIN_TIMEOUT_MS = 1500;
 
-/** Light-affecting tools whose invocation must cancel an active floating loop. */
+/** Light-affecting tools whose invocation must cancel an active animation. */
 const LIGHT_TOOLS = new Set([
     'set_lights',
     'set_room_palette',
@@ -79,16 +79,58 @@ export function floatingFrameColors(
 
 interface ActiveFloating {
     kind: 'software' | 'native';
+    /** Génération à laquelle la boucle appartient. */
+    epoch: number;
     timer?: NodeJS.Timeout;
     nativeRid?: string;
     /** The latest tick's in-flight set_lights promises (fire-and-forget). */
     inflight?: Promise<unknown>[];
 }
 
+/**
+ * Pilote les animations lumineuses (intro ponctuelle + boucle « couleurs
+ * flottantes »).
+ *
+ * Tout ce qui écrit sur les lampes ici est différé (setInterval / setTimeout).
+ * Le risque, c'est qu'une écriture survive à l'arrêt : elle rallume alors ce
+ * que l'utilisateur vient d'éteindre, et comme plus rien ne référence son
+ * timer, seule une relance du processus y met fin. Deux garanties couvrent ça :
+ *
+ * 1. **Génération (`epoch`)** — incrémentée à chaque démarrage ou arrêt. Chaque
+ *    écriture différée capture la sienne et ne fait rien si elle a changé. Un
+ *    timer qui aurait échappé au ménage n'écrit donc rien, et se désarme à son
+ *    premier réveil.
+ * 2. **Sérialisation** — démarrages et arrêts passent par une file. Sans elle,
+ *    deux scènes déclenchées coup sur coup posaient chacune leur boucle
+ *    pendant que l'autre attendait `list_lights`, et `this.floating` n'en
+ *    référençait qu'une : l'autre devenait orpheline.
+ *
+ * Les timers d'intro sont suivis explicitement, pour la même raison.
+ */
 class AnimationManager {
     private floating: ActiveFloating | null = null;
+    private introTimers = new Set<NodeJS.Timeout>();
+    /** Résolveurs des playIntro en cours — appelés pour les débloquer à l'arrêt. */
+    private introWaiters = new Set<() => void>();
+    private epoch = 0;
+    private lifecycle: Promise<unknown> = Promise.resolve();
 
-    /** Play an intro once; resolves when the timeline finishes. */
+    /** File d'attente des opérations de cycle de vie (start/stop). */
+    private serialize<T>(fn: () => Promise<T>): Promise<T> {
+        const next = this.lifecycle.then(fn, fn);
+        // La file ne doit jamais rester en échec, sinon tout se bloque derrière.
+        this.lifecycle = next.then(
+            () => undefined,
+            () => undefined,
+        );
+        return next;
+    }
+
+    /**
+     * Joue une intro. Se termine à la fin de la timeline, ou immédiatement si
+     * un arrêt survient entre-temps (l'appelant enchaîne sur l'état de la
+     * scène, il ne doit pas attendre une intro annulée).
+     */
     async playIntro(
         effects: AnimationEffect[],
         callTool: CallTool,
@@ -108,12 +150,31 @@ class AnimationManager {
             return one ? [one.name] : [];
         };
         const { frames, totalMs } = expandIntro(effects, resolve);
+        const epoch = this.epoch;
 
         await new Promise<void>((done) => {
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                this.introWaiters.delete(finish);
+                done();
+            };
+            this.introWaiters.add(finish);
+
             for (const f of frames) {
-                setTimeout(() => void this.applyFrame(f, callTool), f.atMs);
+                const timer = setTimeout(() => {
+                    this.introTimers.delete(timer);
+                    if (epoch !== this.epoch) return;
+                    this.applyFrame(f, callTool);
+                }, f.atMs);
+                this.introTimers.add(timer);
             }
-            setTimeout(done, totalMs);
+            const end = setTimeout(() => {
+                this.introTimers.delete(end);
+                finish();
+            }, totalMs);
+            this.introTimers.add(end);
         });
     }
 
@@ -133,7 +194,14 @@ class AnimationManager {
         cfg: FloatingConfig,
         callTool: CallTool,
     ): Promise<void> {
-        await this.stopAll();
+        return this.serialize(() => this.startFloatingInner(cfg, callTool));
+    }
+
+    private async startFloatingInner(
+        cfg: FloatingConfig,
+        callTool: CallTool,
+    ): Promise<void> {
+        await this.stopAllInner();
 
         if (cfg.engine === 'native') {
             Logger.warn(
@@ -167,11 +235,17 @@ class AnimationManager {
             MIN_TICK_MS,
         );
         const startedAt = Date.now();
+        const epoch = this.epoch;
         // Register the loop before the first tick so its commands are tracked
         // as in-flight and can be drained by stopAll().
-        const loop: ActiveFloating = { kind: 'software' };
+        const loop: ActiveFloating = { kind: 'software', epoch };
         this.floating = loop;
         const runTick = () => {
+            // Boucle d'une génération révolue : elle n'écrit plus et se désarme.
+            if (epoch !== this.epoch) {
+                if (loop.timer) clearInterval(loop.timer);
+                return;
+            }
             const colors = floatingFrameColors(
                 cfg,
                 names,
@@ -196,22 +270,34 @@ class AnimationManager {
         );
     }
 
-    /** Cancel the active floating loop iff the incoming tool affects lights. */
+    /** Cancel any running animation iff the incoming tool affects lights. */
     async cancelIfAffected(tool: string): Promise<void> {
-        if (this.floating && shouldCancel(tool)) {
-            await this.stopAll();
-        }
+        if (!shouldCancel(tool)) return;
+        if (!this.floating && this.introTimers.size === 0) return;
+        await this.stopAll();
     }
 
     async stopAll(): Promise<void> {
-        if (!this.floating) return;
+        return this.serialize(() => this.stopAllInner());
+    }
+
+    private async stopAllInner(): Promise<void> {
+        const hadIntro = this.introTimers.size > 0;
         const f = this.floating;
+        // Invalide tout ce qui est déjà programmé, y compris ce qu'on n'aurait
+        // pas réussi à référencer.
+        this.epoch++;
         this.floating = null;
-        if (f.timer) clearInterval(f.timer);
+
+        for (const timer of this.introTimers) clearTimeout(timer);
+        this.introTimers.clear();
+        for (const waiter of [...this.introWaiters]) waiter();
+
+        if (f?.timer) clearInterval(f.timer);
         // Drain the last tick's in-flight commands so a following off/colour
         // command reaches the bridge last — otherwise late-arriving "on" frames
         // re-light the room. Capped so a hung request can't block the caller.
-        if (f.inflight?.length) {
+        if (f?.inflight?.length) {
             await Promise.race([
                 Promise.allSettled(f.inflight),
                 new Promise((r) => {
@@ -220,16 +306,21 @@ class AnimationManager {
                 }),
             ]);
         }
-        if (f.kind === 'native' && f.nativeRid) {
+        if (f?.kind === 'native' && f.nativeRid) {
             const host = process.env.HUE_BRIDGE_IP;
             const key = process.env.HUE_USERNAME;
             if (host && key) await stopNativeDynamic(host, key, f.nativeRid);
         }
-        Logger.info('[animation] floating stopped');
+        if (f || hadIntro) Logger.info('[animation] animations stopped');
     }
 
     isFloating(): boolean {
         return this.floating !== null;
+    }
+
+    /** Une intro est-elle en cours ? (diagnostic / tests) */
+    isIntroPlaying(): boolean {
+        return this.introTimers.size > 0;
     }
 }
 
