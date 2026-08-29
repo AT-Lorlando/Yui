@@ -92,12 +92,21 @@ export default class HueController {
      * @param brightness  0–100 %
      * @param color     Hex color string, e.g. "#FF5500"
      */
+    /** Kelvin → mirek, borné à la plage Hue (153 = froid 6500K, 500 = chaud 2000K). */
+    private static kelvinToMirek(kelvin: number): number {
+        return Math.max(153, Math.min(500, Math.round(1_000_000 / kelvin)));
+    }
+
     public async setRoomLights(
         roomName: string,
         opts: {
             on?: boolean;
             brightness?: number;
+            /** Variation relative en points de % (-100..100) — n'allume ni n'éteint. */
+            brightnessDelta?: number;
             color?: string;
+            /** Température de blanc en kelvin (2000 chaud – 6500 froid). Prime sur color. */
+            colorTempK?: number;
             transitionMs?: number;
         },
     ): Promise<string> {
@@ -111,15 +120,33 @@ export default class HueController {
 
         const state = new v3.lightStates.GroupLightState();
 
+        // Un delta seul ne touche pas à l'alimentation : "baisse un peu" sur
+        // une pièce partiellement éteinte ne doit pas rallumer les lampes
+        // éteintes (bri_inc modifie le bri mémorisé, la lampe reste off).
+        const deltaOnly =
+            opts.brightnessDelta !== undefined && opts.on === undefined;
         // Default to on=true unless explicitly turning off
         const turnOn = opts.on !== false;
-        state.on(turnOn);
+        if (!deltaOnly) state.on(turnOn);
 
+        if (opts.brightnessDelta !== undefined && turnOn) {
+            state.bri_inc(
+                Math.max(
+                    -254,
+                    Math.min(
+                        254,
+                        Math.round((opts.brightnessDelta * 254) / 100),
+                    ),
+                ),
+            );
+        }
         if (turnOn) {
             if (opts.brightness !== undefined) {
                 state.brightness(opts.brightness);
             }
-            if (opts.color !== undefined) {
+            if (opts.colorTempK !== undefined) {
+                state.ct(HueController.kelvinToMirek(opts.colorTempK));
+            } else if (opts.color !== undefined) {
                 const { hue, sat } = this.hexToHueSat(opts.color);
                 state.hue(hue).sat(sat);
             }
@@ -134,10 +161,18 @@ export default class HueController {
         if (!turnOn) {
             parts.push('éteint');
         } else {
-            if (opts.brightness !== undefined)
+            if (opts.brightnessDelta !== undefined)
+                parts.push(
+                    `luminosité ${opts.brightnessDelta > 0 ? '+' : ''}${
+                        opts.brightnessDelta
+                    }%`,
+                );
+            else if (opts.brightness !== undefined)
                 parts.push(`luminosité ${opts.brightness}%`);
             else parts.push('allumé');
-            if (opts.color) parts.push(`couleur ${opts.color}`);
+            if (opts.colorTempK !== undefined)
+                parts.push(`blanc ${opts.colorTempK}K`);
+            else if (opts.color) parts.push(`couleur ${opts.color}`);
         }
 
         const msg = `${group.name} : ${parts.join(', ')}`;
@@ -156,6 +191,7 @@ export default class HueController {
         roomName: string,
         colors: string[],
         brightness?: number,
+        transitionMs?: number,
     ): Promise<string> {
         const group = this.findGroup(roomName);
         if (!group) {
@@ -179,6 +215,8 @@ export default class HueController {
                     .hue(h)
                     .sat(s);
                 if (bri !== undefined) state.brightness(bri);
+                if (transitionMs !== undefined)
+                    state.transitiontime(Math.round(transitionMs / 100));
                 return this.api.lights.setLightState(lightId, state);
             }),
         );
@@ -238,6 +276,38 @@ export default class HueController {
             .brightness(brightness);
         await this.api.lights.setLightState(lightId, lightState);
         Logger.info(`Light ${lightId} brightness set to ${brightness}`);
+    }
+
+    public async setLightColorTemp(
+        lightId: number,
+        kelvin: number,
+        transitionMs?: number,
+    ): Promise<void> {
+        await this.getLightById(lightId);
+        const lightState = new v3.lightStates.LightState()
+            .on()
+            .ct(HueController.kelvinToMirek(kelvin));
+        if (transitionMs !== undefined)
+            lightState.transitiontime(Math.round(transitionMs / 100));
+        await this.api.lights.setLightState(lightId, lightState);
+        Logger.info(`Light ${lightId} white set to ${kelvin}K`);
+    }
+
+    /** Variation relative en points de % — ne change pas l'état on/off. */
+    public async incLightBrightness(
+        lightId: number,
+        deltaPct: number,
+    ): Promise<void> {
+        await this.getLightById(lightId);
+        const lightState = new v3.lightStates.LightState().bri_inc(
+            Math.max(-254, Math.min(254, Math.round((deltaPct * 254) / 100))),
+        );
+        await this.api.lights.setLightState(lightId, lightState);
+        Logger.info(
+            `Light ${lightId} brightness ${
+                deltaPct > 0 ? '+' : ''
+            }${deltaPct}%`,
+        );
     }
 
     public async setLightColor(
