@@ -188,6 +188,51 @@ export class HttpSource implements InputSource {
             res.download(apkPath, 'yui.apk');
         });
 
+        // ── Dossier de téléchargements partagé ────────────────────────────────
+        // Tout fichier déposé dans YUI_DOWNLOAD_DIR (défaut /share/yui_download)
+        // devient téléchargeable — APK fraîchement buildé, exports, etc. Les
+        // symlinks sont suivis (le dossier peut lui-même en être un). Public
+        // comme /download/apk : pratique de sideload depuis n'importe quel
+        // appareil du LAN.
+        const downloadDir =
+            process.env.YUI_DOWNLOAD_DIR ?? '/share/yui_download';
+        app.get('/downloads', (_req: any, res: any) => {
+            try {
+                const entries = fs
+                    .readdirSync(downloadDir)
+                    .map((name) => {
+                        try {
+                            // statSync suit les symlinks : un lien vers un
+                            // fichier est listé comme le fichier lui-même.
+                            const st = fs.statSync(
+                                path.join(downloadDir, name),
+                            );
+                            if (!st.isFile()) return null;
+                            return { name, size: st.size, mtime: st.mtimeMs };
+                        } catch {
+                            return null; // lien cassé → ignoré
+                        }
+                    })
+                    .filter(Boolean)
+                    .sort((a: any, b: any) => b.mtime - a.mtime);
+                res.json(entries);
+            } catch {
+                // Dossier absent (non créé sur cette machine) → liste vide.
+                res.json([]);
+            }
+        });
+        app.get('/downloads/:file', (req: any, res: any) => {
+            // basename : impossible de sortir du dossier par ../.
+            const name = path.basename(String(req.params.file));
+            const full = path.join(downloadDir, name);
+            try {
+                if (!fs.statSync(full).isFile()) throw new Error('not a file');
+            } catch {
+                return res.status(404).json({ error: `"${name}" introuvable` });
+            }
+            res.download(full, name);
+        });
+
         // ── Static voice-debug wakes ───────────────────────────────────────────
         // Served at /voice-debug/wakes/<file>.wav — recorded wake-word WAVs for
         // replay in the voice debug panel (written by the voice server).
