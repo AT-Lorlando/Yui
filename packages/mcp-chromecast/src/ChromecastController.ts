@@ -12,6 +12,8 @@ const PORT = String(process.env.CHROMECAST_PORT ?? '8009');
 // via le protocole Android TV Remote (cert/clé appairés une fois), pas via ADB
 // ni le Remote Admin PLUS payant de Fully.
 const FULLY_PACKAGE = process.env.FULLY_PACKAGE ?? 'de.ozerov.fully';
+const PRIME_PACKAGE =
+    process.env.PRIME_PACKAGE ?? 'com.amazon.amazonvideo.livingroom';
 
 function run(args: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -32,14 +34,23 @@ function run(args: string[]): Promise<string> {
     });
 }
 
-// Lance atv_launch.py <host> <cert> <key> <package> (Android TV Remote v2).
-function runAtv(pkg: string): Promise<string> {
+// Lance atv_launch.py <host> <cert> <key> <package|url> [pkg attendu]
+// (Android TV Remote v2). La cible peut être un app link https:// — Android
+// résout l'intent (deep-link Prime, etc.).
+function runAtv(target: string, expectedPkg?: string): Promise<string> {
     const cert = dataPath('atv-cert.pem');
     const key = dataPath('atv-key.pem');
     return new Promise((resolve, reject) => {
         execFile(
             'python3',
-            [ATV_SCRIPT, HOST, cert, key, pkg],
+            [
+                ATV_SCRIPT,
+                HOST,
+                cert,
+                key,
+                target,
+                ...(expectedPkg ? [expectedPkg] : []),
+            ],
             { timeout: 30_000 },
             (error, stdout, stderr) => {
                 if (error) {
@@ -104,6 +115,14 @@ function resolveMediaFile(
     return `${MEDIA_BASE_URL}/${subdir}/${encodeURIComponent(chosen)}`;
 }
 
+/** Bare file names on disk — used to build the tool schema enums. */
+export function mediaFileNames(): { wallpapers: string[]; videos: string[] } {
+    return {
+        wallpapers: listMediaDir('wallpapers', IMAGE_EXT),
+        videos: listMediaDir('videos', VIDEO_EXT),
+    };
+}
+
 export function listMediaFiles(
     type: 'wallpaper' | 'video' | 'all' = 'all',
 ): object {
@@ -149,9 +168,24 @@ export class ChromecastController {
         return title ? run(['disney', title]) : run(['disney']);
     }
 
-    castPrime(title?: string): Promise<string> {
-        Logger.info(`Chromecast: prime${title ? ` "${title}"` : ''}`);
-        return title ? run(['prime', title]) : run(['prime']);
+    async castPrime(title?: string): Promise<string> {
+        // La Google TV n'expose pas Prime en DIAL (404) et son app_id Cast SDK
+        // est mort — le chemin qui marche est Android TV Remote, le même que
+        // Fully. Avec titre : deep-link app.primevideo.com résolu via
+        // JustWatch, qu'Android ouvre directement sur la fiche.
+        Logger.info(`Chromecast: prime${title ? ` "${title}"` : ''} (ATV)`);
+        let link = '';
+        if (title) {
+            const out = await run(['link', 'prime', title]).catch(() => '');
+            const last =
+                out
+                    .split('\n')
+                    .map((l) => l.trim())
+                    .filter((l) => l.startsWith('LINK:'))
+                    .pop() ?? 'LINK:';
+            link = last.slice(5);
+        }
+        return runAtv(link || PRIME_PACKAGE, PRIME_PACKAGE);
     }
 
     async findShow(title: string): Promise<{

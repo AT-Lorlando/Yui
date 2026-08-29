@@ -13,6 +13,7 @@ export const CAST_APP_TOOL = {
     description: 'Lance une app de streaming sur la TV (avec titre optionnel).',
     inputSchema: {
         type: 'object' as const,
+        'x-audience': ['app'],
         properties: {
             app: {
                 type: 'string',

@@ -10,9 +10,13 @@ import {
     ErrorCode,
     McpError,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ChromecastController, listMediaFiles } from './ChromecastController';
+import {
+    ChromecastController,
+    listMediaFiles,
+    mediaFileNames,
+} from './ChromecastController';
 import { LocalTizenBackend, loadTvConfig } from '@yui/shared';
-import { CHROMECAST_TOOLS } from './tools';
+import { buildChromecastTools } from './tools';
 import { handleCastApp } from './castAppHandler';
 import { FullyClient } from './FullyClient';
 import Logger from './logger';
@@ -28,7 +32,7 @@ const server = new Server(
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: CHROMECAST_TOOLS };
+    return { tools: buildChromecastTools(mediaFileNames()) };
 });
 
 async function withTvOn<T>(cast: Promise<T>): Promise<T> {

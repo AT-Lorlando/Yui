@@ -176,6 +176,7 @@ export const CHROMECAST_TOOLS = [
             'Lister les médias locaux disponibles (wallpapers, vidéos).',
         inputSchema: {
             type: 'object' as const,
+            'x-audience': ['system'],
             properties: {
                 type: { type: 'string', enum: ['wallpaper', 'video', 'all'] },
             },
@@ -188,9 +189,11 @@ export const CHROMECAST_TOOLS = [
             "Caster un fond d'écran local sur le Chromecast. Sans argument = aléatoire.",
         inputSchema: {
             type: 'object' as const,
+            'x-audience': ['app'],
             properties: {
                 file: {
                     type: 'string',
+                    title: 'Fichier',
                     description: 'Nom du fichier (ex: "photo.jpg"). Optionnel.',
                 },
             },
@@ -203,9 +206,11 @@ export const CHROMECAST_TOOLS = [
             'Caster une vidéo locale sur le Chromecast. Sans argument = aléatoire.',
         inputSchema: {
             type: 'object' as const,
+            'x-audience': ['app'],
             properties: {
                 file: {
                     type: 'string',
+                    title: 'Fichier',
                     description: 'Nom du fichier (ex: "film.mp4"). Optionnel.',
                 },
             },
@@ -213,3 +218,33 @@ export const CHROMECAST_TOOLS = [
         },
     },
 ];
+
+/**
+ * Same tools, with the media `file` fields turned into enums of what is
+ * actually on disk. Built per tools/list call (a readdir is cheap) so dropping
+ * a new wallpaper in assets/media shows up without restarting the server.
+ */
+export function buildChromecastTools(media: {
+    wallpapers: string[];
+    videos: string[];
+}) {
+    const files: Record<string, string[]> = {
+        cast_wallpaper: media.wallpapers,
+        cast_video: media.videos,
+    };
+    return CHROMECAST_TOOLS.map((tool) => {
+        const values = files[tool.name];
+        if (!values?.length) return tool;
+        const props = tool.inputSchema.properties as Record<string, unknown>;
+        return {
+            ...tool,
+            inputSchema: {
+                ...tool.inputSchema,
+                properties: {
+                    ...props,
+                    file: { ...(props.file as object), enum: values },
+                },
+            },
+        };
+    });
+}

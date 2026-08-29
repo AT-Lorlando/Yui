@@ -15,24 +15,46 @@ import requests
 
 _API = 'https://apis.justwatch.com/graphql'
 
-# service → shortName JustWatch
-_PROVIDER = {
-    'netflix':     'nfx',
-    'crunchyroll': 'cru',
-    'disney':      'dnp',
-    'prime':       'amp',
+# service → technicalName(s) JustWatch (les variantes "withads" comptent aussi).
+_PROVIDER_TECH = {
+    'netflix':     {'netflix', 'netflixbasicwithads'},
+    'crunchyroll': {'crunchyroll'},
+    'disney':      {'disneyplus'},
+    'prime':       {'amazonprimevideo', 'amazonprimevideowithads'},
 }
-_SERVICE_BY_SHORT = {v: k for k, v in _PROVIDER.items()}
-
-SUPPORTED_SERVICES = list(_PROVIDER.keys())
-
-# Extraction du content ID depuis l'URL de chaque provider.
-_ID_PATTERN = {
-    'nfx': re.compile(r'netflix\.com/(?:title|watch)/(\d+)'),
-    'cru': re.compile(r'crunchyroll\.com/(?:series|watch)/([A-Z0-9]+)', re.I),
-    'dnp': re.compile(r'disneyplus\.com/(?:[^/?#]+/){1,3}([^/?&#]+)'),
-    'amp': re.compile(r'(?:primevideo|amazon)\.com/(?:dp|detail)/([A-Z0-9]+)', re.I),
+_SERVICE_BY_TECH = {
+    tech: svc for svc, techs in _PROVIDER_TECH.items() for tech in techs
 }
+
+SUPPORTED_SERVICES = list(_PROVIDER_TECH.keys())
+
+# Extraction du content ID depuis standardWebURL.
+_NETFLIX_ID = re.compile(r'netflix\.com/(?:title|watch)/(\d+)')
+_CRUNCHY_ID = re.compile(r'crunchyroll\.com/(?:series|watch)/([A-Z0-9]+)', re.I)
+_DISNEY_ID = re.compile(r'disneyplus\.com/(?:[^/?#]+/){1,3}([^/?&#]+)')
+
+
+def _extract_id(service: str, url: str) -> str | None:
+    """Content id utilisable par le lanceur du service.
+
+    Netflix/Crunchyroll/Disney : id court (deep-link DIAL `v=<id>`).
+    Prime : l'URL complète — la Google TV n'expose pas Prime en DIAL, on lance
+    le deep-link tel quel via Android TV Remote (app link).
+    """
+    if not url:
+        return None
+    if service == 'netflix':
+        m = _NETFLIX_ID.search(url)
+        return m.group(1) if m else None
+    if service == 'crunchyroll':
+        m = _CRUNCHY_ID.search(url)
+        return m.group(1) if m else None
+    if service == 'disney':
+        m = _DISNEY_ID.search(url)
+        return m.group(1) if m else None
+    if service == 'prime':
+        return url
+    return None
 
 # JustWatch refuse les requêtes sans User-Agent (403) ; schéma popularTitles + filter.
 _HEADERS = {
@@ -43,6 +65,8 @@ _HEADERS = {
     ),
 }
 
+# Sans le filtre monetizationTypes, JustWatch renvoie désormais offers: [] —
+# c'est ce qui avait cassé tous les deep-links (schéma changé ~août 2026).
 _QUERY = '''
 query GetSearchTitles($searchTitlesFilter: TitleFilter!, $country: Country!, $language: Language!, $first: Int!) {
   popularTitles(country: $country, filter: $searchTitlesFilter, first: $first) {
@@ -53,9 +77,9 @@ query GetSearchTitles($searchTitlesFilter: TitleFilter!, $country: Country!, $la
           content(country: $country, language: $language) {
             title
           }
-          offers(country: $country, platform: WEB) {
+          offers(country: $country, platform: WEB, filter: { monetizationTypes: [FLATRATE] }) {
             standardWebURL
-            package { shortName }
+            package { technicalName }
           }
         }
       }
@@ -94,23 +118,22 @@ def _search(title: str) -> list:
 
 def parse_for_service(edges: list, service: str, title: str) -> tuple[str | None, str | None]:
     """(content_id, full_title) pour *service*, ou (None, None). Pur."""
-    provider = _PROVIDER.get(service)
-    if not provider or not edges:
+    techs = _PROVIDER_TECH.get(service)
+    if not techs or not edges:
         return None, None
 
     target = (edges[0].get('node', {}).get('content', {}).get('title') or title).strip().lower()
-    pattern = _ID_PATTERN.get(provider)
     for edge in edges:
         node = edge.get('node', {})
         node_title = node.get('content', {}).get('title', title)
         if node_title.strip().lower() != target:
             continue
-        for offer in node.get('offers', []):
-            if offer.get('package', {}).get('shortName') != provider:
+        for offer in node.get('offers', []) or []:
+            if offer.get('package', {}).get('technicalName') not in techs:
                 continue
-            m = pattern.search(offer.get('standardWebURL', '')) if pattern else None
-            if m:
-                return m.group(1), node_title
+            cid = _extract_id(service, offer.get('standardWebURL', ''))
+            if cid:
+                return cid, node_title
     return None, None
 
 
@@ -126,15 +149,14 @@ def parse_any(edges: list, preference: list, title: str) -> tuple[str | None, st
         node_title = node.get('content', {}).get('title', title)
         if node_title.strip().lower() != target:
             continue
-        for offer in node.get('offers', []):
-            short = offer.get('package', {}).get('shortName')
-            service = _SERVICE_BY_SHORT.get(short)
+        for offer in node.get('offers', []) or []:
+            tech = offer.get('package', {}).get('technicalName')
+            service = _SERVICE_BY_TECH.get(tech)
             if not service or service in found:
                 continue
-            pattern = _ID_PATTERN.get(short)
-            m = pattern.search(offer.get('standardWebURL', '')) if pattern else None
-            if m:
-                found[service] = (m.group(1), node_title)
+            cid = _extract_id(service, offer.get('standardWebURL', ''))
+            if cid:
+                found[service] = (cid, node_title)
 
     for service in preference:
         if service in found:

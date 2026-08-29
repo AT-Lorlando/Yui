@@ -179,6 +179,16 @@ def main() -> None:
         print(_json.dumps({'platform': service, 'id': cid, 'title': full_title}))
         return
 
+    if CMD == 'link':
+        # Résolution seule (cache + JustWatch), sans rien lancer. Utilisé par
+        # le lanceur ATV côté node (Prime n'existe pas en DIAL sur Google TV).
+        if len(sys.argv) < 6:
+            print('ERROR: link requires <service> <title>', file=sys.stderr)
+            sys.exit(1)
+        cid, _ft = content_cache.resolve(sys.argv[4], sys.argv[5])
+        print(f'LINK:{cid or ""}')
+        return
+
     if CMD == 'remember':
         import json as _json
         if len(sys.argv) < 6:
