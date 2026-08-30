@@ -26,6 +26,7 @@ import {
     goveeTargetsForRoom,
     goveeTargetsForAll,
 } from './goveeRouting';
+import { coveredIds, othersToTurnOff, type BulkEntry } from './bulkStates';
 import { discoverLights } from './discovery';
 import { HueEventStream } from './HueEventStream';
 import type { LightStatePatch } from './stateEvents';
@@ -492,6 +493,67 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             text: `Light ${id} color set to ${color}.`,
                         },
                     ],
+                };
+            }
+
+            case 'set_lights_bulk': {
+                const entries = ((args as any).states ?? []) as BulkEntry[];
+                if (!entries.length) {
+                    throw new Error('states: au moins une entrée requise.');
+                }
+                const othersOff = (args as any).othersOff === true;
+
+                // 1. L'extinction du reste d'abord : la scène « apparaît »
+                //    plutôt que de s'éteindre autour de ce qui vient de
+                //    s'allumer.
+                if (othersOff) {
+                    const all = store.getAll();
+                    const covered = coveredIds(all, entries);
+                    const goveeIps = new Map(
+                        [...goveeById].map(([id, g]) => [id, g.ip]),
+                    );
+                    const { hueIds, goveeIds } = othersToTurnOff(
+                        all,
+                        covered,
+                        goveeIps,
+                    );
+                    await Promise.all([
+                        hueIds.length
+                            ? hue.setAllLightsState(hueIds, false)
+                            : Promise.resolve(),
+                        ...goveeIds.map((id) =>
+                            applyGoveeById(id, { on: false }).catch(() => {}),
+                        ),
+                    ]);
+                    hueIds.forEach((id) =>
+                        store.updateState(id, { on: false }),
+                    );
+                }
+
+                // 2. Puis chaque cible, dans l'ordre donné.
+                const results: string[] = [];
+                for (const e of entries) {
+                    results.push(
+                        await applyLightTarget(String(e.target), {
+                            on: e.on,
+                            brightness:
+                                e.brightness !== undefined
+                                    ? Number(e.brightness)
+                                    : undefined,
+                            color:
+                                e.color !== undefined
+                                    ? String(e.color)
+                                    : undefined,
+                            colorTempK:
+                                e.colorTemp !== undefined
+                                    ? Number(e.colorTemp)
+                                    : undefined,
+                        }),
+                    );
+                }
+                if (othersOff) results.push('reste éteint');
+                return {
+                    content: [{ type: 'text', text: results.join(' · ') }],
                 };
             }
 

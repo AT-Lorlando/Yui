@@ -130,6 +130,67 @@ export function buildHueTools(
             },
         },
 
+        // ── Bulk — l'état cible d'une scène en une action ─────────────────────
+        {
+            name: 'set_lights_bulk',
+            description:
+                `Règle PLUSIEURS lampes/pièces en une seule action — l'état lumineux ` +
+                `complet d'une scène. Chaque entrée de states = une cible avec son état ` +
+                `(on/off, luminosité, couleur ou blanc). othersOff=true éteint toutes les ` +
+                `lampes non listées. Exemple « lampes TV en rouge/bleu, le reste éteint » : ` +
+                `states=[{target:"TV Droite",color:"#ff0000"},{target:"TV Gauche",color:"#0000ff"}], othersOff=true. ` +
+                `Pièces : ${roomList}. Lampes : ${lightList}.`,
+            inputSchema: {
+                type: 'object' as const,
+                properties: {
+                    states: {
+                        type: 'array',
+                        title: 'Lampes',
+                        'x-widget': 'light-states',
+                        minItems: 1,
+                        items: {
+                            type: 'object',
+                            properties: {
+                                target: {
+                                    type: 'string',
+                                    title: 'Cible',
+                                    ...enumOf(targets),
+                                },
+                                on: { type: 'boolean', title: 'Allumée' },
+                                brightness: {
+                                    type: 'number',
+                                    title: 'Luminosité',
+                                    minimum: 0,
+                                    maximum: 100,
+                                    'x-unit': '%',
+                                },
+                                color: {
+                                    type: 'string',
+                                    title: 'Couleur',
+                                    'x-widget': 'color',
+                                },
+                                colorTemp: {
+                                    type: 'number',
+                                    title: 'Blanc (K)',
+                                    minimum: 2000,
+                                    maximum: 6500,
+                                    'x-unit': 'K',
+                                },
+                            },
+                            required: ['target'],
+                        },
+                    },
+                    othersOff: {
+                        type: 'boolean',
+                        title: 'Éteindre le reste',
+                        description:
+                            'Éteint toutes les lampes qui ne sont pas listées dans states.',
+                    },
+                },
+                required: ['states'],
+            },
+        },
+
         // ── Room palette — color atmosphere ───────────────────────────────────
         {
             name: 'set_room_palette',

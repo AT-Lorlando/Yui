@@ -19,6 +19,7 @@ const DRAIN_TIMEOUT_MS = 1500;
 /** Light-affecting tools whose invocation must cancel an active animation. */
 const LIGHT_TOOLS = new Set([
     'set_lights',
+    'set_lights_bulk',
     'set_room_palette',
     'set_color',
     'set_brightness',
