@@ -11,6 +11,7 @@
 import Logger from '../logger';
 import { createMacBurst, type MacBurst } from './macBurst';
 import { loadPresenceConfig } from './presenceConfig';
+import { confirmDeparture } from './departureGuard';
 
 // ── Env ───────────────────────────────────────────────────────────────────────
 
@@ -246,16 +247,40 @@ export class PresenceManager {
         }
     }
 
+    /**
+     * Jeton de la confirmation de départ en cours. Incrémenté pour annuler :
+     * un ENTER (ou un nouveau EXIT) invalide la fenêtre précédente.
+     */
+    private departureToken = 0;
+    private departurePending = false;
+
     /** POST /presence/geofence : enter|exit pilotent l'état + events. */
     handleGeofence(transition: string): PresenceState {
+        // Tout ENTER annule une confirmation de départ en cours : le geofence
+        // s'est ravisé, on n'a jamais quitté la maison.
+        if (transition === 'enter' && this.departurePending) {
+            this.departureToken++;
+            this.departurePending = false;
+            Logger.info(
+                '[presence] pending departure cancelled by geofence enter',
+            );
+        }
+
         const { next, event } = geofenceTransition(this.state, transition);
+        if (event === 'departure') {
+            // Un EXIT ne vaut plus départ : le geofence Android émet des EXIT
+            // fantômes en sommeil profond (faux départ nocturne du 17/08,
+            // scène Good bye à 01h18, puis état bloqué away 2 jours). On
+            // vérifie d'abord que le téléphone a vraiment quitté le réseau.
+            this.startDepartureConfirmation();
+            return this.state;
+        }
         if (event) {
             Logger.info(
                 `[presence] geofence ${transition} → ${next} (event=${event})`,
             );
             this.setState(next);
             if (event === 'arrival') this.armBurst();
-            if (event === 'departure') this.burst?.cancel();
             this.emit(event);
         } else {
             Logger.debug(
@@ -263,6 +288,50 @@ export class PresenceManager {
             );
         }
         return this.state;
+    }
+
+    private startDepartureConfirmation(): void {
+        if (this.departurePending) {
+            Logger.debug('[presence] departure already pending — exit ignored');
+            return;
+        }
+        const cfg = loadPresenceConfig().departureConfirm;
+        const token = ++this.departureToken;
+        this.departurePending = true;
+        Logger.info(
+            `[presence] geofence exit → confirmation réseau (${
+                cfg.checks
+            } vérif(s), fenêtre ~${Math.round(
+                (cfg.delayMs + cfg.checks * cfg.intervalMs) / 1000,
+            )}s)`,
+        );
+        void confirmDeparture({
+            delayMs: cfg.delayMs,
+            checks: cfg.checks,
+            intervalMs: cfg.intervalMs,
+            isPhoneHome: async () => (await this.checkNetwork()).present,
+            isCancelled: () => token !== this.departureToken,
+        }).then((verdict) => {
+            if (token !== this.departureToken) return;
+            this.departurePending = false;
+            if (verdict === 'vetoed') {
+                Logger.info(
+                    '[presence] departure VETOED — phone still on the network (phantom geofence exit)',
+                );
+                return;
+            }
+            if (verdict === 'confirmed') {
+                Logger.info('[presence] departure confirmed by network check');
+                this.setState('away');
+                this.burst?.cancel();
+                this.emit('departure');
+            }
+        });
+    }
+
+    /** Injectable pour les tests. */
+    protected checkNetwork(): Promise<{ present: boolean | null }> {
+        return checkPhoneOnNetwork();
     }
 
     private armBurst(): void {

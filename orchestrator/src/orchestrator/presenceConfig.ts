@@ -12,14 +12,27 @@ export interface MacBurstConfig {
     burstIntervalMs: number;
     burstWindowMs: number;
 }
+export interface DepartureConfirmConfig {
+    /** Attente avant la 1re vérification réseau après un EXIT geofence. */
+    delayMs: number;
+    /** Nombre de vérifications. */
+    checks: number;
+    /** Intervalle entre vérifications. */
+    intervalMs: number;
+}
+
 export interface PresenceConfig {
     geofence: GeofenceConfig;
     mac: MacBurstConfig;
+    /** Garde anti-faux-départ : un EXIT n'est confirmé que si le téléphone
+     *  reste invisible du réseau pendant toute la fenêtre. */
+    departureConfirm: DepartureConfirmConfig;
 }
 
 const DEFAULTS: PresenceConfig = {
     geofence: { enabled: true, radiusM: 150 },
     mac: { burstIntervalMs: 15000, burstWindowMs: 300000 },
+    departureConfirm: { delayMs: 60000, checks: 3, intervalMs: 20000 },
 };
 
 function clampNum(
@@ -39,6 +52,7 @@ export function mergePresenceConfig(raw: unknown): PresenceConfig {
     const r = (raw ?? {}) as Record<string, any>;
     const g = (r.geofence ?? {}) as Record<string, unknown>;
     const m = (r.mac ?? {}) as Record<string, unknown>;
+    const d = (r.departureConfirm ?? {}) as Record<string, unknown>;
     return {
         geofence: {
             enabled:
@@ -61,6 +75,21 @@ export function mergePresenceConfig(raw: unknown): PresenceConfig {
                 DEFAULTS.mac.burstWindowMs,
             ),
         },
+        departureConfirm: {
+            delayMs: clampNum(
+                d.delayMs,
+                0,
+                300000,
+                DEFAULTS.departureConfirm.delayMs,
+            ),
+            checks: clampNum(d.checks, 1, 10, DEFAULTS.departureConfirm.checks),
+            intervalMs: clampNum(
+                d.intervalMs,
+                5000,
+                60000,
+                DEFAULTS.departureConfirm.intervalMs,
+            ),
+        },
     };
 }
 
@@ -76,6 +105,7 @@ export function savePresenceConfig(
     patch: {
         geofence?: Partial<GeofenceConfig>;
         mac?: Partial<MacBurstConfig>;
+        departureConfirm?: Partial<DepartureConfirmConfig>;
     },
     file = CONFIG_FILE,
 ): PresenceConfig {
@@ -83,6 +113,10 @@ export function savePresenceConfig(
     const next = mergePresenceConfig({
         geofence: { ...cur.geofence, ...patch.geofence },
         mac: { ...cur.mac, ...patch.mac },
+        departureConfirm: {
+            ...cur.departureConfirm,
+            ...patch.departureConfirm,
+        },
     });
     fs.writeFileSync(file, JSON.stringify(next, null, 2));
     return next;
