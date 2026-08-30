@@ -179,6 +179,12 @@ def main() -> None:
         print(_json.dumps({'platform': service, 'id': cid, 'title': full_title}))
         return
 
+    if CMD == 'prep':
+        # TV on + bonne entrée HDMI, sans rien caster — utilisé par le chemin
+        # ADB (Prime/Fully) qui ne passe plus par les commandes de cast.
+        print(tv_prep.prepare())
+        return
+
     if CMD == 'link':
         # Résolution seule (cache + JustWatch), sans rien lancer. Utilisé par
         # le lanceur ATV côté node (Prime n'existe pas en DIAL sur Google TV).

@@ -20,6 +20,8 @@ import websocket  # websocket-client
 
 _MAC   = os.environ.get('SMARTTHINGS_TV_MAC', '')
 _TV_IP = os.environ.get('SMARTTHINGS_TV_IP', '')
+# Entrée HDMI du device de cast (HDMI3 = dongle historique, HDMI4 = Shield).
+_INPUT = os.environ.get('TV_CAST_INPUT', 'HDMI3')
 
 _APP_NAME = base64.b64encode(b'Yui').decode()
 _WS_URL   = f'ws://{_TV_IP}:8001/api/v2/channels/samsung.remote.control?name={_APP_NAME}'
@@ -94,9 +96,9 @@ def prepare() -> str:
     # If WebSocket is already up, TV was awake → just switch input
     if _ws_alive():
         try:
-            _send_key('KEY_HDMI3')
-            print('[tv_prep] TV awake — switched to HDMI3')
-            return 'TV awake — HDMI3'
+            _send_key('KEY_' + _INPUT)
+            print('[tv_prep] TV awake — switched to ' + _INPUT)
+            return 'TV awake — ' + _INPUT
         except Exception as exc:
             print(f'[tv_prep] HDMI3 key failed: {exc}', file=sys.stderr)
             return 'TV awake — could not switch input'
@@ -112,11 +114,11 @@ def prepare() -> str:
         if _ws_alive():
             time.sleep(1.5)  # let WS server stabilise
             try:
-                _send_key('KEY_HDMI3')
+                _send_key('KEY_' + _INPUT)
             except Exception as exc:
                 print(f'[tv_prep] HDMI3 key after boot failed: {exc}', file=sys.stderr)
-            print('[tv_prep] TV powered on — HDMI3')
-            return 'TV powered on — HDMI3'
+            print('[tv_prep] TV powered on — ' + _INPUT)
+            return 'TV powered on — ' + _INPUT
 
     msg = 'TV WoL sent but did not respond in time — HDMI3 may need manual switch'
     print(f'[tv_prep] {msg}', file=sys.stderr)

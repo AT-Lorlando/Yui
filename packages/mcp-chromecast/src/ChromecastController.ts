@@ -15,6 +15,86 @@ const FULLY_PACKAGE = process.env.FULLY_PACKAGE ?? 'de.ozerov.fully';
 const PRIME_PACKAGE =
     process.env.PRIME_PACKAGE ?? 'com.amazon.amazonvideo.livingroom';
 
+// ── Lancement d'apps sur l'Android TV ────────────────────────────────────────
+// Deux transports, du plus fiable au moins fiable :
+//   1. ADB réseau (ATV_ADB_HOST, ex "10.0.0.190:5555" — Shield) : déterministe,
+//      vrai code retour, deep-link n'importe quelle app.
+//   2. Android TV Remote v2 (runAtv) : repli — le protocole marche partout mais
+//      le dongle Google TV s'est mis à ignorer silencieusement les lancements.
+const ADB_BIN = process.env.ADB_BIN ?? 'adb';
+const ATV_ADB_HOST = process.env.ATV_ADB_HOST ?? '';
+
+function execAdb(args: string[], timeout = 15_000): Promise<string> {
+    return new Promise((resolve, reject) => {
+        execFile(ADB_BIN, args, { timeout }, (error, stdout, stderr) => {
+            if (error) {
+                reject(new Error(stderr?.trim() || error.message));
+            } else {
+                resolve(stdout.trim());
+            }
+        });
+    });
+}
+
+/** Connexion idempotente — adb garde le device ensuite. */
+async function adbConnect(): Promise<void> {
+    const out = await execAdb(['connect', ATV_ADB_HOST], 8_000);
+    if (/failed|refused|unable/i.test(out)) {
+        throw new Error(`adb connect: ${out}`);
+    }
+}
+
+async function adbLaunch(target: string): Promise<string> {
+    await adbConnect();
+    const args = target.startsWith('http')
+        ? [
+              '-s',
+              ATV_ADB_HOST,
+              'shell',
+              'am',
+              'start',
+              '-a',
+              'android.intent.action.VIEW',
+              '-d',
+              target,
+          ]
+        : [
+              '-s',
+              ATV_ADB_HOST,
+              'shell',
+              'monkey',
+              '-p',
+              target,
+              '-c',
+              'android.intent.category.LAUNCHER',
+              '1',
+          ];
+    const out = await execAdb(args);
+    // `am start` sort en 0 même sur échec — l'erreur est dans la sortie.
+    if (/^Error|Exception|No activities found/im.test(out)) {
+        throw new Error(`adb launch: ${out.slice(0, 200)}`);
+    }
+    Logger.debug(`adb launch OK: ${target}`);
+    return `Lancé via ADB : ${target}`;
+}
+
+/** ADB si configuré, sinon (ou en cas d'échec ADB) Android TV Remote. */
+async function launchOnTv(
+    target: string,
+    expectedPkg: string,
+): Promise<string> {
+    if (ATV_ADB_HOST) {
+        try {
+            return await adbLaunch(target);
+        } catch (e) {
+            Logger.warn(
+                `ADB launch failed (${e}) — fallback Android TV Remote`,
+            );
+        }
+    }
+    return runAtv(target, expectedPkg);
+}
+
 function run(args: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
         execFile(
@@ -174,6 +254,8 @@ export class ChromecastController {
         // Fully. Avec titre : deep-link app.primevideo.com résolu via
         // JustWatch, qu'Android ouvre directement sur la fiche.
         Logger.info(`Chromecast: prime${title ? ` "${title}"` : ''} (ATV)`);
+        // TV on + entrée HDMI en parallèle de la résolution du lien.
+        const prep = run(['prep']).catch(() => {});
         let link = '';
         if (title) {
             const out = await run(['link', 'prime', title]).catch(() => '');
@@ -185,7 +267,11 @@ export class ChromecastController {
                     .pop() ?? 'LINK:';
             link = last.slice(5);
         }
-        return runAtv(link || PRIME_PACKAGE, PRIME_PACKAGE);
+        const [, result] = await Promise.all([
+            prep,
+            launchOnTv(link || PRIME_PACKAGE, PRIME_PACKAGE),
+        ]);
+        return result;
     }
 
     async findShow(title: string): Promise<{
@@ -230,9 +316,13 @@ export class ChromecastController {
     }
 
     // Lance l'app Fully Kiosk sur la Google TV (affiche le dashboard).
-    launchFully(): Promise<string> {
+    async launchFully(): Promise<string> {
         Logger.info(`Chromecast: launch Fully (${FULLY_PACKAGE})`);
-        return runAtv(FULLY_PACKAGE);
+        const [, result] = await Promise.all([
+            run(['prep']).catch(() => {}),
+            launchOnTv(FULLY_PACKAGE, FULLY_PACKAGE),
+        ]);
+        return result;
     }
 
     // ── Media library ──────────────────────────────────────────────────────────
