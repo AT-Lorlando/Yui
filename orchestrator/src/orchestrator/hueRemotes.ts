@@ -97,7 +97,14 @@ export interface ButtonConfig {
 
 export interface DeviceConfig {
     buttons?: Record<string, ButtonConfig>;
-    dial?: { room: string; stepFactor?: number };
+    dial?: {
+        room: string;
+        stepFactor?: number;
+        /** Si la musique joue, la molette règle le volume Spotify au lieu des lumières. */
+        musicVolume?: boolean;
+        /** % de volume par cran (steps × facteur). Défaut 0.12. */
+        volumeStepFactor?: number;
+    };
 }
 
 export type RemotesConfig = Record<string, DeviceConfig>;
@@ -418,13 +425,85 @@ function dispatchHoldEvent(
     void runActions(seq, deps);
 }
 
+/** Delta de volume signé pour un cran de molette. Pur (testé). */
+export function dialVolumeDelta(
+    direction: string,
+    steps: number,
+    factor = 0.12,
+): number {
+    const magnitude = Math.max(1, Math.round(steps * factor));
+    return direction === 'clock_wise' ? magnitude : -magnitude;
+}
+
+// La molette émet un flot d'événements pendant la rotation : l'état "musique
+// en cours" est mis en cache quelques secondes (une lecture par rotation, pas
+// par cran), et les crans de volume sont accumulés puis appliqués en un seul
+// set_volume — l'API Spotify n'aimerait pas un appel par cran.
+const MUSIC_CACHE_MS = 2_500;
+const VOLUME_FLUSH_MS = 250;
+let musicCache: { ts: number; playing: boolean } = { ts: 0, playing: false };
+let volumePending = 0;
+let volumeTimer: NodeJS.Timeout | null = null;
+
+async function isMusicPlaying(deps: HueRemotesDeps): Promise<boolean> {
+    if (Date.now() - musicCache.ts < MUSIC_CACHE_MS) return musicCache.playing;
+    try {
+        const st = (await deps.callTool('get_playback_state', {})) as {
+            playing?: boolean;
+        };
+        musicCache = { ts: Date.now(), playing: st?.playing === true };
+    } catch {
+        musicCache = { ts: Date.now(), playing: false };
+    }
+    return musicCache.playing;
+}
+
+function queueVolumeDelta(delta: number, deps: HueRemotesDeps): void {
+    volumePending += delta;
+    if (volumeTimer) clearTimeout(volumeTimer);
+    volumeTimer = setTimeout(() => {
+        volumeTimer = null;
+        const pending = volumePending;
+        volumePending = 0;
+        void (async () => {
+            try {
+                const st = (await deps.callTool('get_playback_state', {})) as {
+                    device?: { volume?: number };
+                };
+                const current = Number(st?.device?.volume ?? 50);
+                const target = Math.max(
+                    0,
+                    Math.min(100, Math.round(current + pending)),
+                );
+                await deps.callTool('set_volume', { percent: target });
+                Logger.info(
+                    `[hue-remotes] dial volume ${current}% → ${target}%`,
+                );
+            } catch (e) {
+                Logger.warn(`[hue-remotes] dial volume failed: ${e}`);
+            }
+        })();
+    }, VOLUME_FLUSH_MS);
+}
+
 async function dispatchDial(
     deviceName: string,
     direction: string,
     steps: number,
+    deps: HueRemotesDeps,
 ): Promise<void> {
     const dial = config[deviceName]?.dial;
     if (!dial) return;
+
+    // Contextuel : musique en lecture → la molette devient le volume.
+    if (dial.musicVolume && (await isMusicPlaying(deps))) {
+        queueVolumeDelta(
+            dialVolumeDelta(direction, steps, dial.volumeStepFactor),
+            deps,
+        );
+        return;
+    }
+
     const factor = dial.stepFactor ?? 0.3;
     const delta = Math.min(100, Math.max(1, Math.round(steps * factor)));
     const action = direction === 'clock_wise' ? 'up' : 'down';
@@ -483,7 +562,7 @@ function handleSseChunk(buffer: string, deps: HueRemotesDeps): string {
                         const dir = rep?.rotation?.direction;
                         const steps = rep?.rotation?.steps ?? 0;
                         if (!dir || steps <= 0) continue;
-                        void dispatchDial(info.deviceName, dir, steps);
+                        void dispatchDial(info.deviceName, dir, steps, deps);
                     }
                 }
             }
@@ -634,6 +713,13 @@ export function saveRemotesConfig(next: unknown): RemotesConfig {
                     typeof raw.dial.stepFactor === 'number'
                         ? Math.max(0.05, Math.min(2, raw.dial.stepFactor))
                         : 0.3,
+                ...(raw.dial.musicVolume === true && { musicVolume: true }),
+                ...(typeof raw.dial.volumeStepFactor === 'number' && {
+                    volumeStepFactor: Math.max(
+                        0.02,
+                        Math.min(1, raw.dial.volumeStepFactor),
+                    ),
+                }),
             };
         }
         if (dev.buttons || dev.dial) out[deviceName] = dev;

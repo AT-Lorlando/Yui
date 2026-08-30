@@ -207,7 +207,14 @@ export function updateScene(
     const scenes = loadScenes();
     const idx = scenes.findIndex((s) => s.id === id);
     if (idx === -1 || scenes[idx].builtIn) return null;
-    scenes[idx] = { ...scenes[idx], ...input };
+    // Un PATCH partiel envoie undefined pour les champs absents : les fusionner
+    // tels quels les effacerait (le spread écrase, puis JSON.stringify les
+    // supprime du fichier). C'est ce qui cassait le toggle favori de l'app —
+    // et toute mise à jour partielle.
+    const defined = Object.fromEntries(
+        Object.entries(input).filter(([, v]) => v !== undefined),
+    );
+    scenes[idx] = { ...scenes[idx], ...defined };
     saveScenes(scenes);
     Logger.info(`Scene updated: "${scenes[idx].name}" (${id})`);
     return scenes[idx];

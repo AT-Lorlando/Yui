@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { runActions, multiPressWindow } from './hueRemotes';
+import { runActions, multiPressWindow, dialVolumeDelta } from './hueRemotes';
 
 // Un binding de télécommande doit se comporter comme une scène : les
 // conditions par action sont évaluées, et sur l'état lu au DÉBUT de l'appui
@@ -121,6 +121,12 @@ async function run(): Promise<void> {
         400,
         'double-appui configuré → fenêtre de détection nécessaire',
     );
+
+    // Molette → volume : delta signé, plancher à 1, facteur configurable
+    assert.strictEqual(dialVolumeDelta('clock_wise', 30), 4); // 30 × 0.12
+    assert.strictEqual(dialVolumeDelta('counter_clock_wise', 30), -4);
+    assert.strictEqual(dialVolumeDelta('clock_wise', 5), 1, 'plancher 1');
+    assert.strictEqual(dialVolumeDelta('clock_wise', 30, 0.5), 15);
 
     console.log('All hueRemotes condition tests passed');
 }
