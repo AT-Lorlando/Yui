@@ -9,6 +9,7 @@ import type { SceneCondition } from './scenes';
 import { createStateReader } from './deviceConditions';
 import { migrateLegacyActions } from './legacyActions';
 import type { PresenceState } from './presence';
+import { logActivity } from './activityLog';
 
 /**
  * Hue v2 SSE watcher — dispatches remote button/dial events to scenes & tools.
@@ -408,6 +409,11 @@ function fireShortPress(
     Logger.info(
         `[hue-remotes] ${deviceName} btn${controlId} ${count}× → ${seq.length} action(s)`,
     );
+    logActivity(
+        'remote',
+        `Bouton ${controlId} (${count}×)`,
+        `${deviceName} → ${seq.map((a) => a.tool).join(', ')}`,
+    );
     void runActions(seq, deps);
 }
 
@@ -421,6 +427,13 @@ function dispatchHoldEvent(
     if (!seq?.length) return;
     Logger.info(
         `[hue-remotes] ${deviceName} btn${controlId} ${field} → ${seq.length} action(s)`,
+    );
+    logActivity(
+        'remote',
+        `Bouton ${controlId} (${
+            field === 'longPress' ? 'appui long' : 'relâché'
+        })`,
+        `${deviceName} → ${seq.map((a) => a.tool).join(', ')}`,
     );
     void runActions(seq, deps);
 }
@@ -447,6 +460,17 @@ let volumeTimer: NodeJS.Timeout | null = null;
 
 async function isMusicPlaying(deps: HueRemotesDeps): Promise<boolean> {
     if (Date.now() - musicCache.ts < MUSIC_CACHE_MS) return musicCache.playing;
+    // WiiM d'abord : local (~10 ms) et vrai pour TOUTES les sources (Spotify,
+    // Tidal Connect, Bluetooth…). L'API Spotify ne voit que Spotify.
+    try {
+        const st = (await deps.callTool('wiim_status', {})) as {
+            playing?: boolean;
+        };
+        musicCache = { ts: Date.now(), playing: st?.playing === true };
+        return musicCache.playing;
+    } catch {
+        /* mcp-wiim absent/injoignable → repli Spotify */
+    }
     try {
         const st = (await deps.callTool('get_playback_state', {})) as {
             playing?: boolean;

@@ -24,6 +24,7 @@ export function buildServerConfigs(): McpServerConfig[] {
         mcp('mcp-nuki'),
         mcp('mcp-somfy'),
         mcp('mcp-spotify'),
+        mcp('mcp-wiim'),
         mcp('mcp-chromecast'),
         mcp('mcp-smartthings'),
         mcp('mcp-timer'),

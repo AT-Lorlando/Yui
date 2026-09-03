@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AutomationAction } from './automations';
 import Logger from '../logger';
+import { logActivity } from './activityLog';
 import { dataPath } from '@yui/shared';
 
 export interface AutomationHistoryEntry {
@@ -45,6 +46,7 @@ export function appendToHistory(automation: {
             tag: automation.tag,
             firedAt: Date.now(),
         };
+        logActivity('automation', automation.name, `id ${automation.id}`);
         const history = [entry, ...loadHistory()].slice(0, MAX_ENTRIES);
         const dir = path.dirname(HISTORY_FILE);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

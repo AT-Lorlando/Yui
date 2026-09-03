@@ -169,6 +169,35 @@ export const CHROMECAST_TOOLS = [
         },
     },
 
+    {
+        name: 'tv_media',
+        description:
+            'Contrôle la lecture en cours sur la TV (Shield) : pause, lecture, ' +
+            "stop, reculer/avancer — quelle que soit l'app (Prime, Netflix, " +
+            'YouTube…). Pour « mets pause », « reprends la lecture » pendant ' +
+            'un visionnage.',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {
+                action: {
+                    type: 'string',
+                    title: 'Action',
+                    enum: [
+                        'play_pause',
+                        'pause',
+                        'play',
+                        'stop',
+                        'rewind',
+                        'forward',
+                    ],
+                    description:
+                        'play_pause = bascule (défaut sûr si on ne sait pas)',
+                },
+            },
+            required: ['action'],
+        },
+    },
+
     // ── Media library (hidden from LLM — orchestrator/scenes only) ───────────
     {
         name: 'list_media',

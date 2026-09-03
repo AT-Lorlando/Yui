@@ -24,7 +24,14 @@ export type LogLevel =
     | 'silly';
 
 export interface Settings {
-    llm: { model: string; baseUrl: string | undefined };
+    llm: {
+        model: string;
+        baseUrl: string | undefined;
+        /** custom (modèle local des réglages) | deepseek | claude | auto */
+        profile: string;
+        /** Profil utilisé pour les ordres complexes quand profile = auto. */
+        smartProfile: string;
+    };
     tts: { speed: number; speaker: string };
     logging: { level: LogLevel };
     conversation: { windowSeconds: number };
@@ -68,6 +75,8 @@ export function settingsFromEnv(env: EnvSource): Settings {
         llm: {
             model: env.LLM_MODEL ?? 'gpt-4o-mini',
             baseUrl: env.LLM_BASE_URL,
+            profile: env.LLM_PROFILE ?? 'custom',
+            smartProfile: env.LLM_SMART_PROFILE ?? 'claude',
         },
         tts: {
             speed: num(env.XTTS_SPEED, 1.0),

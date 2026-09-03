@@ -12,6 +12,7 @@ import {
     type StateReader,
 } from './deviceConditions';
 import { migrateLegacyActions } from './legacyActions';
+import { logActivity } from './activityLog';
 
 // ── Scene conditions ───────────────────────────────────────────────────────────
 
@@ -661,6 +662,7 @@ async function runSceneInternal(
     // Cache d'états frais pour cette exécution (toggle = évaluer l'état du moment)
     context.stateReader = createStateReader(callTool);
 
+    logActivity('scene', scene.name);
     Logger.info(
         `Running scene "${scene.name}" ` +
             `(setup: ${scene.setup.length}, state: ${scene.state.length}` +

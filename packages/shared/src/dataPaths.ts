@@ -39,6 +39,7 @@ const REGISTRY: Record<string, DataCategory> = {
     'proactive-dedup.json': 'state',
     'proactive-digest.json': 'state',
     'automation-history.json': 'state',
+    'activity-log.json': 'state',
     'chromecast-content.json': 'state',
     'voice-tuning.json': 'state',
     'memory.json': 'state',

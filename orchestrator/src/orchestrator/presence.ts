@@ -12,6 +12,7 @@ import Logger from '../logger';
 import { createMacBurst, type MacBurst } from './macBurst';
 import { loadPresenceConfig } from './presenceConfig';
 import { confirmDeparture } from './departureGuard';
+import { logActivity } from './activityLog';
 
 // ── Env ───────────────────────────────────────────────────────────────────────
 
@@ -280,7 +281,10 @@ export class PresenceManager {
                 `[presence] geofence ${transition} → ${next} (event=${event})`,
             );
             this.setState(next);
-            if (event === 'arrival') this.armBurst();
+            if (event === 'arrival') {
+                this.armBurst();
+                logActivity('presence', 'Arrivée', 'enter geofence');
+            }
             this.emit(event);
         } else {
             Logger.debug(
@@ -318,10 +322,20 @@ export class PresenceManager {
                 Logger.info(
                     '[presence] departure VETOED — phone still on the network (phantom geofence exit)',
                 );
+                logActivity(
+                    'presence',
+                    'Départ annulé',
+                    'exit geofence reçu mais téléphone vu sur le réseau (faux départ)',
+                );
                 return;
             }
             if (verdict === 'confirmed') {
                 Logger.info('[presence] departure confirmed by network check');
+                logActivity(
+                    'presence',
+                    'Départ confirmé',
+                    'téléphone absent du réseau pendant la fenêtre de vérification',
+                );
                 this.setState('away');
                 this.burst?.cancel();
                 this.emit('departure');

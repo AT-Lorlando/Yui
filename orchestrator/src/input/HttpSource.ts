@@ -46,6 +46,7 @@ import {
 } from '../orchestrator/memory';
 import { saveFcmToken } from '../orchestrator/notify';
 import { loadHistory } from '../orchestrator/history';
+import { readActivity } from '../orchestrator/activityLog';
 import {
     listPrompts,
     writePrompt,
@@ -426,6 +427,11 @@ export class HttpSource implements InputSource {
                         },
                         reset,
                     )) {
+                        if (typeof token === 'object' && token !== null) {
+                            // Événement outil — le chat de l'app le rend en chip.
+                            res.write(`data: ${JSON.stringify(token)}\n\n`);
+                            continue;
+                        }
                         res.write(`data: ${JSON.stringify({ token })}\n\n`);
                     }
                 } catch (error) {
@@ -1354,6 +1360,16 @@ export class HttpSource implements InputSource {
                 Logger.error(`Chime cast failed: ${e.message}`);
                 return res.status(500).json({ error: e.message });
             }
+        });
+
+        // ── Journal d'activité ────────────────────────────────────────────────
+        app.get('/activity', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const limit = Math.min(400, Number(req.query?.limit) || 120);
+            res.json(readActivity(limit));
         });
 
         app.get('/settings', (req: any, res: any) => {

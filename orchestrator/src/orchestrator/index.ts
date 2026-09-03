@@ -38,6 +38,8 @@ export type { McpServerConfig, CollectedTool };
 export { buildServerConfigs } from './serverConfigs';
 import { buildServerConfigs } from './serverConfigs';
 import { toolAudience, isLlmVisible } from './toolAudience';
+import { logActivity } from './activityLog';
+import { resolveLlm } from './llmRouter';
 
 /** Max messages kept in the rolling conversation buffer (user + assistant pairs). */
 const HISTORY_MAX = 10;
@@ -440,11 +442,16 @@ export class Orchestrator {
         const MAX_TURNS = 10;
         let finalResponse = '';
 
+        const llm = resolveLlm(order);
         for (let turn = 0; turn < MAX_TURNS; turn++) {
-            Logger.debug(`LLM turn ${turn + 1}/${MAX_TURNS}`);
+            Logger.debug(
+                `LLM turn ${turn + 1}/${MAX_TURNS} (${llm.profile}:${
+                    llm.model
+                })`,
+            );
 
-            const response = await this.openai.chat.completions.create({
-                model: env.LLM_MODEL,
+            const response = await llm.client.chat.completions.create({
+                model: llm.model,
                 messages,
                 tools: allTools.length > 0 ? allTools : undefined,
                 tool_choice: allTools.length > 0 ? 'auto' : undefined,
@@ -500,7 +507,11 @@ export class Orchestrator {
         options?: StreamOptions,
         reset?: boolean,
         outputChannel: import('./automations').OutputChannel = 'cast',
-    ): AsyncGenerator<string, void, unknown> {
+    ): AsyncGenerator<
+        string | { tool: string; args?: Record<string, unknown> },
+        void,
+        unknown
+    > {
         const state = options?.conversationId
             ? this.conversations.getOrCreateApp(options.conversationId)
             : options?.appConversation
@@ -510,6 +521,11 @@ export class Orchestrator {
         const story = state.story;
 
         Logger.info(`Processing order (stream): "${order}"`);
+        logActivity(
+            'order',
+            order.length > 80 ? order.slice(0, 80) + '…' : order,
+            `LLM ${resolveLlm(order).profile}`,
+        );
 
         // Build filter context: current order + all previous user messages in the
         // session so follow-up phrases like "laisse tomber" or "annule" still have
@@ -542,11 +558,16 @@ export class Orchestrator {
         const MAX_TURNS = 10;
         let finalResponse = '';
 
+        const llm = resolveLlm(order);
         for (let turn = 0; turn < MAX_TURNS; turn++) {
-            Logger.debug(`LLM turn ${turn + 1}/${MAX_TURNS} (stream)`);
+            Logger.debug(
+                `LLM turn ${turn + 1}/${MAX_TURNS} (stream, ${llm.profile}:${
+                    llm.model
+                })`,
+            );
 
-            const stream = await this.openai.chat.completions.create({
-                model: env.LLM_MODEL,
+            const stream = await llm.client.chat.completions.create({
+                model: llm.model,
                 messages,
                 tools: allTools.length > 0 ? allTools : undefined,
                 tool_choice: allTools.length > 0 ? 'auto' : undefined,
@@ -612,6 +633,18 @@ export class Orchestrator {
                     content: null, // discard any tool-round preamble text
                     tool_calls: toolCalls,
                 });
+
+                // Rend l'assistante moins boîte noire : le client voit chaque
+                // outil au moment où il part (chips dans le chat de l'app).
+                for (const tc of toolCalls) {
+                    let parsedArgs: Record<string, unknown> | undefined;
+                    try {
+                        parsedArgs = JSON.parse(tc.function.arguments || '{}');
+                    } catch {
+                        parsedArgs = undefined;
+                    }
+                    yield { tool: tc.function.name, args: parsedArgs };
+                }
 
                 await this.runToolCalls(
                     toolCalls,

@@ -127,6 +127,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 return { content: [{ type: 'text', text }] };
             }
 
+            case 'tv_media': {
+                const action = String((args as any).action);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: await chromecast.tvMediaKey(action),
+                        },
+                    ],
+                };
+            }
+
             case 'cast_media': {
                 const url = String((args as any).url);
                 return {

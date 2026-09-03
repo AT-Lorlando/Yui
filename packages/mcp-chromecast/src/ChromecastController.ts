@@ -78,6 +78,33 @@ async function adbLaunch(target: string): Promise<string> {
     return `Lancé via ADB : ${target}`;
 }
 
+/** Touches média Android (KEYCODE_*) — pilotent l'app au premier plan. */
+const MEDIA_KEYCODES: Record<string, number> = {
+    play_pause: 85,
+    play: 126,
+    pause: 127,
+    stop: 86,
+    rewind: 89,
+    forward: 90,
+};
+
+async function sendMediaKey(action: string): Promise<string> {
+    const code = MEDIA_KEYCODES[action];
+    if (code === undefined) throw new Error(`Action inconnue : ${action}`);
+    if (!ATV_ADB_HOST) throw new Error('ATV_ADB_HOST non configuré');
+    await adbConnect();
+    await execAdb([
+        '-s',
+        ATV_ADB_HOST,
+        'shell',
+        'input',
+        'keyevent',
+        String(code),
+    ]);
+    Logger.info(`Shield media key: ${action}`);
+    return `TV : ${action.replace('_', '/')}`;
+}
+
 /** ADB si configuré, sinon (ou en cas d'échec ADB) Android TV Remote. */
 async function launchOnTv(
     target: string,
@@ -316,6 +343,10 @@ export class ChromecastController {
     }
 
     // Lance l'app Fully Kiosk sur la Google TV (affiche le dashboard).
+    tvMediaKey(action: string): Promise<string> {
+        return sendMediaKey(action);
+    }
+
     async launchFully(): Promise<string> {
         Logger.info(`Chromecast: launch Fully (${FULLY_PACKAGE})`);
         const [, result] = await Promise.all([

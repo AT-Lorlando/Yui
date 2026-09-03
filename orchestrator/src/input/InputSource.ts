@@ -11,11 +11,16 @@ export type StreamOptions = {
     onConversationId?: (id: string) => void;
 };
 
+/** Un élément du stream : du texte, ou un événement « outil appelé ». */
+export type StreamItem =
+    | string
+    | { tool: string; args?: Record<string, unknown> };
+
 export type StreamHandler = (
     order: string,
     options?: StreamOptions,
     reset?: boolean,
-) => AsyncGenerator<string, void, unknown>;
+) => AsyncGenerator<StreamItem, void, unknown>;
 
 export type StatusHandler = () => object;
 
