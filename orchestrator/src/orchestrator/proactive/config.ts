@@ -22,6 +22,9 @@ export const DEFAULT_CONFIG: ProactiveConfig = {
     automationGuardWindowMin: 60,
     whitelist: [],
     prompts: { phrase: DEFAULT_PHRASE_PROMPT, digest: DEFAULT_DIGEST_PROMPT },
+    // Livraisons actif par défaut (dès que la proactivité l'est) — la requête
+    // Gmail par défaut vit dans le watcher, surchargable ici via `query`.
+    deliveries: { pollMinutes: 30 },
 };
 
 export function mergeConfig(raw: unknown): ProactiveConfig {

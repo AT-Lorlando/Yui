@@ -16,6 +16,7 @@ import { createWeatherWatcher } from './watchers/weather';
 import { createPresenceWatcher } from './watchers/presence';
 import { createCalendarWatcher } from './watchers/calendar';
 import { createMailWatcher } from './watchers/mail';
+import { createDeliveriesWatcher } from './watchers/deliveries';
 import type {
     CandidateEvent,
     ProactiveConfig,
@@ -337,6 +338,8 @@ function buildWatchers(cfg: ProactiveConfig, deps: ProactiveDeps): Watcher[] {
     watchers.push(createPresenceWatcher(deps));
     if (cfg.calendar) watchers.push(createCalendarWatcher(cfg.calendar, deps));
     if (cfg.mail) watchers.push(createMailWatcher(cfg.mail, deps));
+    if (cfg.deliveries)
+        watchers.push(createDeliveriesWatcher(cfg.deliveries, deps));
     return watchers;
 }
 

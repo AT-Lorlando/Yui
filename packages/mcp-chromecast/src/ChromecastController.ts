@@ -116,24 +116,37 @@ async function sendMediaKey(action: string): Promise<string> {
  * après le lancement, un OK sélectionne le premier profil (le nôtre).
  * Best-effort : ne jette jamais.
  */
+async function primePlaybackState(): Promise<string | undefined> {
+    const dump = await execAdb([
+        '-s',
+        ATV_ADB_HOST,
+        'shell',
+        'dumpsys',
+        'media_session',
+    ]);
+    const at = dump.indexOf(`package=${PRIME_PACKAGE}`);
+    return /state=PlaybackState \{state=(\d+)/.exec(
+        at >= 0 ? dump.slice(at, at + 1_500) : '',
+    )?.[1];
+}
+
 async function nudgePrimeProfile(): Promise<void> {
     if (!ATV_ADB_HOST) return;
     try {
-        await new Promise((r) => setTimeout(r, 6_000));
-        const dump = await execAdb([
-            '-s',
-            ATV_ADB_HOST,
-            'shell',
-            'dumpsys',
-            'media_session',
-        ]);
-        const at = dump.indexOf(`package=${PRIME_PACKAGE}`);
-        const state = /state=PlaybackState \{state=(\d+)/.exec(
-            at >= 0 ? dump.slice(at, at + 1_500) : '',
-        )?.[1];
-        if (state !== '3') {
+        // Premier essai à 1 s (démarrage tiède : le picker est déjà là), puis
+        // toutes les 2 s — à froid il apparaît après quelques secondes et un
+        // appui trop tôt part dans le vide. On s'arrête dès que ça joue ;
+        // sur écran de chargement l'OK est sans effet.
+        for (let attempt = 0; attempt < 4; attempt++) {
+            await new Promise((r) =>
+                setTimeout(r, attempt === 0 ? 1_000 : 2_000),
+            );
+            const state = await primePlaybackState();
+            if (state === '3') return;
             Logger.info(
-                `Prime pas en lecture (state=${state ?? '?'}) — OK profil`,
+                `Prime pas en lecture (state=${state ?? '?'}) — OK profil (${
+                    attempt + 1
+                })`,
             );
             await execAdb([
                 '-s',

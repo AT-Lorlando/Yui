@@ -52,6 +52,12 @@ export interface MailWatcherConfig {
     query: string;
 }
 
+export interface DeliveriesWatcherConfig {
+    pollMinutes: number;
+    /** Requête Gmail (défaut : expéditeurs de suivi usuels, newer_than:1d). */
+    query?: string;
+}
+
 export interface ProactiveConfig {
     enabled: boolean;
     chattiness: Chattiness;
@@ -65,6 +71,7 @@ export interface ProactiveConfig {
     weather?: WeatherWatcherConfig;
     calendar?: CalendarWatcherConfig;
     mail?: MailWatcherConfig;
+    deliveries?: DeliveriesWatcherConfig;
 }
 
 export interface ProactiveDeps {
