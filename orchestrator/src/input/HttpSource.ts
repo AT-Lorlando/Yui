@@ -48,6 +48,11 @@ import { saveFcmToken } from '../orchestrator/notify';
 import { loadHistory } from '../orchestrator/history';
 import { readActivity } from '../orchestrator/activityLog';
 import {
+    addManual as addParcel,
+    listParcels,
+    removeParcel,
+} from '../orchestrator/deliveries/tracker';
+import {
     listPrompts,
     writePrompt,
     loadManifest,
@@ -1370,6 +1375,48 @@ export class HttpSource implements InputSource {
             }
             const limit = Math.min(400, Number(req.query?.limit) || 120);
             res.json(readActivity(limit));
+        });
+
+        // ── Suivi de colis ────────────────────────────────────────────────────
+        app.get('/deliveries', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            res.json(listParcels());
+        });
+
+        app.post('/deliveries', async (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const { tracking, carrier, label, url } = req.body ?? {};
+            if (!tracking || typeof tracking !== 'string') {
+                return res.status(400).json({ error: 'tracking requis' });
+            }
+            try {
+                const parcel = await addParcel({
+                    tracking,
+                    carrier,
+                    label,
+                    url,
+                });
+                res.json(parcel);
+            } catch (e: any) {
+                res.status(400).json({ error: e.message });
+            }
+        });
+
+        app.delete('/deliveries/:id', (req: any, res: any) => {
+            const bearer = req.headers['authorization']?.split(' ')[1];
+            if (!this.checkPassword(bearer, req.ip)) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            if (!removeParcel(String(req.params.id))) {
+                return res.status(404).json({ error: 'Colis introuvable' });
+            }
+            res.json({ ok: true });
         });
 
         app.get('/settings', (req: any, res: any) => {
