@@ -44,8 +44,11 @@ async function adbConnect(): Promise<void> {
     }
 }
 
-async function adbLaunch(target: string): Promise<string> {
+async function adbLaunch(target: string, pkg?: string): Promise<string> {
     await adbConnect();
+    // Épingler le package est indispensable pour les liens que l'app link ne
+    // couvre pas (ex. primevideo /watch) : sans lui, `am start` résout sur le
+    // launcher et il ne se passe rien.
     const args = target.startsWith('http')
         ? [
               '-s',
@@ -57,6 +60,7 @@ async function adbLaunch(target: string): Promise<string> {
               'android.intent.action.VIEW',
               '-d',
               target,
+              ...(pkg ? [pkg] : []),
           ]
         : [
               '-s',
@@ -105,6 +109,46 @@ async function sendMediaKey(action: string): Promise<string> {
     return `TV : ${action.replace('_', '/')}`;
 }
 
+/**
+ * Prime démarré à froid s'arrête sur « Qui regarde ? » et garde le deep-link
+ * en attente. Son UI n'expose rien à l'accessibilité (uiautomator vide) — on
+ * détecte le blocage via la media session : si rien ne joue quelques secondes
+ * après le lancement, un OK sélectionne le premier profil (le nôtre).
+ * Best-effort : ne jette jamais.
+ */
+async function nudgePrimeProfile(): Promise<void> {
+    if (!ATV_ADB_HOST) return;
+    try {
+        await new Promise((r) => setTimeout(r, 6_000));
+        const dump = await execAdb([
+            '-s',
+            ATV_ADB_HOST,
+            'shell',
+            'dumpsys',
+            'media_session',
+        ]);
+        const at = dump.indexOf(`package=${PRIME_PACKAGE}`);
+        const state = /state=PlaybackState \{state=(\d+)/.exec(
+            at >= 0 ? dump.slice(at, at + 1_500) : '',
+        )?.[1];
+        if (state !== '3') {
+            Logger.info(
+                `Prime pas en lecture (state=${state ?? '?'}) — OK profil`,
+            );
+            await execAdb([
+                '-s',
+                ATV_ADB_HOST,
+                'shell',
+                'input',
+                'keyevent',
+                '23',
+            ]);
+        }
+    } catch (e) {
+        Logger.warn(`nudgePrimeProfile: ${e}`);
+    }
+}
+
 /** ADB si configuré, sinon (ou en cas d'échec ADB) Android TV Remote. */
 async function launchOnTv(
     target: string,
@@ -112,7 +156,7 @@ async function launchOnTv(
 ): Promise<string> {
     if (ATV_ADB_HOST) {
         try {
-            return await adbLaunch(target);
+            return await adbLaunch(target, expectedPkg);
         } catch (e) {
             Logger.warn(
                 `ADB launch failed (${e}) — fallback Android TV Remote`,
@@ -294,10 +338,17 @@ export class ChromecastController {
                     .pop() ?? 'LINK:';
             link = last.slice(5);
         }
+        // JustWatch donne la fiche (`/detail`) : Prime y met en avant S1E1.
+        // `/watch` sur le même GTI lance la lecture avec la reprise Amazon
+        // (l'épisode en cours du profil) — c'est le comportement voulu.
+        if (link) link = link.replace('/detail?', '/watch?');
         const [, result] = await Promise.all([
             prep,
             launchOnTv(link || PRIME_PACKAGE, PRIME_PACKAGE),
         ]);
+        // À froid, Prime bloque sur le choix de profil — débloqué en tâche de
+        // fond pour ne pas retarder la réponse.
+        void nudgePrimeProfile();
         return result;
     }
 
