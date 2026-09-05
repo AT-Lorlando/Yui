@@ -128,15 +128,31 @@ class AnimationManager {
     }
 
     /**
+     * Génération courante — un lancement de scène la capture après son
+     * stopAll initial et la repasse à playIntro/startFloating : si elle a
+     * bougé entre-temps (extinction, autre scène), l'animation d'une scène
+     * périmée ne démarre jamais.
+     */
+    currentEpoch(): number {
+        return this.epoch;
+    }
+
+    /**
      * Joue une intro. Se termine à la fin de la timeline, ou immédiatement si
      * un arrêt survient entre-temps (l'appelant enchaîne sur l'état de la
-     * scène, il ne doit pas attendre une intro annulée).
+     * scène, il ne doit pas attendre une intro annulée). `token` : génération
+     * capturée au lancement de la scène — si elle est révolue, rien ne joue.
      */
     async playIntro(
         effects: AnimationEffect[],
         callTool: CallTool,
+        token?: number,
     ): Promise<void> {
         if (!effects?.length) return;
+        if (token !== undefined && token !== this.epoch) {
+            Logger.info('[animation] intro d’une scène périmée — ignorée');
+            return;
+        }
         const lights = (await callTool('list_lights', {})) as Array<{
             name: string;
             room?: string;
@@ -190,12 +206,27 @@ class AnimationManager {
         void callTool('set_lights', args).catch(() => {});
     }
 
-    /** Start a floating loop (cancels any previous). Software engine only here. */
+    /**
+     * Start a floating loop (cancels any previous). Software engine only here.
+     * `token` : génération capturée au lancement de la scène — une scène dont
+     * l'exécution a été doublée (extinction, autre scène) ne démarre pas sa
+     * boucle. C'était LE bug « j'éteins et les couleurs reviennent » : le
+     * startFloating différé en fin de scène rallumait tout.
+     */
     async startFloating(
         cfg: FloatingConfig,
         callTool: CallTool,
+        token?: number,
     ): Promise<void> {
-        return this.serialize(() => this.startFloatingInner(cfg, callTool));
+        return this.serialize(() => {
+            if (token !== undefined && token !== this.epoch) {
+                Logger.info(
+                    '[animation] boucle flottante d’une scène périmée — ignorée',
+                );
+                return Promise.resolve();
+            }
+            return this.startFloatingInner(cfg, callTool);
+        });
     }
 
     private async startFloatingInner(
@@ -252,17 +283,28 @@ class AnimationManager {
                 names,
                 Date.now() - startedAt,
             );
-            loop.inflight = Object.entries(colors).map(([name, c]) =>
-                callTool('set_lights', {
-                    target: name,
-                    on: true,
-                    color: c.color,
-                    ...(c.brightness !== undefined
-                        ? { brightness: c.brightness }
-                        : {}),
-                    transitionMs: tick,
-                }).catch(() => {}),
-            );
+            // Écritures SÉQUENTIELLES, époque revérifiée entre chaque : sur un
+            // vrai bridge, un tick de N lampes en parallèle mettait plusieurs
+            // secondes à retomber — plus que le plafond de drain — et les
+            // retardataires rallumaient la pièce APRÈS l'ordre d'extinction
+            // (constaté en live le 05/09, 9 lampes sur 11). En séquentiel, un
+            // arrêt n'a au pire qu'UNE écriture en vol, et le reste du tick
+            // est abandonné sur-le-champ.
+            const chain = (async () => {
+                for (const [name, c] of Object.entries(colors)) {
+                    if (epoch !== this.epoch) return;
+                    await callTool('set_lights', {
+                        target: name,
+                        on: true,
+                        color: c.color,
+                        ...(c.brightness !== undefined
+                            ? { brightness: c.brightness }
+                            : {}),
+                        transitionMs: tick,
+                    }).catch(() => {});
+                }
+            })();
+            loop.inflight = [chain];
         };
         runTick();
         loop.timer = setInterval(runTick, tick);
@@ -274,7 +316,13 @@ class AnimationManager {
     /** Cancel any running animation iff the incoming tool affects lights. */
     async cancelIfAffected(tool: string): Promise<void> {
         if (!shouldCancel(tool)) return;
-        if (!this.floating && this.introTimers.size === 0) return;
+        // Même sans animation active, la génération avance : une scène en
+        // cours d'exécution (dont la flottante n'a pas encore démarré) voit
+        // son jeton périmé et n'allumera rien après cette commande.
+        if (!this.floating && this.introTimers.size === 0) {
+            this.epoch++;
+            return;
+        }
         await this.stopAll();
     }
 

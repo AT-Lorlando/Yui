@@ -152,7 +152,41 @@ async function testOffDuringIntroCancelsIt(): Promise<void> {
     await animationManager.stopAll();
 }
 
+/**
+ * Bridge lent + beaucoup de lampes : un tick met plusieurs secondes à
+ * retomber. L'extinction ne doit PAS voir arriver de retardataires après
+ * elle — constaté en live le 05/09 : 9 lampes sur 11 rallumées. Le tick
+ * doit s'interrompre en plein milieu dès l'arrêt.
+ */
+async function testSlowBridgeNoLateRelight(): Promise<void> {
+    const calls: string[] = [];
+    const lights = Array.from({ length: 11 }, (_, i) => ({
+        name: `L${i}`,
+        room: 'Salon',
+    }));
+    const callTool = async (tool: string): Promise<unknown> => {
+        if (tool === 'list_lights') return lights;
+        await sleep(150); // latence réaliste du bridge par écriture
+        calls.push(tool);
+        return null;
+    };
+
+    await animationManager.startFloating(CFG, callTool);
+    await sleep(300); // le tick est au milieu de ses écritures
+    await animationManager.cancelIfAffected('turn_off_all_lights');
+
+    // Après l'arrêt (drain compris), plus AUCUNE écriture ne doit tomber.
+    const at = calls.length;
+    await sleep(2500);
+    assert.strictEqual(
+        calls.length,
+        at,
+        `${calls.length - at} écriture(s) tardive(s) après l'extinction`,
+    );
+}
+
 async function run(): Promise<void> {
+    await testSlowBridgeNoLateRelight();
     await testConcurrentStartLeavesNoOrphan();
     await testStopAllCancelsIntro();
     await testOffDuringIntroCancelsIt();

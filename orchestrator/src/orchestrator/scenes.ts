@@ -13,6 +13,12 @@ import {
 } from './deviceConditions';
 import { migrateLegacyActions } from './legacyActions';
 import { logActivity } from './activityLog';
+import {
+    resolveFloating,
+    resolveIntro,
+    type FloatingRef,
+    type IntroRef,
+} from './animation/effectLibrary';
 
 // ── Scene conditions ───────────────────────────────────────────────────────────
 
@@ -125,10 +131,16 @@ export interface Scene {
     favorite?: boolean;
     /** Free-text category for grouping in the UI (e.g. "Cinéma", "Ambiance", "Routines"). Defaults to "Scènes". */
     label?: string;
-    /** Optional intro animation played before the final state. */
-    intro?: AnimationEffect[];
-    /** Optional continuous floating-colour config started after the state. */
-    floating?: FloatingConfig;
+    /**
+     * Optional intro animation played before the final state — soit une
+     * timeline inline (legacy), soit une référence d'effet `{ effectId }`.
+     */
+    intro?: AnimationEffect[] | IntroRef;
+    /**
+     * Optional continuous floating-colour config started after the state —
+     * config inline (legacy) ou référence `{ effectId, target }`.
+     */
+    floating?: FloatingConfig | FloatingRef;
 }
 
 export type CreateSceneInput = Omit<Scene, 'id' | 'createdAt' | 'builtIn'>;
@@ -393,6 +405,36 @@ export async function runVirtualAction(
             await callTool('turn_off_all_lights', {});
             break;
 
+        case '_effect_start': {
+            // Démarre un effet de la bibliothèque sur une cible. Les écritures
+            // passent par le chemin raw (sinon l'effet s'annulerait lui-même).
+            const animCall = context.callToolRaw ?? callTool;
+            const id = String(action.args.id ?? '');
+            const target = String(action.args.target ?? '');
+            const floating = resolveFloating({
+                effectId: id,
+                target,
+                ...(action.args.brightness !== undefined
+                    ? { brightness: Number(action.args.brightness) }
+                    : {}),
+            });
+            if (floating) {
+                await animationManager.startFloating(floating, animCall);
+                break;
+            }
+            const frames = resolveIntro({ effectId: id, target });
+            if (frames.length) {
+                await animationManager.playIntro(frames, animCall);
+            } else {
+                Logger.warn(`_effect_start: effet "${id}" introuvable`);
+            }
+            break;
+        }
+
+        case '_effect_stop':
+            await animationManager.stopAll();
+            break;
+
         case '_lights_all_brightness':
             await callTool('turn_on_all_lights', {
                 brightness: action.args.brightness,
@@ -648,6 +690,21 @@ export async function runActionList(
     await runActions('state', actions, label, callTool, context);
 }
 
+/**
+ * Compteur de runs de scène. Un lancement de scène prend le jeton ; une
+ * nouvelle scène (ou une commande lumière externe, via `bumpSceneRun`) le
+ * périme, et le run en cours abandonne ses phases restantes à la prochaine
+ * frontière — c'était le second visage du bug « les couleurs flottantes
+ * reviennent » : deux scènes concurrentes, la première posait sa boucle
+ * après la fin de la seconde.
+ */
+let sceneRunCounter = 0;
+
+/** Périme le run de scène en cours (commande lumière externe). */
+export function bumpSceneRun(): void {
+    sceneRunCounter++;
+}
+
 async function runSceneInternal(
     sceneId: string,
     callTool: CallTool,
@@ -657,39 +714,59 @@ async function runSceneInternal(
     if (!scene)
         return { success: false, error: `Scene "${sceneId}" not found` };
 
-    const animCall = context.callToolRaw ?? callTool;
+    // Les actions de la scène passent par le chemin raw quand il existe :
+    // le stopAll initial a déjà fait le ménage, et une action lumière du
+    // setup ne doit pas tuer l'intro de SA PROPRE scène (c'était la raison
+    // principale des intros « qui ne marchent jamais »).
+    const phaseCall = context.callToolRaw ?? callTool;
 
     // Cache d'états frais pour cette exécution (toggle = évaluer l'état du moment)
     context.stateReader = createStateReader(callTool);
+
+    const floatingCfg = resolveFloating(scene.floating);
+    const introFrames = resolveIntro(scene.intro, floatingCfg?.target);
 
     logActivity('scene', scene.name);
     Logger.info(
         `Running scene "${scene.name}" ` +
             `(setup: ${scene.setup.length}, state: ${scene.state.length}` +
-            `${scene.intro ? `, intro: ${scene.intro.length}` : ''}` +
-            `${scene.floating ? ', floating' : ''})`,
+            `${introFrames.length ? `, intro: ${introFrames.length}` : ''}` +
+            `${floatingCfg ? ', floating' : ''})`,
     );
 
     // Any new scene cancels a running floating loop before it begins.
+    const run = ++sceneRunCounter;
     await animationManager.stopAll();
+    // Jeton d'animation : si la génération bouge (extinction, autre scène)
+    // pendant les phases, l'intro/flottante de CE run ne démarrera pas.
+    const token = animationManager.currentEpoch();
+    const stale = () => run !== sceneRunCounter;
 
     // Intro plays on the lights WHILE setup (TV/cast prep) runs — hides latency.
-    const introP = scene.intro?.length
-        ? animationManager.playIntro(scene.intro, animCall)
+    const introP = introFrames.length
+        ? animationManager.playIntro(introFrames, phaseCall, token)
         : Promise.resolve();
     const setupP = runActions(
         'setup',
         scene.setup,
         scene.name,
-        callTool,
+        phaseCall,
         context,
     );
     await Promise.all([introP, setupP]);
+    if (stale()) {
+        Logger.info(`Scene "${scene.name}" doublée pendant le setup — stop`);
+        return { success: true };
+    }
 
-    await runActions('state', scene.state, scene.name, callTool, context);
+    await runActions('state', scene.state, scene.name, phaseCall, context);
+    if (stale()) {
+        Logger.info(`Scene "${scene.name}" doublée pendant le state — stop`);
+        return { success: true };
+    }
 
-    if (scene.floating) {
-        await animationManager.startFloating(scene.floating, animCall);
+    if (floatingCfg) {
+        await animationManager.startFloating(floatingCfg, phaseCall, token);
     }
 
     Logger.info(`Scene "${scene.name}" complete`);

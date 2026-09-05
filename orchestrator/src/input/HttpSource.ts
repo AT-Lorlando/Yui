@@ -75,6 +75,13 @@ import {
     saveRemotesConfig,
 } from '../orchestrator/hueRemotes';
 import { animationManager } from '../orchestrator/animation/animationManager';
+import {
+    deleteEffect,
+    listEffects,
+    resolveFloating,
+    resolveIntro,
+    upsertEffect,
+} from '../orchestrator/animation/effectLibrary';
 
 // ── TTS helper ────────────────────────────────────────────────────────────────
 // Calls the XTTS server to synthesise text and returns WAV audio as base64.
@@ -882,6 +889,56 @@ export class HttpSource implements InputSource {
             anim.post('/floating/stop', async (_req: any, res: any) => {
                 await animationManager.stopAll();
                 res.json({ success: true });
+            });
+
+            // ── Bibliothèque d'effets ─────────────────────────────────────────
+            anim.get('/effects', (_req: any, res: any) => {
+                res.json(listEffects());
+            });
+
+            anim.post('/effects', (req: any, res: any) => {
+                try {
+                    res.json(upsertEffect(req.body ?? {}));
+                } catch (e: any) {
+                    res.status(400).json({ error: e.message });
+                }
+            });
+
+            anim.delete('/effects/:id', (req: any, res: any) => {
+                if (!deleteEffect(String(req.params.id))) {
+                    return res.status(404).json({ error: 'Effet introuvable' });
+                }
+                res.json({ ok: true });
+            });
+
+            // Aperçu sur les vraies lampes : floating démarre (stop via
+            // /floating/stop), intro joue une fois.
+            anim.post('/effects/:id/preview', async (req: any, res: any) => {
+                const id = String(req.params.id);
+                const target = String(req.body?.target ?? '');
+                if (!target) {
+                    return res.status(400).json({ error: 'target requis' });
+                }
+                try {
+                    const floating = resolveFloating({ effectId: id, target });
+                    if (floating) {
+                        await animationManager.startFloating(
+                            floating,
+                            animCall,
+                        );
+                        return res.json({ success: true, kind: 'floating' });
+                    }
+                    const frames = resolveIntro({ effectId: id, target });
+                    if (!frames.length) {
+                        return res
+                            .status(404)
+                            .json({ error: 'Effet introuvable' });
+                    }
+                    await animationManager.playIntro(frames, animCall);
+                    res.json({ success: true, kind: 'intro' });
+                } catch (e: any) {
+                    res.status(400).json({ error: e.message });
+                }
             });
 
             app.use('/', anim);

@@ -21,9 +21,14 @@ import {
     handleVirtualTool,
     ToolCallResult,
 } from './virtualTools';
-import { runScene, runVirtualAction, isVirtualSceneTool } from './scenes';
+import {
+    runScene,
+    runVirtualAction,
+    isVirtualSceneTool,
+    bumpSceneRun,
+} from './scenes';
 import { sendNotification } from './notify';
-import { animationManager } from './animation/animationManager';
+import { animationManager, shouldCancel } from './animation/animationManager';
 import type { McpServerConfig, CollectedTool } from './types';
 import {
     formatLights,
@@ -697,6 +702,11 @@ export class Orchestrator {
         toolName: string,
         args: Record<string, unknown> = {},
     ): Promise<unknown> {
+        // Une commande lumière explicite périme aussi le run de scène en
+        // cours : ses phases restantes (et sa flottante) n'écraseront pas
+        // ce que l'utilisateur vient de demander. Les actions internes d'une
+        // scène passent par callToolRaw et ne déclenchent pas cette garde.
+        if (shouldCancel(toolName)) bumpSceneRun();
         await animationManager.cancelIfAffected(toolName);
         return this.callToolInner(toolName, args);
     }
