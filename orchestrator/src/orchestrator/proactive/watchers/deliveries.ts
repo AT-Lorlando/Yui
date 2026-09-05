@@ -12,11 +12,14 @@ import {
 } from '../../deliveries/carriers';
 import type { ParcelStatus } from '../../deliveries/providers';
 import {
+    listParcels,
     refreshFromCarriers,
     takeTransitions,
     upsertFromMail,
+    type Parcel,
     type Transition,
 } from '../../deliveries/tracker';
+import { enrichParcelContents } from '../../deliveries/content';
 
 /**
  * Watcher livraisons — deux étages :
@@ -171,15 +174,31 @@ export function mailOnlyCandidate(
     };
 }
 
-/** Transition de statut d'un colis suivi → candidat. Pur. */
-export function transitionCandidate(t: Transition): CandidateEvent {
-    const p = t.parcel;
-    const who = p.label ? `${p.label} (${p.carrier})` : p.carrier;
+/** Transition de statut d'un colis suivi → candidat. Pur.
+ *  `fresh` : version à jour du colis (contenu corrélé après coup). */
+export function transitionCandidate(
+    t: Transition,
+    fresh?: Parcel,
+): CandidateEvent {
+    const p = fresh ?? t.parcel;
+    // Le contenu (« 2× SheaMoisture… ») parle plus que « AMAZON n° 510… ».
+    const who = p.content
+        ? `${p.content}${
+              p.contentConfidence === 'probable' ? ' (probablement)' : ''
+          } — ${p.label ?? p.carrier}`
+        : p.label
+        ? `${p.label} (${p.carrier})`
+        : p.carrier;
     const eta =
         p.estimatedDate && t.to !== 'delivered'
             ? `, livraison estimée le ${p.estimatedDate}`
             : '';
-    const lastEvent = p.events[0]?.label ? ` — ${p.events[0].label}` : '';
+    // Le dernier événement n'illustre la transition que s'il correspond au
+    // statut annoncé (plusieurs transitions peuvent tomber dans le même tick).
+    const lastEvent =
+        p.status === t.to && p.events[0]?.label
+            ? ` — ${p.events[0].label}`
+            : '';
     return {
         watcherId: 'deliveries',
         subject: `livraison-${p.id}-${t.to}`,
@@ -197,6 +216,7 @@ export async function evaluateDeliveries(
         args?: Record<string, unknown>,
     ) => Promise<unknown>,
     cfg: DeliveriesWatcherConfig,
+    complete?: (system: string, user: string) => Promise<string>,
 ): Promise<CandidateEvent[]> {
     const events: CandidateEvent[] = [];
 
@@ -234,7 +254,9 @@ export async function evaluateDeliveries(
                 for (const parcel of detected) {
                     upsertFromMail(parcel, {
                         status: KIND_STATUS[kind],
-                        label: senderName(mail.from),
+                        // Le marchand cité dans le mail (« colis AMAZON… »)
+                        // prime sur l'expéditeur (le transporteur lui-même).
+                        label: parcel.merchant ?? senderName(mail.from),
                         estimatedDate: eta,
                     });
                 }
@@ -247,8 +269,16 @@ export async function evaluateDeliveries(
     // 2. Providers transporteur pour les colis actifs du registre.
     await refreshFromCarriers();
 
-    // 3. Toutes les transitions (mails, providers, ajouts manuels) notifient.
-    for (const t of takeTransitions()) events.push(transitionCandidate(t));
+    // 3. Corrélation contenu (mails du marchand, LLM si ambigu) — avant de
+    //    formuler, pour que « en cours de livraison » nomme les articles.
+    await enrichParcelContents(deviceHandler, complete);
+
+    // 4. Toutes les transitions (mails, providers, ajouts manuels) notifient,
+    //    sur la version fraîche du colis (contenu inclus).
+    const fresh = new Map(listParcels().map((p) => [p.id, p]));
+    for (const t of takeTransitions()) {
+        events.push(transitionCandidate(t, fresh.get(t.parcel.id)));
+    }
 
     return events;
 }
@@ -260,7 +290,11 @@ export function createDeliveriesWatcher(
     let timer: ReturnType<typeof setInterval> | undefined;
     const tick = async (emit: (c: CandidateEvent) => void): Promise<void> => {
         try {
-            const events = await evaluateDeliveries(deps.deviceHandler, cfg);
+            const events = await evaluateDeliveries(
+                deps.deviceHandler,
+                cfg,
+                deps.complete,
+            );
             Logger.info(
                 `proactive[deliveries]: poll → ${events.length} candidat(s)`,
             );

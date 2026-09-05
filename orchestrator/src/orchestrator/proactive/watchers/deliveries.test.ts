@@ -17,6 +17,11 @@ import {
 } from './deliveries';
 import { listParcels, takeTransitions } from '../../deliveries/tracker';
 
+// Hermétique : sans code postal ni clé, aucun appel réseau transporteur.
+// (Après les imports : dotenv, chargé par les modules, re-remplit l'env.)
+process.env.DELIVERIES_POSTAL_CODE = '';
+process.env.LAPOSTE_API_KEY = '';
+
 const block = (id: string, from: string, subject: string, snippet = '') =>
     [
         `ID: ${id}`,

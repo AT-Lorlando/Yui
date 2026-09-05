@@ -33,6 +33,13 @@ export interface Parcel {
     status: ParcelStatus;
     estimatedDate?: string;
     url?: string;
+    /** Contenu du colis, corrélé aux mails du marchand (content.ts). */
+    content?: string;
+    contentConfidence?: 'sûr' | 'probable';
+    /** Mail marchand apparié — évite qu'un autre colis le réclame. */
+    contentMailId?: string;
+    /** Tentatives de corrélation infructueuses (on abandonne à 3). */
+    contentAttempts?: number;
     /** Du plus récent au plus ancien, borné. */
     events: { date: string; label: string }[];
     createdAt: number;
@@ -194,6 +201,28 @@ export async function addManual(input: {
     return parcel;
 }
 
+/** Résultat de la corrélation contenu — null compte comme une tentative. */
+export function setContent(
+    id: string,
+    match: {
+        content: string;
+        confidence: 'sûr' | 'probable';
+        mailId: string;
+    } | null,
+): void {
+    const parcels = load();
+    const parcel = parcels.find((p) => p.id === id);
+    if (!parcel) return;
+    if (match) {
+        parcel.content = match.content;
+        parcel.contentConfidence = match.confidence;
+        parcel.contentMailId = match.mailId;
+    } else {
+        parcel.contentAttempts = (parcel.contentAttempts ?? 0) + 1;
+    }
+    save(parcels);
+}
+
 export function removeParcel(id: string): boolean {
     const parcels = load();
     const next = parcels.filter((p) => p.id !== id);
@@ -223,7 +252,9 @@ export async function refreshFromCarriers(): Promise<void> {
     const parcels = prune(load(), now);
     let dirty = false;
     for (const parcel of parcels) {
-        if (parcel.status === 'delivered') continue;
+        // Un colis déjà livré mérite quand même UNE interrogation (historique
+        // + expéditeur, dont dépend la corrélation contenu), puis silence.
+        if (parcel.status === 'delivered' && parcel.lastCheckedAt) continue;
         if (now - (parcel.lastCheckedAt ?? 0) < CHECK_INTERVAL_MS) continue;
         const up = await queryCarrier(
             parcel.carrier,

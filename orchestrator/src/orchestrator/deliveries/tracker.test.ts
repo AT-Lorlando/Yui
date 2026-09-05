@@ -17,6 +17,11 @@ import {
     upsertFromMail,
 } from './tracker';
 
+// Hermétique : sans code postal ni clé, aucun appel réseau transporteur.
+// (Après les imports : dotenv, chargé par les modules, re-remplit l'env.)
+process.env.DELIVERIES_POSTAL_CODE = '';
+process.env.LAPOSTE_API_KEY = '';
+
 async function run(): Promise<void> {
     // guessCarrier
     assert.strictEqual(guessCarrier('1Z999AA10123456784'), 'ups');

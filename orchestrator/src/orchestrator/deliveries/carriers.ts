@@ -20,6 +20,8 @@ export interface DetectedParcel {
     carrier: Carrier;
     /** Lien de suivi trouvé dans le mail (page publique du transporteur). */
     url?: string;
+    /** Marchand cité à côté du numéro (« votre colis AMAZON 510… »). */
+    merchant?: string;
 }
 
 /** Transporteur déduit de l'expéditeur du mail (domaine ou nom). */
