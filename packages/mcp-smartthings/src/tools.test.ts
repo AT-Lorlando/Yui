@@ -6,6 +6,7 @@ async function run() {
     const tools = buildSmartThingsTools(['HDMI3', 'HDMI2', 'dtv']);
     const names = tools.map((t) => t.name).sort();
     assert.deepStrictEqual(names, [
+        'tv_get_status',
         'tv_mute',
         'tv_off',
         'tv_on',

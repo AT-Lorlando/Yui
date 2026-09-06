@@ -1,4 +1,5 @@
 import './bootstrap'; // load .env + settings.json and patch process.env — must be first
+import { startBackupSchedule } from './orchestrator/dataBackup';
 import './env';
 import http from 'http';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
@@ -86,6 +87,9 @@ async function main() {
     const servers = buildServerConfigs();
     const orchestrator = new Orchestrator(servers);
     await orchestrator.init();
+
+    // Sauvegarde quotidienne de data/ (config + credentials + mémoire).
+    startBackupSchedule();
 
     const handler = (
         order: string,

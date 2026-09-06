@@ -22,12 +22,17 @@ import subprocess
 import sys
 
 import justwatch
+import tmdb
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.abspath(os.path.join(_HERE, '..', '..'))
-CACHE_FILE = os.path.join(_PROJECT_ROOT, 'data', 'chromecast-content.json')
+# Depuis le split de data/ (juin 2026), le cache vit dans data/state/ — ce
+# module lisait encore l'ancien chemin plat et tournait donc à vide.
+_DATA_ROOT = os.environ.get('YUI_DATA_DIR', os.path.join(_PROJECT_ROOT, 'data'))
+CACHE_FILE = os.path.join(_DATA_ROOT, 'state', 'chromecast-content.json')
+_LEGACY_CACHE_FILE = os.path.join(_DATA_ROOT, 'chromecast-content.json')
 
 # Ordre de préférence quand un titre est dispo sur plusieurs plateformes.
 PROVIDER_PREFERENCE = ['crunchyroll', 'netflix', 'disney', 'prime']
@@ -43,11 +48,18 @@ _YT_URL_RE = re.compile(
 # ── Cache I/O ─────────────────────────────────────────────────────────────────
 
 def _load() -> dict:
-    try:
-        with open(CACHE_FILE, encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    data: dict = {}
+    # Reprendre une fois les entrées écrites au mauvais endroit (chemin plat
+    # d'avant le split) — le fichier de state fait foi en cas de doublon.
+    for path in (_LEGACY_CACHE_FILE, CACHE_FILE):
+        try:
+            with open(path, encoding='utf-8') as f:
+                loaded = json.load(f)
+            for service, entries in loaded.items():
+                data.setdefault(service, {}).update(entries)
+        except (FileNotFoundError, json.JSONDecodeError, AttributeError):
+            continue
+    return data
 
 
 def _save(cache: dict) -> None:
@@ -94,6 +106,13 @@ def resolve_any(title: str | None) -> tuple[str | None, str | None, str | None]:
         _put(service, title, cid, ft or title)
         print(f'[cache] stored {service}/{ft} → {cid}')
         return service, cid, ft
+
+    # JustWatch muet (API non documentée, déjà cassée une fois) → TMDB dit au
+    # moins OÙ regarder ; l'app s'ouvrira sans deep-link (id None).
+    service, ft = tmdb.find_platform(title, PROVIDER_PREFERENCE)
+    if service:
+        print(f'[tmdb] fallback: "{title}" → {service} (sans deep-link)')
+        return service, None, ft
 
     print(f'[justwatch] no result for any/"{title}"', file=sys.stderr)
     return None, None, None

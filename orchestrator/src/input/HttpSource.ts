@@ -6,8 +6,6 @@ import cors from 'cors';
 import * as http from 'http';
 import Logger from '../logger';
 import env from '../env';
-import { getSettings, updateSettings, applyToEnv } from '../settings';
-import { dataPath } from '@yui/shared';
 import {
     InputSource,
     StreamHandler,
@@ -22,66 +20,17 @@ import {
     ProactiveHandler,
     DashboardHandler,
 } from './InputSource';
-import { loadConfig, saveConfig } from '../orchestrator/proactive/config';
-import {
-    loadIntegrations,
-    saveIntegrations,
-    maskIntegrations,
-} from '../orchestrator/integrations';
-import {
-    listDataFiles,
-    readDataFile,
-    writeDataFile,
-} from '../orchestrator/dataFiles';
-import {
-    INTEGRATIONS_CATALOG,
-    expectedDomains,
-} from '../orchestrator/configCatalog';
-import {
-    loadStore,
-    saveMemory,
-    deleteMemory,
-    setNamespacePriority,
-    deleteNamespace,
-} from '../orchestrator/memory';
-import { saveFcmToken } from '../orchestrator/notify';
-import { loadHistory } from '../orchestrator/history';
-import { readActivity } from '../orchestrator/activityLog';
-import {
-    addManual as addParcel,
-    listParcels,
-    removeParcel,
-} from '../orchestrator/deliveries/tracker';
-import {
-    listPrompts,
-    writePrompt,
-    loadManifest,
-    createPrompt,
-    deletePrompt,
-    updatePromptEntry,
-    importPromptFromUrl,
-} from '../orchestrator/prompts';
-import {
-    listPresets,
-    addPreset,
-    removePreset,
-} from '../orchestrator/timerPresets';
-import {
-    loadIrrigationConfig,
-    saveIrrigationConfig,
-} from '../orchestrator/irrigationConfig';
-import {
-    getRemotesSnapshot,
-    saveRemotesConfig,
-} from '../orchestrator/hueRemotes';
-import { animationManager } from '../orchestrator/animation/animationManager';
-import {
-    deleteEffect,
-    listEffects,
-    resolveFloating,
-    resolveIntro,
-    upsertEffect,
-} from '../orchestrator/animation/effectLibrary';
+import { makeRequireAuth } from './routes/helpers';
+import { deviceRoutes } from './routes/devices';
+import { sceneRoutes } from './routes/scenes';
+import { effectRoutes } from './routes/effects';
+import { automationRoutes } from './routes/automations';
+import { conversationRoutes } from './routes/conversations';
+import { presenceRoutes } from './routes/presence';
+import { memoryRoutes } from './routes/memory';
+import { promptRoutes } from './routes/prompts';
+import { configRoutes } from './routes/config';
+import { miscRoutes } from './routes/misc';
 
 // ── TTS helper ────────────────────────────────────────────────────────────────
 // Calls the XTTS server to synthesise text and returns WAV audio as base64.
@@ -115,6 +64,19 @@ async function generateTtsAudio(
     }
 }
 
+/**
+ * API HTTP de l'orchestrateur (port 4000).
+ *
+ * Ce fichier ne porte plus que : le socle express, les routes statiques
+ * publiques, /status, /tools et les deux endpoints d'ordre (/order,
+ * /order/stream). Tout le reste vit dans `routes/<domaine>.ts` — un router
+ * par domaine, l'auth Bearer via le middleware unique `makeRequireAuth`.
+ *
+ * ⚠️ Règle apprise à la dure : un router monté sur '/' ne doit JAMAIS porter
+ * d'auth en `router.use` — le middleware intercepte TOUTES les requêtes et
+ * 401-ait les endpoints publics déclarés après lui (c'est ce qui a cassé
+ * /chime, donc les sonneries de minuteur, de juin à septembre 2026).
+ */
 export class HttpSource implements InputSource {
     private server: http.Server | null = null;
 
@@ -154,6 +116,10 @@ export class HttpSource implements InputSource {
         app.use(cors({ origin: '*' }));
         app.use(bodyParser.json());
         app.use(bodyParser.urlencoded({ extended: true }));
+
+        const requireAuth = makeRequireAuth((bearer, ip) =>
+            this.checkPassword(bearer, ip),
+        );
 
         app.get('/health', (_req: any, res: any) => {
             res.status(200).json({ status: 'ok' });
@@ -321,21 +287,21 @@ export class HttpSource implements InputSource {
             });
 
             // Call a tool directly (bypasses LLM) — requires auth
-            app.post('/tools/:name', async (req: any, res: any) => {
-                const bearer = req.headers['authorization']?.split(' ')[1];
-                if (!this.checkPassword(bearer, req.ip)) {
-                    return res.status(401).json({ error: 'Unauthorized' });
-                }
-                try {
-                    const result = await toolsHandler.call(
-                        req.params.name,
-                        req.body || {},
-                    );
-                    return res.json({ result });
-                } catch (e: any) {
-                    return res.status(500).json({ error: e.message });
-                }
-            });
+            app.post(
+                '/tools/:name',
+                requireAuth,
+                async (req: any, res: any) => {
+                    try {
+                        const result = await toolsHandler.call(
+                            req.params.name,
+                            req.body || {},
+                        );
+                        return res.json({ result });
+                    } catch (e: any) {
+                        return res.status(500).json({ error: e.message });
+                    }
+                },
+            );
         }
 
         // ── Blocking endpoint (used by mobile app, cron, etc.) ───────────────
@@ -343,12 +309,7 @@ export class HttpSource implements InputSource {
         // TTS audio as base64 WAV so the caller can play it locally.
         // The voice pipeline sends `voice: true` (not `audio: true`) and handles
         // its own TTS — it never receives audio bytes here.
-        app.post('/order', async (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-
+        app.post('/order', requireAuth, async (req: any, res: any) => {
             const order = req.body?.order;
             if (!order || typeof order !== 'string') {
                 return res.status(400).json({ error: 'Missing "order" field' });
@@ -391,1285 +352,105 @@ export class HttpSource implements InputSource {
         // Each event: data: {"token":"..."}\n\n
         // End signal:  data: [DONE]\n\n
         if (streamHandler) {
-            app.post('/order/stream', async (req: any, res: any) => {
-                const bearer = req.headers['authorization']?.split(' ')[1];
-                if (!this.checkPassword(bearer, req.ip)) {
-                    return res.status(401).json({ error: 'Unauthorized' });
-                }
-
-                const order = req.body?.order;
-                if (!order || typeof order !== 'string') {
-                    return res
-                        .status(400)
-                        .json({ error: 'Missing "order" field' });
-                }
-
-                // Voice pipeline sends "voice: true" → cap response length
-                const isVoice = req.body?.voice === true;
-                const reset = req.body?.reset === true;
-                const conversationId =
-                    typeof req.body?.conversationId === 'string'
-                        ? req.body.conversationId
-                        : undefined;
-
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
-                res.flushHeaders();
-
-                const streamOutputChannel = isVoice ? 'cast' : 'none';
-                try {
-                    let idSent = false;
-                    for await (const token of streamHandler(
-                        order,
-                        {
-                            outputChannel: streamOutputChannel,
-                            conversationId,
-                            appConversation: !isVoice,
-                            onConversationId: (id: string) => {
-                                if (!idSent) {
-                                    res.write(
-                                        `data: ${JSON.stringify({
-                                            conversationId: id,
-                                        })}\n\n`,
-                                    );
-                                    idSent = true;
-                                }
-                            },
-                        },
-                        reset,
-                    )) {
-                        if (typeof token === 'object' && token !== null) {
-                            // Événement outil — le chat de l'app le rend en chip.
-                            res.write(`data: ${JSON.stringify(token)}\n\n`);
-                            continue;
-                        }
-                        res.write(`data: ${JSON.stringify({ token })}\n\n`);
+            app.post(
+                '/order/stream',
+                requireAuth,
+                async (req: any, res: any) => {
+                    const order = req.body?.order;
+                    if (!order || typeof order !== 'string') {
+                        return res
+                            .status(400)
+                            .json({ error: 'Missing "order" field' });
                     }
-                } catch (error) {
-                    Logger.error(`SSE stream error: ${error}`);
-                    res.write(
-                        `data: ${JSON.stringify({ error: String(error) })}\n\n`,
-                    );
-                } finally {
-                    res.write('data: [DONE]\n\n');
-                    res.end();
-                }
-            });
-        }
 
-        // ── Direct device control (bypasses LLM) ─────────────────────────────
-        if (deviceHandler) {
-            const dev = express.Router();
+                    // Voice pipeline sends "voice: true" → cap response length
+                    const isVoice = req.body?.voice === true;
+                    const reset = req.body?.reset === true;
+                    const conversationId =
+                        typeof req.body?.conversationId === 'string'
+                            ? req.body.conversationId
+                            : undefined;
 
-            // Auth middleware for all /devices routes
-            dev.use((req: any, res: any, next: any) => {
-                const bearer = req.headers['authorization']?.split(' ')[1];
-                if (!this.checkPassword(bearer, req.ip)) {
-                    return res.status(401).json({ error: 'Unauthorized' });
-                }
-                next();
-            });
+                    res.setHeader('Content-Type', 'text/event-stream');
+                    res.setHeader('Cache-Control', 'no-cache');
+                    res.setHeader('Connection', 'keep-alive');
+                    res.flushHeaders();
 
-            const call =
-                (tool: string, args: Record<string, unknown> = {}) =>
-                async (_req: any, res: any) => {
+                    const streamOutputChannel = isVoice ? 'cast' : 'none';
                     try {
-                        res.json(await deviceHandler(tool, args));
-                    } catch (e: any) {
-                        res.status(500).json({ error: e.message });
-                    }
-                };
-
-            // ── Lights ────────────────────────────────────────────────────────
-            dev.get('/lights', call('list_lights'));
-            // Atomic "turn everything off" — also cancels any floating loop
-            // (via callTool → cancelIfAffected), unlike N per-light requests.
-            dev.post('/lights/off-all', call('turn_off_all_lights'));
-            dev.post('/lights/on-all', call('turn_on_all_lights'));
-            // Ids are numeric for Hue, strings ("g:1") for Govee — keep the
-            // raw value when it isn't a plain number.
-            const lightId = (raw: string): string | number =>
-                /^\d+$/.test(raw) ? Number(raw) : raw;
-            dev.post('/lights/:id/on', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('turn_on_light', {
-                            lightId: lightId(req.params.id),
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.post('/lights/:id/off', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('turn_off_light', {
-                            lightId: lightId(req.params.id),
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.patch('/lights/:id/brightness', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('set_brightness', {
-                            lightId: lightId(req.params.id),
-                            brightness: +req.body.brightness,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.patch('/lights/:id/color', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('set_color', {
-                            lightId: lightId(req.params.id),
-                            color: req.body.color,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-
-            // ── Rooms (grouped light control) ────────────────────────────────
-            dev.post('/rooms/:room/lights', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('set_lights', {
-                            target: req.params.room,
-                            ...(req.body?.on !== undefined
-                                ? { on: !!req.body.on }
-                                : {}),
-                            ...(req.body?.brightness !== undefined
-                                ? { brightness: +req.body.brightness }
-                                : {}),
-                            ...(req.body?.colorTemp !== undefined
-                                ? { colorTemp: +req.body.colorTemp }
-                                : {}),
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.post('/rooms/:room/palette', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('set_room_palette', {
-                            room: req.params.room,
-                            colors: req.body?.colors,
-                            ...(req.body?.brightness !== undefined
-                                ? { brightness: +req.body.brightness }
-                                : {}),
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-
-            // ── Doors ─────────────────────────────────────────────────────────
-            dev.get('/doors', call('list_doors'));
-            dev.post('/doors/:id/lock', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('lock_door', {
-                            nukiId: +req.params.id,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.post('/doors/:id/unlock', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('unlock_door', {
-                            nukiId: +req.params.id,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-
-            // ── Spotify ───────────────────────────────────────────────────────
-            dev.get('/spotify', call('get_playback_state'));
-            dev.post('/spotify/play', call('play_music'));
-            dev.post('/spotify/pause', call('pause_music'));
-            dev.post('/spotify/next', call('next_track'));
-            dev.post('/spotify/previous', call('previous_track'));
-            dev.patch('/spotify/volume', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('set_volume', {
-                            percent: +req.body.percent,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-
-            // ── TV (mcp-smartthings : WoL + SmartThings cloud) ────────────────
-            dev.get('/tv', call('tv_get_status'));
-            dev.post('/tv/on', call('tv_on'));
-            dev.post('/tv/off', call('tv_off'));
-            dev.patch('/tv/volume', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('tv_volume', {
-                            level: +req.body.level,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.post('/tv/mute', async (_req: any, res: any) => {
-                try {
-                    res.json(await deviceHandler('tv_mute', { mute: true }));
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.post('/tv/unmute', async (_req: any, res: any) => {
-                try {
-                    res.json(await deviceHandler('tv_mute', { mute: false }));
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.post('/tv/input', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('tv_set_input', {
-                            source: req.body.source,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-
-            // ── Covers (Somfy) ────────────────────────────────────────────────
-            dev.get('/covers', call('list_covers'));
-            dev.post('/covers/open', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('open_cover', {
-                            device: req.body.device,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.post('/covers/close', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('close_cover', {
-                            device: req.body.device,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.patch('/covers/position', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('set_cover_position', {
-                            device: req.body.device,
-                            position: +req.body.position,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-
-            // ── Irrigation ────────────────────────────────────────────────────
-            dev.get('/irrigation', call('irrigation_status'));
-            dev.post('/irrigation/start', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('irrigation_start', {
-                            target: req.body.target,
-                            amount: req.body.amount,
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-            dev.post('/irrigation/stop', async (req: any, res: any) => {
-                try {
-                    res.json(
-                        await deviceHandler('irrigation_stop', {
-                            target: req.body?.target ?? 'all',
-                        }),
-                    );
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-
-            app.use('/devices', dev);
-        }
-
-        // ── Scenes ────────────────────────────────────────────────────────────
-        if (scenesHandler) {
-            const sc = express.Router();
-
-            sc.use((req: any, res: any, next: any) => {
-                const bearer = req.headers['authorization']?.split(' ')[1];
-                if (!this.checkPassword(bearer, req.ip)) {
-                    return res.status(401).json({ error: 'Unauthorized' });
-                }
-                next();
-            });
-
-            // List all scenes
-            sc.get('/', (_req: any, res: any) => {
-                res.json(scenesHandler.list());
-            });
-
-            // Trigger a scene
-            sc.post('/:id/trigger', async (req: any, res: any) => {
-                try {
-                    const result = await scenesHandler.trigger(req.params.id);
-                    res.json(result);
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-
-            // Create a custom scene
-            sc.post('/', (req: any, res: any) => {
-                try {
-                    const {
-                        name,
-                        icon,
-                        color,
-                        description,
-                        label,
-                        setup,
-                        state,
-                        favorite,
-                        intro,
-                        floating,
-                    } = req.body;
-                    const scene = scenesHandler.create({
-                        name,
-                        icon,
-                        color,
-                        description,
-                        label,
-                        setup,
-                        state,
-                        favorite,
-                        intro,
-                        floating,
-                    });
-                    res.status(201).json(scene);
-                } catch (e: any) {
-                    res.status(400).json({ error: e.message });
-                }
-            });
-
-            // Delete a custom scene
-            sc.delete('/:id', (req: any, res: any) => {
-                const ok = scenesHandler.remove(req.params.id);
-                if (!ok)
-                    return res
-                        .status(404)
-                        .json({ error: 'Scene not found or is built-in' });
-                res.json({ success: true });
-            });
-
-            // Update a custom scene
-            sc.patch('/:id', (req: any, res: any) => {
-                try {
-                    const {
-                        name,
-                        icon,
-                        color,
-                        description,
-                        label,
-                        setup,
-                        state,
-                        favorite,
-                        intro,
-                        floating,
-                    } = req.body;
-                    const scene = scenesHandler.update(req.params.id, {
-                        name,
-                        icon,
-                        color,
-                        description,
-                        label,
-                        setup,
-                        state,
-                        favorite,
-                        intro,
-                        floating,
-                    });
-                    if (!scene)
-                        return res
-                            .status(404)
-                            .json({ error: 'Scene not found or is built-in' });
-                    res.json(scene);
-                } catch (e: any) {
-                    res.status(400).json({ error: e.message });
-                }
-            });
-
-            // Toggle favorite
-            sc.patch('/:id/favorite', (req: any, res: any) => {
-                const scene = scenesHandler.toggleFavorite(req.params.id);
-                if (!scene)
-                    return res.status(404).json({ error: 'Scene not found' });
-                res.json({ scene });
-            });
-
-            app.use('/scenes', sc);
-        }
-
-        // ── Animation routes ──────────────────────────────────────────────────
-        if (deviceHandler) {
-            const anim = express.Router();
-            anim.use((req: any, res: any, next: any) => {
-                const bearer = req.headers['authorization']?.split(' ')[1];
-                if (!this.checkPassword(bearer, req.ip)) {
-                    return res.status(401).json({ error: 'Unauthorized' });
-                }
-                next();
-            });
-
-            // Les écritures d'une animation passent par le chemin raw : sinon
-            // chaque image déclenche la garde d'annulation et l'aperçu se
-            // coupe tout seul dès la première.
-            const animCall = toolsHandler?.callRaw ?? deviceHandler;
-
-            // Preview an intro once (no persistence).
-            anim.post('/animations/preview', async (req: any, res: any) => {
-                try {
-                    await animationManager.playIntro(
-                        req.body?.intro ?? [],
-                        animCall,
-                    );
-                    res.json({ success: true });
-                } catch (e: any) {
-                    res.status(400).json({ error: e.message });
-                }
-            });
-
-            // Start a floating preview.
-            anim.post('/floating/start', async (req: any, res: any) => {
-                try {
-                    await animationManager.startFloating(
-                        req.body?.floating,
-                        animCall,
-                    );
-                    res.json({ success: true });
-                } catch (e: any) {
-                    res.status(400).json({ error: e.message });
-                }
-            });
-
-            // Stop all floating animations.
-            anim.post('/floating/stop', async (_req: any, res: any) => {
-                await animationManager.stopAll();
-                res.json({ success: true });
-            });
-
-            // ── Bibliothèque d'effets ─────────────────────────────────────────
-            anim.get('/effects', (_req: any, res: any) => {
-                res.json(listEffects());
-            });
-
-            anim.post('/effects', (req: any, res: any) => {
-                try {
-                    res.json(upsertEffect(req.body ?? {}));
-                } catch (e: any) {
-                    res.status(400).json({ error: e.message });
-                }
-            });
-
-            anim.delete('/effects/:id', (req: any, res: any) => {
-                if (!deleteEffect(String(req.params.id))) {
-                    return res.status(404).json({ error: 'Effet introuvable' });
-                }
-                res.json({ ok: true });
-            });
-
-            // Aperçu sur les vraies lampes : floating démarre (stop via
-            // /floating/stop), intro joue une fois.
-            anim.post('/effects/:id/preview', async (req: any, res: any) => {
-                const id = String(req.params.id);
-                const target = String(req.body?.target ?? '');
-                if (!target) {
-                    return res.status(400).json({ error: 'target requis' });
-                }
-                try {
-                    const floating = resolveFloating({ effectId: id, target });
-                    if (floating) {
-                        await animationManager.startFloating(
-                            floating,
-                            animCall,
-                        );
-                        return res.json({ success: true, kind: 'floating' });
-                    }
-                    const frames = resolveIntro({ effectId: id, target });
-                    if (!frames.length) {
-                        return res
-                            .status(404)
-                            .json({ error: 'Effet introuvable' });
-                    }
-                    await animationManager.playIntro(frames, animCall);
-                    res.json({ success: true, kind: 'intro' });
-                } catch (e: any) {
-                    res.status(400).json({ error: e.message });
-                }
-            });
-
-            app.use('/', anim);
-        }
-
-        // ── Automations ───────────────────────────────────────────────────────
-        if (automationsHandler) {
-            const auto = express.Router();
-
-            auto.use((req: any, res: any, next: any) => {
-                const bearer = req.headers['authorization']?.split(' ')[1];
-                if (!this.checkPassword(bearer, req.ip)) {
-                    return res.status(401).json({ error: 'Unauthorized' });
-                }
-                next();
-            });
-
-            auto.get('/', (_req: any, res: any) => {
-                res.json(automationsHandler.list());
-            });
-
-            auto.get('/history', (_req: any, res: any) => {
-                res.json(loadHistory());
-            });
-
-            auto.post('/', (req: any, res: any) => {
-                try {
-                    const automation = automationsHandler.add(req.body);
-                    res.status(201).json(automation);
-                } catch (e: any) {
-                    res.status(400).json({ error: e.message });
-                }
-            });
-
-            auto.patch('/:id', (req: any, res: any) => {
-                try {
-                    const { name, trigger, action, notify, enabled } = req.body;
-                    const result = automationsHandler.update(req.params.id, {
-                        name,
-                        trigger,
-                        action,
-                        notify,
-                        enabled,
-                    });
-                    if (!result)
-                        return res
-                            .status(404)
-                            .json({ error: 'Automation not found' });
-                    res.json(result);
-                } catch (e: any) {
-                    res.status(400).json({ error: e.message });
-                }
-            });
-
-            auto.patch('/:id/toggle', (req: any, res: any) => {
-                const msg = automationsHandler.toggle(req.params.id);
-                if (msg === null)
-                    return res
-                        .status(404)
-                        .json({ error: 'Automation not found' });
-                res.json({ message: msg });
-            });
-
-            auto.delete('/:id', (req: any, res: any) => {
-                const ok = automationsHandler.remove(req.params.id);
-                if (!ok)
-                    return res
-                        .status(404)
-                        .json({ error: 'Automation not found' });
-                res.json({ success: true });
-            });
-
-            auto.post('/:id/run', async (req: any, res: any) => {
-                try {
-                    const result = await automationsHandler.run(req.params.id);
-                    if (!result.success)
-                        return res.status(404).json({ error: result.error });
-                    res.json({ success: true });
-                } catch (e: any) {
-                    res.status(500).json({ error: e.message });
-                }
-            });
-
-            app.use('/automations', auto);
-        }
-
-        // ── Conversations ─────────────────────────────────────────────────────
-        if (conversationsHandler) {
-            const conv = express.Router();
-            conv.use((req: any, res: any, next: any) => {
-                const bearer = req.headers['authorization']?.split(' ')[1];
-                if (!this.checkPassword(bearer, req.ip)) {
-                    return res.status(401).json({ error: 'Unauthorized' });
-                }
-                next();
-            });
-
-            conv.get('/', (req: any, res: any) => {
-                const scope = req.query?.scope === 'all' ? 'all' : 'resumable';
-                res.json(conversationsHandler.list(scope));
-            });
-
-            conv.get('/:id', (req: any, res: any) => {
-                res.json(conversationsHandler.get(req.params.id));
-            });
-
-            conv.post('/:id/simulate', async (req: any, res: any) => {
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
-                res.flushHeaders();
-                let idSent = false;
-                try {
-                    for await (const token of conversationsHandler.simulate(
-                        req.params.id,
-                        {
-                            fromMessageIndex: req.body?.fromMessageIndex,
-                            systemPrompt: req.body?.systemPrompt,
-                            temperature: req.body?.temperature,
-                        },
-                        {
-                            onConversationId: (id: string) => {
-                                if (!idSent) {
-                                    res.write(
-                                        `data: ${JSON.stringify({
-                                            conversationId: id,
-                                        })}\n\n`,
-                                    );
-                                    idSent = true;
-                                }
+                        let idSent = false;
+                        for await (const token of streamHandler(
+                            order,
+                            {
+                                outputChannel: streamOutputChannel,
+                                conversationId,
+                                appConversation: !isVoice,
+                                onConversationId: (id: string) => {
+                                    if (!idSent) {
+                                        res.write(
+                                            `data: ${JSON.stringify({
+                                                conversationId: id,
+                                            })}\n\n`,
+                                        );
+                                        idSent = true;
+                                    }
+                                },
                             },
-                        },
-                    )) {
-                        res.write(`data: ${JSON.stringify({ token })}\n\n`);
+                            reset,
+                        )) {
+                            if (typeof token === 'object' && token !== null) {
+                                // Événement outil — le chat de l'app le rend en chip.
+                                res.write(`data: ${JSON.stringify(token)}\n\n`);
+                                continue;
+                            }
+                            res.write(`data: ${JSON.stringify({ token })}\n\n`);
+                        }
+                    } catch (error) {
+                        Logger.error(`SSE stream error: ${error}`);
+                        res.write(
+                            `data: ${JSON.stringify({
+                                error: String(error),
+                            })}\n\n`,
+                        );
+                    } finally {
+                        res.write('data: [DONE]\n\n');
+                        res.end();
                     }
-                } catch (error) {
-                    res.write(
-                        `data: ${JSON.stringify({ error: String(error) })}\n\n`,
-                    );
-                } finally {
-                    res.write('data: [DONE]\n\n');
-                    res.end();
-                }
-            });
-
-            app.use('/conversations', conv);
+                },
+            );
         }
 
-        // ── Memory (read-only) ────────────────────────────────────────────────
-        app.get('/memory', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            res.json(loadStore());
-        });
-
-        app.post('/memory', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            const { namespace, key, value, priority } = req.body ?? {};
-            if (typeof namespace !== 'string' || !namespace.trim()) {
-                return res.status(400).json({ error: 'namespace is required' });
-            }
-            if (priority && priority !== 'always' && priority !== 'on-demand') {
-                return res
-                    .status(400)
-                    .json({ error: 'priority must be always or on-demand' });
-            }
-            if (key !== undefined) {
-                if (typeof key !== 'string' || typeof value !== 'string') {
-                    return res
-                        .status(400)
-                        .json({ error: 'key and value must be strings' });
-                }
-                if (key === '_priority') {
-                    return res
-                        .status(400)
-                        .json({ error: '_priority is reserved' });
-                }
-                saveMemory(namespace, key, value, priority ?? 'always');
-            } else if (priority) {
-                setNamespacePriority(namespace, priority);
-            } else {
-                setNamespacePriority(namespace, 'always');
-            }
-            res.json(loadStore());
-        });
-
-        app.delete('/memory/:namespace/:key', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            if (req.params.key === '_priority') {
-                return res.status(400).json({ error: '_priority is reserved' });
-            }
-            deleteMemory(req.params.namespace, req.params.key);
-            res.json(loadStore());
-        });
-
-        app.delete('/memory/:namespace', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            deleteNamespace(req.params.namespace);
-            res.json(loadStore());
-        });
-
-        // ── Timers (read from shared data file) ───────────────────────────────
-        app.get('/timers', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            try {
-                const timersFile = dataPath('timers.json');
-                const raw = fs.existsSync(timersFile)
-                    ? (JSON.parse(fs.readFileSync(timersFile, 'utf-8')) as {
-                          id: string;
-                          label: string;
-                          duration_seconds: number;
-                          started_at: number;
-                          fires_at: number;
-                          room?: string;
-                      }[])
-                    : [];
-                const now = Date.now();
-                res.json(
-                    raw.map((t) => ({
-                        ...t,
-                        remaining_seconds: Math.max(
-                            0,
-                            Math.round((t.fires_at - now) / 1_000),
-                        ),
-                    })),
-                );
-            } catch {
-                res.json([]);
-            }
-        });
-
-        app.get('/timer-presets', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            res.json(listPresets());
-        });
-
-        app.post('/timer-presets', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            try {
-                const preset = addPreset(req.body ?? {});
-                res.status(201).json(preset);
-            } catch (e: any) {
-                res.status(400).json({ error: e.message });
-            }
-        });
-
-        app.delete('/timer-presets/:id', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            const ok = removePreset(req.params.id);
-            if (!ok) return res.status(404).json({ error: 'Preset not found' });
-            res.json({ success: true });
-        });
-
-        // ── Presence (current state) ──────────────────────────────────────────
-        app.get('/presence', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            res.json({
-                state: presenceHandler ? presenceHandler.getState() : 'unknown',
-                config: presenceHandler ? presenceHandler.getConfig() : null,
-            });
-        });
-
-        // ── Presence geofence (arrival from native Android geofence) ──────────
-        app.post('/presence/geofence', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            const transition = String(req.body?.transition ?? '');
-            if (transition !== 'enter' && transition !== 'exit') {
-                return res
-                    .status(400)
-                    .json({ error: "transition must be 'enter' or 'exit'" });
-            }
-            Logger.info(
-                `[presence] geofence webhook reçu: ${transition} (ip=${req.ip})`,
+        // ── Routers par domaine (routes/<domaine>.ts) ─────────────────────────
+        if (deviceHandler) {
+            app.use('/devices', deviceRoutes(requireAuth, deviceHandler));
+            app.use(
+                '/',
+                effectRoutes(requireAuth, deviceHandler, toolsHandler),
             );
-            if (!presenceHandler) {
-                return res.status(503).json({ error: 'presence unavailable' });
-            }
-            const cfg = presenceHandler.getConfig();
-            if (!cfg.geofence.enabled) {
-                return res.json({
-                    state: presenceHandler.getState(),
-                    ignored: true,
-                });
-            }
-            const state = presenceHandler.handleGeofence(transition);
-            res.json({ state });
-        });
-
-        app.get('/presence/config', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            res.json(presenceHandler ? presenceHandler.getConfig() : null);
-        });
-
-        app.put('/presence/config', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip))
-                return res.status(401).json({ error: 'Unauthorized' });
-            if (!presenceHandler)
-                return res.status(503).json({ error: 'presence unavailable' });
-            const body = req.body ?? {};
-            const patch: any = {};
-            if (body.geofence) patch.geofence = body.geofence;
-            if (body.mac) patch.mac = body.mac;
-            res.json(presenceHandler.setConfig(patch));
-        });
-
-        app.get('/presence/rules', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip))
-                return res.status(401).json({ error: 'Unauthorized' });
-            res.json(presenceHandler ? presenceHandler.listRules() : []);
-        });
-        app.put('/presence/rules', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip))
-                return res.status(401).json({ error: 'Unauthorized' });
-            if (!presenceHandler)
-                return res.status(503).json({ error: 'presence unavailable' });
-            try {
-                res.json(presenceHandler.replaceRules(req.body));
-            } catch (e: any) {
-                res.status(400).json({ error: String(e?.message ?? e) });
-            }
-        });
-
-        // ── Prompts (markdown files in prompts/ + data/prompts.json manifest) ──
-        const promptAuth = (req: any, res: any): boolean => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                res.status(401).json({ error: 'Unauthorized' });
-                return false;
-            }
-            return true;
-        };
-
-        // List files + their manifest policy (layer/enabled/order/domain).
-        app.get('/prompts', (req: any, res: any) => {
-            if (!promptAuth(req, res)) return;
-            // domains = the domain prompt slots the orchestrator can load, so
-            // the front can show expected (possibly missing) domain files.
-            res.json({
-                files: listPrompts(),
-                manifest: loadManifest(),
-                domains: expectedDomains(),
-            });
-        });
-
-        // Create a new prompt file (+ manifest entry).
-        app.post('/prompts', (req: any, res: any) => {
-            if (!promptAuth(req, res)) return;
-            const { file, content, layer, domain, enabled } = req.body ?? {};
-            if (typeof file !== 'string' || typeof content !== 'string') {
-                return res
-                    .status(400)
-                    .json({ error: 'file and content must be strings' });
-            }
-            try {
-                const manifest = createPrompt(file, content, {
-                    layer,
-                    domain,
-                    enabled,
-                });
-                res.json({ success: true, manifest });
-            } catch (e: any) {
-                res.status(400).json({ error: e.message });
-            }
-        });
-
-        // Import a prompt from a URL (created or overwritten, disabled by
-        // default so a heavy prompt never silently inflates every request).
-        app.post('/prompts/import', async (req: any, res: any) => {
-            if (!promptAuth(req, res)) return;
-            const { file, url, layer, domain, enabled } = req.body ?? {};
-            if (typeof file !== 'string' || typeof url !== 'string') {
-                return res
-                    .status(400)
-                    .json({ error: 'file and url must be strings' });
-            }
-            try {
-                const manifest = await importPromptFromUrl(file, url, {
-                    layer,
-                    domain,
-                    enabled,
-                });
-                res.json({ success: true, manifest });
-            } catch (e: any) {
-                res.status(400).json({ error: e.message });
-            }
-        });
-
-        // Patch a manifest entry (enabled / order / domain / layer).
-        app.patch('/prompts/manifest/*', (req: any, res: any) => {
-            if (!promptAuth(req, res)) return;
-            try {
-                const manifest = updatePromptEntry(
-                    req.params[0],
-                    req.body ?? {},
-                );
-                res.json({ success: true, manifest });
-            } catch (e: any) {
-                res.status(400).json({ error: e.message });
-            }
-        });
-
-        // Delete a prompt file (+ manifest entry).
-        app.delete('/prompts/*', (req: any, res: any) => {
-            if (!promptAuth(req, res)) return;
-            try {
-                const manifest = deletePrompt(req.params[0]);
-                res.json({ success: true, manifest });
-            } catch (e: any) {
-                res.status(400).json({ error: e.message });
-            }
-        });
-
-        // Overwrite an existing prompt file's content. :file may contain
-        // slashes (sub-folders) → wildcard param.
-        app.put('/prompts/*', (req: any, res: any) => {
-            if (!promptAuth(req, res)) return;
-            const file = req.params[0];
-            const { content } = req.body ?? {};
-            if (typeof content !== 'string') {
-                return res
-                    .status(400)
-                    .json({ error: 'content must be a string' });
-            }
-            try {
-                writePrompt(file, content);
-                res.json({ success: true });
-            } catch (e: any) {
-                res.status(400).json({ error: e.message });
-            }
-        });
-
-        // ── Chime cast (called internally by mcp-timer, no auth) ─────────────
-        // Receives { url } and casts the audio file to the default speaker.
-        app.post('/chime', async (req: any, res: any) => {
-            const { url } = req.body ?? {};
-            if (!url || !deviceHandler) return res.json({ ok: false });
-            try {
-                await deviceHandler('cast_media', {
-                    content_id: url,
-                    content_type: 'audio/mpeg',
-                    title: 'Minuteur',
-                });
-                Logger.info(`Chime cast: ${url}`);
-                return res.json({ ok: true });
-            } catch (e: any) {
-                Logger.error(`Chime cast failed: ${e.message}`);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        // ── Journal d'activité ────────────────────────────────────────────────
-        app.get('/activity', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            const limit = Math.min(400, Number(req.query?.limit) || 120);
-            res.json(readActivity(limit));
-        });
-
-        // ── Suivi de colis ────────────────────────────────────────────────────
-        app.get('/deliveries', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            res.json(listParcels());
-        });
-
-        app.post('/deliveries', async (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            const { tracking, carrier, label, url } = req.body ?? {};
-            if (!tracking || typeof tracking !== 'string') {
-                return res.status(400).json({ error: 'tracking requis' });
-            }
-            try {
-                const parcel = await addParcel({
-                    tracking,
-                    carrier,
-                    label,
-                    url,
-                });
-                res.json(parcel);
-            } catch (e: any) {
-                res.status(400).json({ error: e.message });
-            }
-        });
-
-        app.delete('/deliveries/:id', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            if (!removeParcel(String(req.params.id))) {
-                return res.status(404).json({ error: 'Colis introuvable' });
-            }
-            res.json({ ok: true });
-        });
-
-        app.get('/settings', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            res.json(getSettings());
-        });
-
-        app.put('/settings', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            try {
-                const saved = updateSettings(req.body ?? {});
-                // Apply live: patch process.env + adjust the logger level.
-                // Per-request consumers (LLM model, TTS) pick it up immediately;
-                // module-level constants (presence) take effect on next restart.
-                applyToEnv(saved);
-                (Logger as any).level = saved.logging.level;
-                res.json(saved);
-            } catch (err) {
-                res.status(400).json({
-                    error: err instanceof Error ? err.message : String(err),
-                });
-            }
-        });
-
-        // ── Proactivité (data/proactive.json) ─────────────────────────────────
-        app.get('/proactive', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            res.json(loadConfig());
-        });
-
-        app.put('/proactive', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            try {
-                const saved = saveConfig(req.body ?? {});
-                // Apply live: restart watchers with the new config.
-                proactiveHandler?.reload();
-                res.json(saved);
-            } catch (err) {
-                res.status(400).json({
-                    error: err instanceof Error ? err.message : String(err),
-                });
-            }
-        });
-
-        // ── Raw data/*.json editor (guardrailed) ──────────────────────────────
-        app.get('/data', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            res.json({ files: listDataFiles() });
-        });
-
-        app.get('/data/*', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            try {
-                res.json({ content: readDataFile(req.params[0]) });
-            } catch (e: any) {
-                res.status(400).json({ error: e.message });
-            }
-        });
-
-        app.put('/data/*', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            const { content } = req.body ?? {};
-            if (typeof content !== 'string') {
-                return res
-                    .status(400)
-                    .json({ error: 'content must be a string' });
-            }
-            try {
-                writeDataFile(req.params[0], content);
-                res.json({ success: true });
-            } catch (e: any) {
-                res.status(400).json({ error: e.message });
-            }
-        });
-
-        app.get('/integrations', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            // servers = current values (masked) ; catalog = expected keys per
-            // server so the front can render placeholders for unset infra.
-            res.json({
-                servers: maskIntegrations(loadIntegrations()),
-                catalog: INTEGRATIONS_CATALOG,
-            });
-        });
-
-        app.put('/integrations', async (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            try {
-                const patch = req.body?.servers ?? req.body ?? {};
-                saveIntegrations(patch);
-                // Respawn only the servers touched by this patch.
-                const affected = Object.keys(patch);
-                const reconnected: string[] = [];
-                if (integrationsHandler) {
-                    for (const name of affected) {
-                        if (await integrationsHandler.reconnect(name))
-                            reconnected.push(name);
-                    }
-                }
-                res.json({
-                    servers: maskIntegrations(loadIntegrations()),
-                    reconnected,
-                });
-            } catch (err) {
-                res.status(400).json({
-                    error: err instanceof Error ? err.message : String(err),
-                });
-            }
-        });
-
-        app.get('/irrigation/config', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            res.json(loadIrrigationConfig());
-        });
-
-        app.put('/irrigation/config', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            try {
-                const saved = saveIrrigationConfig(req.body);
-                res.json(saved);
-            } catch (err) {
-                res.status(400).json({
-                    error: err instanceof Error ? err.message : String(err),
-                });
-            }
-        });
-
-        app.get('/remotes/hue', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            res.json(getRemotesSnapshot());
-        });
-
-        app.put('/remotes/hue', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            try {
-                const saved = saveRemotesConfig(req.body);
-                res.json({ ...getRemotesSnapshot(), config: saved });
-            } catch (err) {
-                res.status(400).json({
-                    error: err instanceof Error ? err.message : String(err),
-                });
-            }
-        });
-
-        // ── FCM device token registration ─────────────────────────────────────
-        app.post('/devices/fcm-token', (req: any, res: any) => {
-            const bearer = req.headers['authorization']?.split(' ')[1];
-            if (!this.checkPassword(bearer, req.ip)) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-            const { token } = req.body ?? {};
-            if (!token || typeof token !== 'string') {
-                return res.status(400).json({ error: 'Missing token' });
-            }
-            saveFcmToken(token);
-            return res.json({ ok: true });
-        });
+        }
+        if (scenesHandler) {
+            app.use('/scenes', sceneRoutes(requireAuth, scenesHandler));
+        }
+        if (automationsHandler) {
+            app.use(
+                '/automations',
+                automationRoutes(requireAuth, automationsHandler),
+            );
+        }
+        if (conversationsHandler) {
+            app.use(
+                '/conversations',
+                conversationRoutes(requireAuth, conversationsHandler),
+            );
+        }
+        app.use('/memory', memoryRoutes(requireAuth));
+        app.use('/presence', presenceRoutes(requireAuth, presenceHandler));
+        app.use('/prompts', promptRoutes(requireAuth));
+        app.use(
+            '/',
+            configRoutes(requireAuth, integrationsHandler, proactiveHandler),
+        );
+        app.use('/', miscRoutes(requireAuth, deviceHandler));
 
         return new Promise((resolve, reject) => {
             this.server = app

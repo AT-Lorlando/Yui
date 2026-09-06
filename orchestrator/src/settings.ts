@@ -219,8 +219,15 @@ export function loadSettings(opts?: {
 // ── Module-level cache (used by the orchestrator + REST API) ─────────────────
 
 let current: Settings | null = null;
-let activeDir = 'data';
+// null tant qu'initSettings n'a pas tourné — résolu paresseusement via
+// defaultDir() : un updateSettings précoce écrivait sinon dans '<cwd>/data'
+// à plat (vécu : des settings de test ont atterri dans le vrai checkout).
+let activeDir: string | null = null;
 let activeEnv: EnvSource = process.env;
+
+function currentDir(): string {
+    return activeDir ?? defaultDir();
+}
 
 /** Initialise (or re-initialise) the singleton cache from disk. */
 export function initSettings(opts?: {
@@ -229,7 +236,7 @@ export function initSettings(opts?: {
 }): Settings {
     activeDir = opts?.dir ?? defaultDir();
     activeEnv = opts?.env ?? process.env;
-    current = loadSettings({ dir: activeDir, env: activeEnv });
+    current = loadSettings({ dir: currentDir(), env: activeEnv });
     return current;
 }
 
@@ -241,7 +248,7 @@ export function getSettings(): Settings {
 
 /** Re-read settings.json into the cache (for fs.watch hot-reload). */
 export function reloadSettings(): Settings {
-    current = loadSettings({ dir: activeDir, env: activeEnv });
+    current = loadSettings({ dir: currentDir(), env: activeEnv });
     return current;
 }
 
@@ -253,7 +260,7 @@ export function updateSettings(patch: DeepPartial<Settings>): Settings {
     const errors = validateOverlay(patch);
     if (errors.length) throw new Error(errors.join('; '));
 
-    const file = path.join(activeDir, FILENAME);
+    const file = path.join(currentDir(), FILENAME);
     let overlay: DeepPartial<Settings> = {};
     if (fs.existsSync(file)) {
         try {
@@ -263,7 +270,7 @@ export function updateSettings(patch: DeepPartial<Settings>): Settings {
         }
     }
     const nextOverlay = applyOverlay(overlay as Settings, patch);
-    fs.mkdirSync(activeDir, { recursive: true });
+    fs.mkdirSync(currentDir(), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(nextOverlay, null, 2));
 
     current = applyOverlay(settingsFromEnv(activeEnv), nextOverlay);
