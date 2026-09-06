@@ -87,7 +87,7 @@ class WhisperSTT:
         "allume, éteins, baisse, monte, règle, mets, lance, joue, coupe."
     )
 
-    def transcribe(self, audio_int16: np.ndarray) -> str:
+    def transcribe(self, audio_int16: np.ndarray, initial_prompt: str | None = None) -> str:
         """Transcribe 16kHz int16 PCM. Returns text or '' if silent/hallucination."""
         audio_float = audio_int16.astype(np.float32) / 32768.0
 
@@ -105,7 +105,7 @@ class WhisperSTT:
         segments, info = self.model.transcribe(
             audio_float,
             language="fr",
-            initial_prompt=self.INITIAL_PROMPT,
+            initial_prompt=initial_prompt or self.INITIAL_PROMPT,
             beam_size=5,
             best_of=5,
             condition_on_previous_text=False,
@@ -150,7 +150,17 @@ class WhisperSTT:
 # ---------------------------------------------------------------------------
 
 _stop_event = threading.Event()
+# Lecture TTS (ou réponse LLM) en cours — le pipeline continue d'écouter
+# pendant ce temps (barge-in) au lieu de bloquer comme avant.
+_speaking = threading.Event()
 _conversation_mode_until: float = 0.0
+
+# Fenêtre conversation : après une réponse, parler directement sans wake word.
+CONVERSATION_WINDOW_S = float(os.getenv("CONVERSATION_WINDOW_S", "20"))
+# Pendant que Yui parle, le seuil de wake est relevé (self-echo).
+WAKE_SPEAKING_BOOST = float(os.getenv("WAKE_SPEAKING_BOOST", "0.10"))
+# Lecture gapless (une session cast par réponse) — 0 pour l'ancien mode.
+TTS_GAPLESS = os.getenv("TTS_GAPLESS", "1").lower() not in ("0", "false", "no")
 
 
 def _post_order(text: str, reset_convo: bool = False) -> None:
@@ -158,7 +168,9 @@ def _post_order(text: str, reset_convo: bool = False) -> None:
     Send text to the orchestrator via SSE, TTS each sentence, play on Chromecast.
     Blocks until all TTS playback is complete.
     """
+    global _conversation_mode_until
     _stop_event.clear()
+    _speaking.set()
     log.info(f'Order ({"NEW convo" if reset_convo else "convo"}): "{text}"')
 
     play_queue: _queue.Queue = _queue.Queue()
@@ -245,7 +257,19 @@ def _post_order(text: str, reset_convo: bool = False) -> None:
 
     threading.Thread(target=_sse_reader, daemon=True).start()
 
-    # Playback loop — plays sentences in order
+    try:
+        if TTS_GAPLESS:
+            _play_gapless(play_queue)
+        else:
+            _play_per_sentence(play_queue)
+    finally:
+        _speaking.clear()
+        # Fenêtre conversation : on peut enchaîner sans re-dire le wake word.
+        _conversation_mode_until = time.time() + CONVERSATION_WINDOW_S
+
+
+def _play_per_sentence(play_queue: _queue.Queue) -> None:
+    """Ancien mode : un play_media par phrase (repli du gapless)."""
     while True:
         if _stop_event.is_set():
             break
@@ -266,6 +290,54 @@ def _post_order(text: str, reset_convo: bool = False) -> None:
             break
 
 
+def _play_gapless(play_queue: _queue.Queue) -> None:
+    """Une seule session cast : les phrases sont décodées en PCM et poussées
+    dans un flux continu — plus de trou entre les phrases, démarrage dès la
+    première phrase prête."""
+    from tts import open_stream, start_stream_cast, wait_stream_end, wav_to_pcm
+
+    stream = None
+    fell_back = False
+    while True:
+        if _stop_event.is_set():
+            break
+        try:
+            item = play_queue.get(timeout=0.1)
+        except _queue.Empty:
+            continue
+        if item is None:
+            break  # SSE reader sentinel
+        result = item.get()  # blocks until TTS is ready
+        if result is None or _stop_event.is_set():
+            continue
+        audio, mime = result
+        if fell_back:
+            play_audio_blocking(audio, mime, _stop_event)
+            continue
+        try:
+            pcm, rate = wav_to_pcm(audio)
+        except Exception as e:
+            log.error(f"wav decode failed ({e}) — fallback per-sentence")
+            fell_back = True
+            play_audio_blocking(audio, mime, _stop_event)
+            continue
+        if stream is None:
+            stream, url = open_stream(rate)
+            stream.push(pcm)
+            if not start_stream_cast(url):
+                stream.close()
+                stream = None
+                fell_back = True
+                play_audio_blocking(audio, mime, _stop_event)
+                continue
+        else:
+            stream.push_gap()
+            stream.push(pcm)
+    if stream is not None:
+        stream.close()
+        wait_stream_end(stream, _stop_event)
+
+
 # ---------------------------------------------------------------------------
 # Server-side continuous pipeline
 # ---------------------------------------------------------------------------
@@ -275,6 +347,7 @@ from audio_source import AudioSource
 from wake import WakeDetector, OWW_CHUNK
 from vad_capture import UtteranceCapture
 from tuning import load_tuning, save_tuning
+import vocab
 from debug_hub import DebugHub
 from config import AUDIO_UDP_PORT, DEBUG_WS_PORT, WAKEWORD_NAME
 
@@ -296,6 +369,7 @@ class VoicePipeline:
         self.source = AudioSource(AUDIO_UDP_PORT, get_gain=lambda: self.tuning.gain)
         self.wake = WakeDetector(self.model_path)
         self.running = False
+        self._speaker: threading.Thread | None = None
 
     def _new_capture(self) -> UtteranceCapture:
         import webrtcvad
@@ -307,12 +381,20 @@ class VoicePipeline:
         cap.reset()
         utterance = None
         while self.running and utterance is None:
+            # Fenêtre conversation : si personne ne parle avant l'expiration,
+            # on rend la main (sinon la capture attendait indéfiniment).
+            if (
+                conversation
+                and not cap.started
+                and time.time() >= _conversation_mode_until
+            ):
+                return
             chunk = self.source.read(OWW_CHUNK)
             self.hub.publish_audio(chunk)
             utterance = cap.feed(chunk)
         if utterance is None or len(utterance) < 16000 // 2:    # < 0.5s -> ignore
             return
-        text = self.stt.transcribe(utterance)
+        text = self.stt.transcribe(utterance, initial_prompt=vocab.get_prompt())
         _save_debug_audio(utterance, "utterance")
         if not text.strip():
             log.info("empty transcription - ignored")
@@ -327,7 +409,12 @@ class VoicePipeline:
         if not self.tuning.send_to_ai:
             log.info(f"send_to_ai OFF — dry-run, not forwarding: {clean!r}")
             return
-        _post_order(clean, reset_convo=not conversation)
+        # Thread parleur : le pipeline retourne écouter tout de suite —
+        # c'est ce qui rend le barge-in possible pendant la réponse.
+        self._speaker = threading.Thread(
+            target=_post_order, args=(clean, not conversation), daemon=True
+        )
+        self._speaker.start()
 
     def _save_wake_wav(self, pcm: np.ndarray) -> str:
         import wave, time
@@ -338,17 +425,50 @@ class VoicePipeline:
             w.writeframes(pcm.tobytes())
         return f"/voice-debug/wakes/{name}"
 
+    def _interrupt_speaker(self) -> None:
+        """Coupe la lecture TTS en cours et jette l'audio de Yui du tampon."""
+        _stop_event.set()
+        sp = self._speaker
+        if sp is not None:
+            sp.join(timeout=4)
+        self.source.drain()
+        log.info("barge-in: lecture interrompue")
+
     def run(self) -> None:
         self.running = True
         self.source.start()
         hot = 0
+        was_speaking = False
         log.info("Voice pipeline listening (UDP audio -> OWW -> VAD -> Whisper)")
         while self.running:
             chunk = self.source.read(OWW_CHUNK)
             self.hub.publish_audio(chunk)
-            in_convo = time.time() < _conversation_mode_until
+            speaking = _speaking.is_set()
+            if was_speaking and not speaking:
+                # Fin de lecture : jeter la voix de Yui captée par le micro.
+                self.source.drain()
+                self.wake.reset()
+                hot = 0
+            was_speaking = speaking
+
             score = self.wake.score(chunk)
             self.hub.publish_score(score)
+
+            if speaking:
+                # Pendant que Yui parle : seule l'écoute du wake word reste
+                # active, seuil relevé (self-echo). « Yui » → barge-in.
+                threshold = min(0.95, self.tuning.threshold + WAKE_SPEAKING_BOOST)
+                hot = hot + 1 if score >= threshold else 0
+                if hot >= WAKE_PATIENCE:
+                    hot = 0
+                    self._interrupt_speaker()
+                    play_chime()
+                    log.info(f"barge-in wake (score={score:.3f})")
+                    self._capture_and_handle(conversation=True)
+                    self.wake.reset()
+                continue
+
+            in_convo = time.time() < _conversation_mode_until
             hot = hot + 1 if score >= self.tuning.threshold else 0
             if hot >= WAKE_PATIENCE or in_convo:
                 hot = 0
@@ -376,7 +496,16 @@ def main() -> None:
     def on_tuning_change() -> None:
         save_tuning(tuning, _TUNING_PATH)
 
-    hub = DebugHub(tuning, on_tuning_change, DEBUG_WS_PORT)
+    import tts as tts_module
+    tts_module.set_tuning(tuning)
+    vocab.start_refresher()
+
+    def on_say(text: str) -> None:
+        threading.Thread(
+            target=tts_module.speak, args=(text,), daemon=True
+        ).start()
+
+    hub = DebugHub(tuning, on_tuning_change, DEBUG_WS_PORT, on_say=on_say)
     stt = WhisperSTT(args.whisper_model, args.whisper_device, args.whisper_compute)
     pipeline = VoicePipeline(stt, hub, tuning)
 

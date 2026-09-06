@@ -17,6 +17,7 @@ import logging
 import os
 import random
 import struct
+import queue
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -41,16 +42,108 @@ log = logging.getLogger("voice")
 
 # ── TTS generation — XTTS v2 ─────────────────────────────────────────────────
 
+# Réglages TTS live (page /debug) — injectés par server.py ; None = env only.
+_tuning = None
+
+
+def set_tuning(tuning) -> None:
+    global _tuning
+    _tuning = tuning
+
+
+def _tts_params() -> tuple[float, str, str]:
+    """(speed, speaker, speaker_wav) — le tuning live prime sur l'env."""
+    speed, speaker, wav = XTTS_SPEED, XTTS_SPEAKER, XTTS_SPEAKER_WAV
+    t = _tuning
+    if t is not None:
+        if getattr(t, "tts_speed", 0.0):
+            speed = t.tts_speed
+        ts = getattr(t, "tts_speaker", "")
+        if ts == "clone":
+            wav = XTTS_SPEAKER_WAV
+        elif ts:
+            speaker, wav = ts, ""
+    return speed, speaker, wav
+
+
 def generate_tts(text: str) -> tuple[bytes, str]:
     """Call the local XTTS server and return (wav_bytes, 'audio/wav')."""
-    payload: dict = {"text": text, "language": "fr", "speed": XTTS_SPEED}
-    if XTTS_SPEAKER_WAV:
-        payload["speaker_wav"] = XTTS_SPEAKER_WAV
+    speed, speaker, speaker_wav = _tts_params()
+    payload: dict = {"text": text, "language": "fr", "speed": speed}
+    if speaker_wav:
+        payload["speaker_wav"] = speaker_wav
     else:
-        payload["speaker"] = XTTS_SPEAKER
+        payload["speaker"] = speaker
     resp = requests.post(XTTS_SERVER_URL, json=payload, timeout=30)
     resp.raise_for_status()
     return resp.content, "audio/wav"
+
+
+# ── Flux gapless ─────────────────────────────────────────────────────────────
+# Une seule session cast par réponse : les phrases TTS sont décodées en PCM et
+# poussées dans un flux WAV servi en continu (taille RIFF « infinie », HTTP/1.0
+# délimité par la fermeture). Fini le play_media + block_until_active PAR
+# phrase (~1 s de trou entre chaque).
+
+# Silence inséré entre deux phrases (respiration naturelle).
+TTS_GAP_MS = int(os.getenv("TTS_GAP_MS", "150"))
+
+
+class PcmStream:
+    """File de PCM int16 mono consommée par le handler HTTP."""
+
+    def __init__(self, rate: int):
+        self.rate = rate
+        self.q: "queue.Queue[bytes | None]" = queue.Queue()
+        self.pushed_s = 0.0
+        self.closed = False
+
+    def push(self, pcm: np.ndarray) -> None:
+        if self.closed or len(pcm) == 0:
+            return
+        self.q.put(pcm.astype("<i2").tobytes())
+        self.pushed_s += len(pcm) / self.rate
+
+    def push_gap(self, ms: int = TTS_GAP_MS) -> None:
+        if ms > 0:
+            self.push(np.zeros(self.rate * ms // 1000, dtype=np.int16))
+
+    def close(self) -> None:
+        self.closed = True
+        self.q.put(None)
+
+
+def wav_to_pcm(wav_bytes: bytes) -> tuple[np.ndarray, int]:
+    """WAV → (PCM int16 mono, rate)."""
+    data, rate = sf.read(io.BytesIO(wav_bytes), dtype="int16", always_2d=True)
+    return data.mean(axis=1).astype(np.int16), int(rate)
+
+
+def stream_wav_header(rate: int) -> bytes:
+    """En-tête WAV à tailles « infinies » (0xFFFFFFFF) pour un flux sans fin
+    connue — les lecteurs (Chromecast inclus) lisent jusqu'à la fermeture."""
+    return (
+        b"RIFF" + struct.pack("<I", 0xFFFFFFFF) + b"WAVE"
+        + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+        + b"data" + struct.pack("<I", 0xFFFFFFFF)
+    )
+
+
+_stream_lock = threading.Lock()
+_current_stream: PcmStream | None = None
+
+
+def open_stream(rate: int) -> tuple[PcmStream, str]:
+    """Enregistre un nouveau flux et renvoie (stream, url à caster)."""
+    global _current_stream
+    stream = PcmStream(rate)
+    with _stream_lock:
+        old = _current_stream
+        _current_stream = stream
+    if old and not old.closed:
+        old.close()
+    url = f"http://{LOCAL_IP}:{TTS_PORT}/stream.wav?t={int(time.time() * 1000)}"
+    return stream, url
 
 
 # ── TTS HTTP server (Chromecast fetches audio from here) ─────────────────────
@@ -62,6 +155,8 @@ _tts_lock = threading.Lock()
 
 class _TtsHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.startswith("/stream.wav"):
+            return self._serve_stream()
         with _tts_lock:
             audio, mime = _tts_audio, _tts_mime
         self.send_response(200)
@@ -69,6 +164,32 @@ class _TtsHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(audio)))
         self.end_headers()
         self.wfile.write(audio)
+
+    def _serve_stream(self):
+        with _stream_lock:
+            stream = _current_stream
+        if stream is None:
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.protocol_version = "HTTP/1.0"  # fin de flux = fermeture
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/wav")
+        self.end_headers()
+        try:
+            self.wfile.write(stream_wav_header(stream.rate))
+            self.wfile.flush()
+            while True:
+                try:
+                    chunk = stream.q.get(timeout=30)
+                except queue.Empty:
+                    break
+                if chunk is None:
+                    break
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # le lecteur a raccroché (stop)
 
     def log_message(self, *_):
         pass
@@ -185,6 +306,45 @@ def play_audio_blocking(
         time.sleep(0.2)  # short tail buffer for clean transition
     except Exception as e:
         log.error(f"Playback error: {e}")
+
+
+def start_stream_cast(url: str) -> bool:
+    """Lance la lecture du flux gapless sur l'enceinte. False si échec
+    (l'appelant retombe sur la lecture phrase par phrase)."""
+    if not _cast:
+        return False
+    try:
+        mc = _cast.media_controller
+        mc.play_media(url, "audio/wav", stream_type="LIVE")
+        mc.block_until_active(timeout=10)
+        return True
+    except Exception as e:
+        log.error(f"Stream cast failed: {e}")
+        return False
+
+
+def wait_stream_end(stream: PcmStream, stop_event: threading.Event) -> None:
+    """Bloque jusqu'à la fin de lecture du flux (durée poussée écoulée) ou
+    stop_event. Coupe le player dans tous les cas (flux LIVE)."""
+    if not _cast:
+        return
+    mc = _cast.media_controller
+    started = time.time()
+    while True:
+        if stop_event.is_set():
+            break
+        played = time.time() - started
+        if stream.closed and played >= stream.pushed_s + 1.0:
+            state = getattr(mc.status, "player_state", None)
+            if state not in ("PLAYING", "BUFFERING"):
+                break
+            if played >= stream.pushed_s + 6.0:
+                break  # garde-fou si le player ne rend jamais IDLE
+        time.sleep(0.1)
+    try:
+        mc.stop()
+    except Exception:
+        pass
 
 
 # ── Simple speak (used by the /speak scheduler endpoint) ─────────────────────

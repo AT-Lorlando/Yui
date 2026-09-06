@@ -28,6 +28,12 @@ class UtteranceCapture:
         self._silence_run = 0
         self._frames_since_start = 0
 
+    @property
+    def started(self) -> bool:
+        """La parole a-t-elle commencé ? (fenêtre conversation : on n'abandonne
+        jamais une utterance déjà entamée, même si la fenêtre expire.)"""
+        return self._started
+
     def feed(self, chunk_int16: np.ndarray) -> Optional[np.ndarray]:
         self._tail = np.concatenate([self._tail, chunk_int16])
         while len(self._tail) >= self._frame:

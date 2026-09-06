@@ -15,9 +15,11 @@ class VoiceTuning:
     vad_aggressiveness: int = 2     # webrtcvad aggressiveness [0,3]
     gain: float = 1.0               # software input gain [0,4]
     send_to_ai: bool = True         # if False, transcribe but don't forward to the LLM
+    tts_speed: float = 0.0          # XTTS speed [0.7,1.4] — 0 = défaut env
+    tts_speaker: str = ""           # XTTS speaker — "" = défaut env, "clone" = XTTS_SPEAKER_WAV
 
     def update(self, *, threshold=None, vad_aggressiveness=None, gain=None,
-               send_to_ai=None) -> None:
+               send_to_ai=None, tts_speed=None, tts_speaker=None) -> None:
         if threshold is not None:
             self.threshold = max(0.0, min(1.0, float(threshold)))
         if vad_aggressiveness is not None:
@@ -26,6 +28,11 @@ class VoiceTuning:
             self.gain = max(0.0, min(4.0, float(gain)))
         if send_to_ai is not None:
             self.send_to_ai = bool(send_to_ai)
+        if tts_speed is not None:
+            v = float(tts_speed)
+            self.tts_speed = 0.0 if v == 0 else max(0.7, min(1.4, v))
+        if tts_speaker is not None:
+            self.tts_speaker = str(tts_speaker)[:60]
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -41,6 +48,8 @@ def load_tuning(path: str) -> VoiceTuning:
             vad_aggressiveness=data.get("vad_aggressiveness"),
             gain=data.get("gain"),
             send_to_ai=data.get("send_to_ai"),
+            tts_speed=data.get("tts_speed"),
+            tts_speaker=data.get("tts_speaker"),
         )
         return t
     except (FileNotFoundError, json.JSONDecodeError):

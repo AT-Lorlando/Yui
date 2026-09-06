@@ -56,6 +56,13 @@ class AudioSource:
             return scaled.astype(np.int16)
         return out
 
+    def drain(self) -> None:
+        """Vide le tampon — jeté après une lecture TTS pour ne pas re-traiter
+        la voix de Yui captée par le micro (self-echo)."""
+        with self._cond:
+            self._buf.clear()
+            self._available = 0
+
     def start(self) -> None:
         self._running = True
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

@@ -23,9 +23,11 @@ log = logging.getLogger("voice")
 
 
 class DebugHub:
-    def __init__(self, tuning, on_tuning_change: Callable[[], None], port: int):
+    def __init__(self, tuning, on_tuning_change: Callable[[], None], port: int,
+                 on_say: Callable[[str], None] | None = None):
         self._tuning = tuning
         self._on_tuning_change = on_tuning_change
+        self._on_say = on_say
         self._port = port
         self._clients: set = set()
         self._listeners: set = set()
@@ -81,9 +83,15 @@ class DebugHub:
                         vad_aggressiveness=msg.get("vad_aggressiveness"),
                         gain=msg.get("gain"),
                         send_to_ai=msg.get("send_to_ai"),
+                        tts_speed=msg.get("tts_speed"),
+                        tts_speaker=msg.get("tts_speaker"),
                     )
                     self._on_tuning_change()
                     await self._broadcast_json({"type": "tuning", **self._tuning.to_dict()})
+                elif msg.get("type") == "say":
+                    text = str(msg.get("text") or "").strip()[:300]
+                    if text and self._on_say:
+                        self._on_say(text)
                 elif msg.get("type") == "listen":
                     if msg.get("on"):
                         self._listeners.add(ws)
