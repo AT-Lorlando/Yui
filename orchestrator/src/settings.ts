@@ -31,6 +31,11 @@ export interface Settings {
         profile: string;
         /** Profil utilisé pour les ordres complexes quand profile = auto. */
         smartProfile: string;
+        /** Régime de raisonnement du modèle local : auto | always | never. */
+        thinking: string;
+        /** Second petit serveur (classification + domotique) — optionnel. */
+        fastBaseUrl?: string;
+        fastModel?: string;
     };
     tts: { speed: number; speaker: string };
     logging: { level: LogLevel };
@@ -77,6 +82,9 @@ export function settingsFromEnv(env: EnvSource): Settings {
             baseUrl: env.LLM_BASE_URL,
             profile: env.LLM_PROFILE ?? 'custom',
             smartProfile: env.LLM_SMART_PROFILE ?? 'claude',
+            thinking: env.LLM_THINKING ?? 'auto',
+            fastBaseUrl: env.LLM_FAST_BASE_URL,
+            fastModel: env.LLM_FAST_MODEL,
         },
         tts: {
             speed: num(env.XTTS_SPEED, 1.0),

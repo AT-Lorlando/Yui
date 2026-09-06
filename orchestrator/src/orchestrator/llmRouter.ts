@@ -2,18 +2,31 @@ import OpenAI from 'openai';
 import Logger from '../logger';
 import { getSettings } from '../settings';
 import env from '../env';
+import {
+    classifyOrder,
+    isComplexOrder,
+    type OrderCategory,
+} from './llmClassifier';
+
+export { isComplexOrder };
 
 /**
- * Routage LLM — choisir le modèle par requête.
+ * Routage LLM — choisir le modèle ET le régime de raisonnement par requête.
  *
- * Trois profils : `custom` (le modèle des réglages — le llama-server local),
- * `deepseek` et `claude` (presets cloud, clé dans le .env). Le réglage
- * `llm.profile` force un profil, ou vaut `auto` : les ordres simples
- * (« éteins le salon ») restent sur le local, les ordres complexes
- * (planification, rédaction, raisonnement) partent sur `llm.smartProfile`.
+ * Profils (`settings.json llm.profile`) : `custom` (llama-server local),
+ * `deepseek`, `claude` (presets cloud), ou `auto`. En `auto`, un classifieur
+ * (llmClassifier.ts : chemin court 0 ms → LLM éclair → heuristique) trie :
+ *  - `domotique` / `conversation` → local, **thinking coupé**
+ *    (chat_template_kwargs.enable_thinking=false — mesuré : 0,27 s au lieu de
+ *    plusieurs secondes de raisonnement par tour sur Qwen3.6) ;
+ *  - `complexe` → `llm.smartProfile` (clé cloud) sinon local avec thinking.
  *
- * Tout est OpenAI-compatible (l'API Anthropic expose /v1/chat/completions) :
- * un seul SDK, des clients mis en cache par (baseURL, clé).
+ * `llm.thinking` force le régime : 'auto' (défaut), 'always', 'never'.
+ * `llm.fastBaseUrl`/`llm.fastModel` (optionnels) : un second petit serveur
+ * (ex. llama-server Qwen3-1.7B sur :11436) qui prend la classification ET la
+ * catégorie domotique — sinon tout passe par le modèle local principal.
+ *
+ * Tout est OpenAI-compatible : un seul SDK, clients en cache par (URL, clé).
  */
 
 interface Preset {
@@ -39,23 +52,14 @@ export interface LlmChoice {
     client: OpenAI;
     model: string;
     profile: string;
-}
-
-/**
- * Heuristique de complexité — pur, testé. Un ordre est « complexe » s'il est
- * long, multi-étapes, ou demande du raisonnement/de la rédaction plutôt
- * qu'une commande domotique directe.
- */
-const SMART_KEYWORDS =
-    /\b(planifie|organise|compare|analyse|résume|resume|explique|pourquoi|rédige|redige|écris|ecris|propose|réfléchis|reflechis|prépare|recherche|idée|idees|conseil|stratégie|strategie|calcule|traduis)\b/i;
-
-export function isComplexOrder(order: string): boolean {
-    if (order.length > 180) return true;
-    if (SMART_KEYWORDS.test(order)) return true;
-    // Multi-étapes explicites : « fais A, puis B, ensuite C »
-    const steps = (order.match(/\b(puis|ensuite|après ça|apres ca)\b/gi) ?? [])
-        .length;
-    return steps >= 2;
+    /** Catégorie détectée (auto) — pour le journal/les logs. */
+    category?: OrderCategory;
+    /**
+     * Corps additionnel à joindre à chat.completions.create — porte
+     * chat_template_kwargs pour couper le thinking sur le local. Vide pour
+     * les presets cloud (paramètre inconnu chez eux).
+     */
+    extraBody: Record<string, unknown>;
 }
 
 const clientCache = new Map<string, OpenAI>();
@@ -70,12 +74,47 @@ function clientFor(baseURL: string | undefined, apiKey: string): OpenAI {
     return c;
 }
 
-function customChoice(): LlmChoice {
-    const llm = getSettings().llm;
+type LlmSettings = ReturnType<typeof getSettings>['llm'] & {
+    profile?: string;
+    smartProfile?: string;
+    thinking?: string;
+    fastBaseUrl?: string;
+    fastModel?: string;
+};
+
+const NO_THINKING = { chat_template_kwargs: { enable_thinking: false } };
+
+/** Le régime de thinking demandé s'applique-t-il ? (local uniquement) */
+function thinkingBody(
+    settings: LlmSettings,
+    wantThinking: boolean,
+): Record<string, unknown> {
+    const policy = settings.thinking ?? 'auto';
+    if (policy === 'always') return {};
+    if (policy === 'never') return NO_THINKING;
+    return wantThinking ? {} : NO_THINKING;
+}
+
+function customChoice(settings: LlmSettings, wantThinking: boolean): LlmChoice {
     return {
-        client: clientFor(llm.baseUrl ?? env.LLM_BASE_URL, env.LLM_API_KEY),
-        model: llm.model || env.LLM_MODEL,
+        client: clientFor(
+            settings.baseUrl ?? env.LLM_BASE_URL,
+            env.LLM_API_KEY,
+        ),
+        model: settings.model || env.LLM_MODEL,
         profile: 'custom',
+        extraBody: thinkingBody(settings, wantThinking),
+    };
+}
+
+/** Petit modèle dédié (classification + domotique) si configuré. */
+function fastChoice(settings: LlmSettings): LlmChoice | null {
+    if (!settings.fastBaseUrl || !settings.fastModel) return null;
+    return {
+        client: clientFor(settings.fastBaseUrl, env.LLM_API_KEY),
+        model: settings.fastModel,
+        profile: 'fast',
+        extraBody: thinkingBody(settings, false),
     };
 }
 
@@ -93,35 +132,45 @@ function presetChoice(name: string): LlmChoice | null {
         client: clientFor(preset.baseURL, apiKey),
         model: preset.model,
         profile: name,
+        extraBody: {},
     };
 }
 
 /**
- * Choisit le LLM pour un ordre donné, selon `llm.profile` des réglages :
- * `custom` (défaut), `deepseek`, `claude`, ou `auto` (complexité).
+ * Choisit le LLM pour un ordre, selon `llm.profile` :
+ * `custom` (défaut), `deepseek`, `claude`, ou `auto` (classification).
  */
-export function resolveLlm(order?: string): LlmChoice {
-    const settings = getSettings().llm as {
-        profile?: string;
-        smartProfile?: string;
-    } & ReturnType<typeof getSettings>['llm'];
+export async function resolveLlm(order?: string): Promise<LlmChoice> {
+    const settings = getSettings().llm as LlmSettings;
     const profile = settings.profile ?? 'custom';
 
-    if (profile === 'auto') {
-        if (order && isComplexOrder(order)) {
-            const smart = presetChoice(settings.smartProfile ?? 'claude');
-            if (smart) {
-                Logger.info(
-                    `[llm] ordre complexe → profil "${smart.profile}" (${smart.model})`,
-                );
-                return smart;
-            }
+    if (profile !== 'auto') {
+        if (profile !== 'custom') {
+            const choice = presetChoice(profile);
+            if (choice) return choice;
         }
-        return customChoice();
+        // Hors auto : le thinking suit la politique, régime « réfléchi ».
+        return customChoice(settings, true);
     }
-    if (profile !== 'custom') {
-        const choice = presetChoice(profile);
-        if (choice) return choice;
+
+    if (!order) return customChoice(settings, false);
+
+    const fast = fastChoice(settings);
+    const classifier = fast ?? customChoice(settings, false);
+    const { category, source } = await classifyOrder(
+        order,
+        classifier.client,
+        classifier.model,
+    );
+    Logger.info(`[llm] ordre classé "${category}" (${source})`);
+
+    if (category === 'complexe') {
+        const smart = presetChoice(settings.smartProfile ?? 'claude');
+        if (smart) return { ...smart, category };
+        return { ...customChoice(settings, true), category };
     }
-    return customChoice();
+    // domotique / conversation → le petit modèle s'il existe, sinon le
+    // local principal — thinking coupé dans les deux cas.
+    if (category === 'domotique' && fast) return { ...fast, category };
+    return { ...customChoice(settings, false), category };
 }

@@ -50,6 +50,14 @@ import { resolveLlm } from './llmRouter';
 const HISTORY_MAX = 10;
 
 /**
+ * Streaming du tour final : nombre de caractères retenus avant d'émettre.
+ * Un préambule pré-tool-call dépasse rarement ce seuil sans que les tool
+ * calls n'aient commencé ; au-delà, on considère la réponse comme finale et
+ * les tokens partent au TTS au fil de l'eau.
+ */
+const STREAM_HOLD_CHARS = Number(process.env.STREAM_HOLD_CHARS ?? 48);
+
+/**
  * Strips markdown syntax and emojis from a TTS-bound response.
  * The LLM is instructed not to use markdown, but this is a safety net
  * in case it ignores the rule (e.g. after a model update).
@@ -411,7 +419,10 @@ export class Orchestrator {
                 { role: 'system', content: system },
                 { role: 'user', content: user },
             ],
-        });
+            // Reformulations proactives, corrélation colis… : pas besoin de
+            // raisonner, besoin d'être rapide (ignoré hors llama.cpp).
+            chat_template_kwargs: { enable_thinking: false },
+        } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
         return response.choices[0]?.message?.content?.trim() ?? '';
     }
 
@@ -447,7 +458,7 @@ export class Orchestrator {
         const MAX_TURNS = 10;
         let finalResponse = '';
 
-        const llm = resolveLlm(order);
+        const llm = await resolveLlm(order);
         for (let turn = 0; turn < MAX_TURNS; turn++) {
             Logger.debug(
                 `LLM turn ${turn + 1}/${MAX_TURNS} (${llm.profile}:${
@@ -461,7 +472,8 @@ export class Orchestrator {
                 tools: allTools.length > 0 ? allTools : undefined,
                 tool_choice: allTools.length > 0 ? 'auto' : undefined,
                 temperature: 0,
-            });
+                ...llm.extraBody,
+            } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
 
             const choice = response.choices[0];
             const assistantMessage = choice.message;
@@ -526,11 +538,8 @@ export class Orchestrator {
         const story = state.story;
 
         Logger.info(`Processing order (stream): "${order}"`);
-        logActivity(
-            'order',
-            order.length > 80 ? order.slice(0, 80) + '…' : order,
-            `LLM ${resolveLlm(order).profile}`,
-        );
+        const t0 = Date.now();
+        const timing: string[] = [];
 
         // Build filter context: current order + all previous user messages in the
         // session so follow-up phrases like "laisse tomber" or "annule" still have
@@ -563,13 +572,20 @@ export class Orchestrator {
         const MAX_TURNS = 10;
         let finalResponse = '';
 
-        const llm = resolveLlm(order);
+        const llm = await resolveLlm(order);
+        timing.push(`route=${Date.now() - t0}ms`);
+        logActivity(
+            'order',
+            order.length > 80 ? order.slice(0, 80) + '…' : order,
+            `LLM ${llm.profile}${llm.category ? ` (${llm.category})` : ''}`,
+        );
         for (let turn = 0; turn < MAX_TURNS; turn++) {
             Logger.debug(
                 `LLM turn ${turn + 1}/${MAX_TURNS} (stream, ${llm.profile}:${
                     llm.model
                 })`,
             );
+            const tTurn = Date.now();
 
             const stream = await llm.client.chat.completions.create({
                 model: llm.model,
@@ -581,15 +597,19 @@ export class Orchestrator {
                 ...(options?.maxTokens
                     ? { max_tokens: options.maxTokens }
                     : {}),
-            });
+                ...llm.extraBody,
+            } as OpenAI.Chat.ChatCompletionCreateParamsStreaming);
 
-            // Accumulate the response from streaming chunks.
-            // Tokens are buffered and NOT yielded yet — we must first confirm
-            // this is the final text turn (no tool calls). If the LLM emits
-            // content alongside tool calls (Kimi K2 / DeepSeek do this), we
-            // must discard that content so TTS doesn't speak before tools run.
+            // Accumulate the response from streaming chunks. Un LLM qui va
+            // appeler des outils peut émettre un préambule texte avant ses
+            // tool calls (Kimi K2 / DeepSeek) — ce texte ne doit pas partir
+            // au TTS. Mais bufferiser TOUT le tour final tuait le
+            // sentence-pipelining (le TTS ne démarrait qu'à la toute fin).
+            // Compromis : on retient les STREAM_HOLD_CHARS premiers
+            // caractères ; passé ce seuil sans le moindre tool call, c'est
+            // une vraie réponse → les tokens partent au fil de l'eau.
             let contentAcc = '';
-            const tokenBuffer: string[] = [];
+            let streamedUpTo = 0; // longueur déjà émise (post-hold)
             const toolCallsAcc = new Map<
                 number,
                 { id: string; name: string; arguments: string }
@@ -600,7 +620,17 @@ export class Orchestrator {
 
                 if (delta?.content) {
                     contentAcc += delta.content;
-                    tokenBuffer.push(delta.content); // buffer — don't yield yet
+                    if (
+                        toolCallsAcc.size === 0 &&
+                        turn < MAX_TURNS &&
+                        contentAcc.length >= STREAM_HOLD_CHARS
+                    ) {
+                        const clean = stripMarkdownForTts(contentAcc);
+                        if (clean.length > streamedUpTo) {
+                            yield clean.slice(streamedUpTo);
+                            streamedUpTo = clean.length;
+                        }
+                    }
                 }
 
                 if (delta?.tool_calls) {
@@ -651,20 +681,35 @@ export class Orchestrator {
                     yield { tool: tc.function.name, args: parsedArgs };
                 }
 
+                timing.push(
+                    `turn${turn + 1}=${Date.now() - tTurn}ms(${
+                        toolCalls.length
+                    } outil(s))`,
+                );
+                const tTools = Date.now();
                 await this.runToolCalls(
                     toolCalls,
                     story,
                     messages,
                     outputChannel,
                 );
+                timing.push(`tools=${Date.now() - tTools}ms`);
             } else {
-                // Final text response — strip markdown then yield
+                // Final text response — émettre le reliquat non streamé.
                 finalResponse = stripMarkdownForTts(contentAcc);
-                yield finalResponse;
+                if (finalResponse.length > streamedUpTo) {
+                    yield finalResponse.slice(streamedUpTo);
+                }
+                timing.push(`turn${turn + 1}=${Date.now() - tTurn}ms(final)`);
                 story.add({ role: 'assistant', content: finalResponse });
                 break;
             }
         }
+        Logger.info(
+            `[timing] "${order.slice(0, 40)}" → ${timing.join(' ')} total=${
+                Date.now() - t0
+            }ms`,
+        );
 
         if (!finalResponse) {
             finalResponse = 'Tâche effectuée.';

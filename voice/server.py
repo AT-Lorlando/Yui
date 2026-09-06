@@ -150,6 +150,7 @@ class WhisperSTT:
 # ---------------------------------------------------------------------------
 
 _stop_event = threading.Event()
+_order_t0: float = 0.0
 # Lecture TTS (ou réponse LLM) en cours — le pipeline continue d'écouter
 # pendant ce temps (barge-in) au lieu de bloquer comme avant.
 _speaking = threading.Event()
@@ -257,6 +258,8 @@ def _post_order(text: str, reset_convo: bool = False) -> None:
 
     threading.Thread(target=_sse_reader, daemon=True).start()
 
+    global _order_t0
+    _order_t0 = time.time()
     try:
         if TTS_GAPLESS:
             _play_gapless(play_queue)
@@ -322,6 +325,7 @@ def _play_gapless(play_queue: _queue.Queue) -> None:
             play_audio_blocking(audio, mime, _stop_event)
             continue
         if stream is None:
+            log.info(f"[timing] premier audio prêt {time.time() - _order_t0:.2f}s après l'ordre")
             stream, url = open_stream(rate)
             stream.push(pcm)
             if not start_stream_cast(url):
@@ -394,7 +398,9 @@ class VoicePipeline:
             utterance = cap.feed(chunk)
         if utterance is None or len(utterance) < 16000 // 2:    # < 0.5s -> ignore
             return
+        t_stt = time.time()
         text = self.stt.transcribe(utterance, initial_prompt=vocab.get_prompt())
+        log.info(f"[timing] STT {time.time() - t_stt:.2f}s ({len(utterance)/16000:.1f}s d'audio)")
         _save_debug_audio(utterance, "utterance")
         if not text.strip():
             log.info("empty transcription - ignored")
