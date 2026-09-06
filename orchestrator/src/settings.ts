@@ -38,6 +38,8 @@ export interface Settings {
         fastModel?: string;
     };
     tts: { speed: number; speaker: string };
+    /** Préférences d'affichage de l'app (partagées entre appareils). */
+    ui: { sceneLabelOrder: string[] };
     logging: { level: LogLevel };
     conversation: { windowSeconds: number };
     deviceState: { refreshMs: number };
@@ -90,6 +92,7 @@ export function settingsFromEnv(env: EnvSource): Settings {
             speed: num(env.XTTS_SPEED, 1.0),
             speaker: env.XTTS_SPEAKER ?? 'Lilya Stainthorpe',
         },
+        ui: { sceneLabelOrder: [] },
         logging: {
             level: (env.LOG_LEVEL as LogLevel) ?? 'info',
         },
@@ -177,6 +180,15 @@ export function validateOverlay(overlay: DeepPartial<Settings>): string[] {
     };
 
     positive(o.tts?.speed, 'tts.speed');
+    if (o.ui?.sceneLabelOrder !== undefined) {
+        const order = o.ui.sceneLabelOrder;
+        if (
+            !Array.isArray(order) ||
+            order.some((l) => typeof l !== 'string' || l.length > 60)
+        ) {
+            errors.push('ui.sceneLabelOrder must be an array of short strings');
+        }
+    }
     positive(o.conversation?.windowSeconds, 'conversation.windowSeconds');
     positive(o.deviceState?.refreshMs, 'deviceState.refreshMs');
     nonNegative(o.presence?.awayTimeoutMin, 'presence.awayTimeoutMin');
