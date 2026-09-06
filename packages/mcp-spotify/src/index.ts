@@ -235,18 +235,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
             case 'play_playlist': {
                 const query = String((args as any).query);
+                const shuffle = (args as any).shuffle === true;
+
+                const play = async (
+                    uri: string,
+                    deviceId: string | undefined,
+                    total?: number,
+                ) => {
+                    if (!shuffle) {
+                        await spotify.playUri(uri, deviceId);
+                        return;
+                    }
+                    const count =
+                        total ?? (await spotify.getPlaylistTrackCount(uri));
+                    await spotify.playUriShuffled(uri, deviceId, count);
+                };
 
                 return await playOnSpeaker(
                     DEFAULT_SPEAKER,
                     async (deviceId) => {
+                        const suffix = shuffle ? ' (aléatoire)' : '';
                         const myPlaylists = await spotify.getUserPlaylists();
                         const match = myPlaylists.find((p) =>
                             p.name.toLowerCase().includes(query.toLowerCase()),
                         );
 
                         if (match) {
-                            await spotify.playUri(match.uri, deviceId);
-                            return `Playing your playlist "${match.name}".`;
+                            await play(match.uri, deviceId, match.tracks);
+                            return `Playing your playlist "${match.name}"${suffix}.`;
                         }
 
                         const results = await spotify.search(query, 'playlist');
@@ -255,8 +271,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 `No playlists found for "${query}".`,
                             );
                         const playlist = results[0];
-                        await spotify.playUri(playlist.uri, deviceId);
-                        return `Playing playlist "${playlist.name}" by ${playlist.owner}.`;
+                        await play(playlist.uri, deviceId);
+                        return `Playing playlist "${playlist.name}" by ${playlist.owner}${suffix}.`;
                     },
                 );
             }
@@ -562,15 +578,29 @@ async function main() {
     spotify = new SpotifyController(api);
     Logger.info('Spotify authenticated.');
 
-    // Populate speaker enum best-effort after auth
-    try {
-        const devs = await spotify.getDevices();
-        SPOTIFY_TOOL_LIST = buildSpotifyTools(
-            devs.map((d) => d.name).filter((n): n is string => !!n),
-        );
-    } catch {
-        /* keep no-enum fallback */
-    }
+    // Populate speaker + playlist enums best-effort after auth. The playlist
+    // list is refreshed periodically so a new playlist shows up in the scene
+    // editor without a restart.
+    const refreshToolEnums = async () => {
+        try {
+            const [devs, playlists] = await Promise.all([
+                spotify.getDevices().catch(() => []),
+                spotify.getUserPlaylists().catch(() => []),
+            ]);
+            SPOTIFY_TOOL_LIST = buildSpotifyTools(
+                devs
+                    .map((d: any) => d.name)
+                    .filter((n: any): n is string => !!n),
+                playlists
+                    .map((p: any) => p.name)
+                    .filter((n: any): n is string => !!n),
+            );
+        } catch {
+            /* keep previous enums */
+        }
+    };
+    await refreshToolEnums();
+    setInterval(() => void refreshToolEnums(), 10 * 60 * 1000).unref?.();
 
     // Spotify access tokens expire after 1 hour. Refresh every 50 minutes so the
     // token is always valid regardless of how long the process runs.

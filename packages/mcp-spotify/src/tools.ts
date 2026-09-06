@@ -18,11 +18,50 @@ function withSpeaker(tool: any, speakerNames: string[]) {
     };
 }
 
-export function buildSpotifyTools(speakerNames: string[] = []) {
+/**
+ * play_playlist : l'éditeur de scènes veut un SELECT des playlists du compte
+ * (enum → select filtrable), pas un champ texte. L'enum n'est pas une
+ * contrainte d'exécution : toute valeur libre reste acceptée (recherche
+ * catalogue) — le LLM comme l'app peuvent sortir de la liste.
+ */
+function withPlaylists(tool: any, playlistNames: string[]) {
+    const query: Record<string, unknown> = {
+        type: 'string',
+        title: 'Playlist',
+        description:
+            "Une de tes playlists (proposées), ou n'importe quelle recherche " +
+            'libre sur le catalogue Spotify.',
+    };
+    if (playlistNames.length) query.enum = playlistNames;
+    return {
+        ...tool,
+        inputSchema: {
+            ...tool.inputSchema,
+            properties: {
+                ...tool.inputSchema.properties,
+                query,
+                shuffle: {
+                    type: 'boolean',
+                    title: 'Aléatoire',
+                    description:
+                        'Ordre de lecture aléatoire, en commençant par un ' +
+                        'titre au hasard.',
+                },
+            },
+        },
+    };
+}
+
+export function buildSpotifyTools(
+    speakerNames: string[] = [],
+    playlistNames: string[] = [],
+) {
     const withEnum = new Set(['play_music', 'play_liked_tracks']);
-    return SPOTIFY_TOOLS.map((t) =>
-        withEnum.has(t.name) ? withSpeaker(t, speakerNames) : t,
-    );
+    return SPOTIFY_TOOLS.map((t) => {
+        if (withEnum.has(t.name)) return withSpeaker(t, speakerNames);
+        if (t.name === 'play_playlist') return withPlaylists(t, playlistNames);
+        return t;
+    });
 }
 
 export const SPOTIFY_TOOLS = [

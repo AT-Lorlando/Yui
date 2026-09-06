@@ -45,6 +45,54 @@ export class SpotifyController {
     }
 
     /** Play an ordered list of track URIs (e.g. radio recommendations) */
+    /**
+     * Joue un contexte (playlist/album) en aléatoire : départ sur un titre
+     * au hasard (offset aléatoire si le total est connu) + shuffle activé.
+     * Sans total, le premier titre est déterministe mais la suite est
+     * mélangée par Spotify.
+     */
+    async playUriShuffled(
+        uri: string,
+        deviceId?: string,
+        totalTracks?: number,
+    ): Promise<void> {
+        const options: Parameters<SpotifyWebApi['play']>[0] = {
+            context_uri: uri,
+        };
+        if (deviceId) options.device_id = deviceId;
+        if (totalTracks && totalTracks > 1) {
+            options.offset = {
+                position: Math.floor(Math.random() * totalTracks),
+            };
+        }
+        // Shuffle déjà actif → Spotify ignore l'offset demandé (constaté :
+        // même titre de départ à chaque lancement). Ordre obligatoire :
+        // shuffle OFF, lecture à l'offset aléatoire, puis shuffle ON.
+        const dev = deviceId ? { device_id: deviceId } : {};
+        await this.api
+            .setShuffle(false, dev)
+            .catch((err) => Logger.warn(`setShuffle(false) failed: ${err}`));
+        await this.api.play(options);
+        await this.api
+            .setShuffle(true, dev)
+            .catch((err) => Logger.warn(`setShuffle(true) failed: ${err}`));
+        Logger.debug(`Playing (shuffle): ${uri}`);
+    }
+
+    /** Nombre de titres d'une playlist (pour l'offset aléatoire). */
+    async getPlaylistTrackCount(uri: string): Promise<number | undefined> {
+        try {
+            const id = uri.split(':playlist:')[1];
+            if (!id) return undefined;
+            const res = await this.api.getPlaylist(id, {
+                fields: 'tracks.total',
+            });
+            return res.body.tracks?.total;
+        } catch {
+            return undefined;
+        }
+    }
+
     async playUris(uris: string[], deviceId?: string): Promise<void> {
         if (uris.length === 0) throw new Error('No URIs to play');
         const options: Parameters<SpotifyWebApi['play']>[0] = { uris };
