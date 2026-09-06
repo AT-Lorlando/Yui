@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 import struct
 import sys
+import tempfile
 import threading
 import time
 
@@ -166,6 +168,7 @@ def test_barge_in_and_conversation():
     pipe.wake = FakeWake()
     pipe.running = False
     pipe._speaker = None
+    pipe._last_echo_est = 0.0
     pipe._new_capture = lambda: InstantCapture()
 
     pipe.running = True
@@ -235,6 +238,96 @@ def test_conversation_window_expires():
     ok(elapsed < 1.5, f"fenêtre expirée → capture rend la main ({elapsed:.2f}s)")
 
 
+
+
+
+# ── Garde anti-écho (double-talk) ────────────────────────────────────────────
+
+def test_echo_gate():
+    import importlib
+    import echo as echo_mod
+    importlib.reload(echo_mod)
+    g = echo_mod.EchoGate()
+
+    RATE, CH = 24000, 1280  # far à 24 kHz, chunks micro 80 ms @16 kHz
+    t0 = 1000.0
+
+    # Yui joue un motif d'énergie variable (parole simulée) pendant 6 s.
+    g.on_stream_start(RATE)
+    g._far_t0 = t0
+    rng = np.random.default_rng(42)
+    pattern = []
+    for i in range(int(6 / echo_mod.SLICE_S)):
+        loud = 4000 if (i // 5) % 2 == 0 else 300   # alternance parole/pause
+        pattern.append(loud)
+        g.feed_far((rng.standard_normal(int(RATE * echo_mod.SLICE_S)) * loud).astype(np.int16))
+
+    # Le micro entend le même motif, retardé de 1,2 s, atténué ×0,5.
+    DELAY = 1.2
+    for i in range(int(6 / echo_mod.SLICE_S)):
+        ts = t0 + DELAY + i * echo_mod.SLICE_S
+        g.feed_mic((rng.standard_normal(1280) * pattern[i] * 0.5).astype(np.int16), now=ts)
+
+    g.maybe_estimate(now=t0 + DELAY + 6)
+    ok(g.delay_s is not None and abs(g.delay_s - DELAY) <= 0.2,
+       f"écho: délai estimé ≈ 1,2 s (obtenu {g.delay_s})")
+    ok(0.3 <= g.gain <= 0.8, f"écho: gain estimé ≈ 0,5 (obtenu {g.gain:.2f})")
+
+    # Pendant une tranche forte : l'écho seul (mic ≈ 2000) est bloqué,
+    # une vraie voix par-dessus (mic ≈ 6000) passe.
+    loud_t = t0 + DELAY + 0.5 * echo_mod.SLICE_S  # au milieu d'une tranche forte
+    ok(not g.allow_barge_in(2000, now=loud_t), "écho: Yui seule → barge-in bloqué")
+    ok(g.allow_barge_in(6000, now=loud_t), "écho: voix par-dessus → barge-in permis")
+    # Pendant une pause de Yui : tout passe.
+    quiet_t = t0 + DELAY + 6 * echo_mod.SLICE_S  # tranche « pause » (i=6 → 300)
+    ok(g.allow_barge_in(900, now=quiet_t), "écho: Yui en pause → garde ouverte")
+
+
+# ── Corpus wake word ─────────────────────────────────────────────────────────
+
+def test_wake_corpus():
+    import importlib, wake_corpus
+    tmpd = tempfile.mkdtemp(prefix="yui-corpus-")
+    wake_corpus.WAKES_DIR = os.path.join(tmpd, "wakes")
+    wake_corpus.SAMPLES_DIR = os.path.join(tmpd, "samples")
+    os.makedirs(wake_corpus.WAKES_DIR)
+    for n in ("wake-1.wav", "wake-2.wav"):
+        open(os.path.join(wake_corpus.WAKES_DIR, n), "wb").write(b"RIFF")
+
+    ok(wake_corpus.label_wake("/voice-debug/wakes/wake-1.wav", "false"),
+       "corpus: faux wake accepté")
+    ok(not os.path.exists(os.path.join(wake_corpus.WAKES_DIR, "wake-1.wav")),
+       "corpus: faux wake retiré des archives")
+    ok(os.path.exists(os.path.join(wake_corpus.SAMPLES_DIR, "negative", "wake-1.wav")),
+       "corpus: faux wake dans negative/")
+
+    ok(wake_corpus.label_wake("/voice-debug/wakes/wake-2.wav", "positive"),
+       "corpus: vrai wake accepté")
+    ok(os.path.exists(os.path.join(wake_corpus.WAKES_DIR, "wake-2.wav")),
+       "corpus: vrai wake reste rejouable")
+    ok(os.path.exists(os.path.join(wake_corpus.SAMPLES_DIR, "positive", "wake-2.wav")),
+       "corpus: vrai wake copié dans positive/")
+
+    ok(not wake_corpus.label_wake("/voice-debug/wakes/../../../etc/passwd", "false"),
+       "corpus: traversée de chemin refusée")
+    counts = wake_corpus.corpus_counts()
+    ok(counts == {"positive": 1, "negative": 1}, f"corpus: compteurs {counts}")
+    shutil.rmtree(tmpd)
+
+
+# ── speak() du scheduler partage l'état de parole ────────────────────────────
+
+def test_speak_shares_state():
+    import speech_state, tts
+    # Sans enceinte (__aucune_enceinte__), speak sort tôt SANS lever speaking.
+    tts.speak("test")
+    ok(not speech_state.speaking.is_set(), "speak: sans cast → pas d'état levé")
+    # Les événements du serveur SONT ceux de speech_state (une seule vérité).
+    import server
+    ok(server._speaking is speech_state.speaking, "speak: état partagé (speaking)")
+    ok(server._stop_event is speech_state.stop, "speak: état partagé (stop)")
+
+
 if __name__ == "__main__":
     print("vocab:")
     test_vocab()
@@ -243,4 +336,10 @@ if __name__ == "__main__":
     print("barge-in / conversation:")
     test_barge_in_and_conversation()
     test_conversation_window_expires()
+    print("garde anti-écho:")
+    test_echo_gate()
+    print("corpus wake word:")
+    test_wake_corpus()
+    print("speak partagé:")
+    test_speak_shares_state()
     print(f"\nAll voice pipeline tests passed ({PASS} checks)")

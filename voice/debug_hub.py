@@ -24,10 +24,14 @@ log = logging.getLogger("voice")
 
 class DebugHub:
     def __init__(self, tuning, on_tuning_change: Callable[[], None], port: int,
-                 on_say: Callable[[str], None] | None = None):
+                 on_say: Callable[[str], None] | None = None,
+                 on_label: Callable[[str, str], bool] | None = None,
+                 corpus_counts: Callable[[], dict] | None = None):
         self._tuning = tuning
         self._on_tuning_change = on_tuning_change
         self._on_say = on_say
+        self._on_label = on_label
+        self._corpus_counts = corpus_counts
         self._port = port
         self._clients: set = set()
         self._listeners: set = set()
@@ -70,6 +74,9 @@ class DebugHub:
         self._clients.add(ws)
         try:
             await ws.send(json.dumps({"type": "tuning", **self._tuning.to_dict()}))
+            if self._corpus_counts:
+                await ws.send(json.dumps(
+                    {"type": "corpus", **self._corpus_counts()}))
             for evt in self._wakes:
                 await ws.send(json.dumps(evt))
             async for raw in ws:
@@ -92,6 +99,18 @@ class DebugHub:
                     text = str(msg.get("text") or "").strip()[:300]
                     if text and self._on_say:
                         self._on_say(text)
+                elif msg.get("type") == "wake_label":
+                    # Étiquetage d'un wake archivé → corpus d'entraînement.
+                    wav = str(msg.get("wav") or "")
+                    label = str(msg.get("label") or "")
+                    if self._on_label and self._on_label(wav, label):
+                        if label == "false":
+                            self._wakes = [
+                                w for w in self._wakes if w.get("wav") != wav
+                            ]
+                        if self._corpus_counts:
+                            await self._broadcast_json(
+                                {"type": "corpus", **self._corpus_counts()})
                 elif msg.get("type") == "listen":
                     if msg.get("on"):
                         self._listeners.add(ws)

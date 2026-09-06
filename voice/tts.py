@@ -27,6 +27,9 @@ import pychromecast
 import requests
 import soundfile as sf
 
+import echo
+import speech_state
+
 from config import (
     LOCAL_IP,
     SPEAK_PORT,
@@ -103,6 +106,8 @@ class PcmStream:
             return
         self.q.put(pcm.astype("<i2").tobytes())
         self.pushed_s += len(pcm) / self.rate
+        # Garde anti-écho : elle sait ce que Yui joue, tranche par tranche.
+        echo.gate.feed_far(pcm)
 
     def push_gap(self, ms: int = TTS_GAP_MS) -> None:
         if ms > 0:
@@ -136,6 +141,7 @@ _current_stream: PcmStream | None = None
 def open_stream(rate: int) -> tuple[PcmStream, str]:
     """Enregistre un nouveau flux et renvoie (stream, url à caster)."""
     global _current_stream
+    echo.gate.on_stream_start(rate)
     stream = PcmStream(rate)
     with _stream_lock:
         old = _current_stream
@@ -349,28 +355,65 @@ def wait_stream_end(stream: PcmStream, stop_event: threading.Event) -> None:
 
 # ── Simple speak (used by the /speak scheduler endpoint) ─────────────────────
 
+def split_sentences(text: str) -> list[str]:
+    """Découpe en phrases pour le TTS (mêmes frontières que le stream LLM)."""
+    from text_utils import find_sentence_end
+
+    out: list[str] = []
+    buf = text.strip()
+    while buf:
+        end = find_sentence_end(buf)
+        if end == -1:
+            out.append(buf)
+            break
+        out.append(buf[: end + 1].strip())
+        buf = buf[end + 1 :].lstrip()
+    return [s for s in out if s]
+
+
 def speak(text: str) -> None:
-    """Generate TTS and cast to the speaker. Non-interruptible (scheduler use)."""
+    """Annonce du scheduler/proactivité — même chemin que les réponses :
+    lecture gapless, interruptible (speech_state.stop), et l'état de parole
+    est partagé pour que le pipeline micro passe en mode barge-in.
+
+    Si Yui parle déjà (réponse en cours), on attend qu'elle finisse (30 s max)
+    plutôt que de parler par-dessus."""
     if not _cast:
         log.debug("No cast device — skipping TTS.")
         return
+    if speech_state.speaking.is_set():
+        deadline = time.time() + 30
+        while speech_state.speaking.is_set() and time.time() < deadline:
+            time.sleep(0.2)
+    speech_state.stop.clear()
+    speech_state.speaking.set()
+    stream = None
     try:
-        t0 = time.time()
-        audio, mime = generate_tts(text)
-        log.debug(f"TTS generated in {time.time() - t0:.1f}s ({len(audio)} bytes)")
-
-        with _tts_lock:
-            global _tts_audio, _tts_mime
-            _tts_audio, _tts_mime = audio, mime
-
-        ext = "wav" if "wav" in mime else "mp3"
-        url = f"http://{LOCAL_IP}:{TTS_PORT}/tts.{ext}?t={int(time.time())}"
-        mc = _cast.media_controller
-        mc.play_media(url, mime)
-        mc.block_until_active(timeout=10)
         log.info(f"Speaking: {text[:80]}…")
+        for sentence in split_sentences(text):
+            if speech_state.stop.is_set():
+                break
+            audio, _mime = generate_tts(sentence)
+            pcm, rate = wav_to_pcm(audio)
+            if stream is None:
+                stream, url = open_stream(rate)
+                stream.push(pcm)
+                if not start_stream_cast(url):
+                    # Repli one-shot (ancien comportement), interruptible.
+                    stream.close()
+                    stream = None
+                    play_audio_blocking(audio, "audio/wav", speech_state.stop)
+                    continue
+            else:
+                stream.push_gap()
+                stream.push(pcm)
+        if stream is not None:
+            stream.close()
+            wait_stream_end(stream, speech_state.stop)
     except Exception as e:
         log.error(f"TTS/Cast error: {e}")
+    finally:
+        speech_state.speaking.clear()
 
 
 # ── Trigger chime ─────────────────────────────────────────────────────────────

@@ -43,6 +43,7 @@ from config import (
     YUI_STREAM_URL,
     YUI_URL,
 )
+import speech_state
 from text_utils import contains_trigger, find_sentence_end, strip_trigger
 from tts import generate_tts, play_audio_blocking, play_chime
 
@@ -149,11 +150,11 @@ class WhisperSTT:
 # (mirrors post_order() from voice/pipeline.py, without the stop-word listener)
 # ---------------------------------------------------------------------------
 
-_stop_event = threading.Event()
+# État de parole PARTAGÉ avec tts.speak (annonces du scheduler) — le
+# barge-in et la purge du tampon valent pour toutes les sources de voix.
+_stop_event = speech_state.stop
 _order_t0: float = 0.0
-# Lecture TTS (ou réponse LLM) en cours — le pipeline continue d'écouter
-# pendant ce temps (barge-in) au lieu de bloquer comme avant.
-_speaking = threading.Event()
+_speaking = speech_state.speaking
 _conversation_mode_until: float = 0.0
 
 # Fenêtre conversation : après une réponse, parler directement sans wake word.
@@ -352,6 +353,8 @@ from wake import WakeDetector, OWW_CHUNK
 from vad_capture import UtteranceCapture
 from tuning import load_tuning, save_tuning
 import vocab
+import echo
+from wake_corpus import corpus_counts, label_wake
 from debug_hub import DebugHub
 from config import AUDIO_UDP_PORT, DEBUG_WS_PORT, WAKEWORD_NAME
 
@@ -374,6 +377,7 @@ class VoicePipeline:
         self.wake = WakeDetector(self.model_path)
         self.running = False
         self._speaker: threading.Thread | None = None
+        self._last_echo_est = 0.0
 
     def _new_capture(self) -> UtteranceCapture:
         import webrtcvad
@@ -435,8 +439,12 @@ class VoicePipeline:
         """Coupe la lecture TTS en cours et jette l'audio de Yui du tampon."""
         _stop_event.set()
         sp = self._speaker
-        if sp is not None:
+        if sp is not None and sp.is_alive():
             sp.join(timeout=4)
+        # Annonce du scheduler (pas de thread à joindre) : attendre la fin.
+        deadline = time.time() + 4
+        while _speaking.is_set() and time.time() < deadline:
+            time.sleep(0.05)
         self.source.drain()
         log.info("barge-in: lecture interrompue")
 
@@ -462,9 +470,16 @@ class VoicePipeline:
 
             if speaking:
                 # Pendant que Yui parle : seule l'écoute du wake word reste
-                # active, seuil relevé (self-echo). « Yui » → barge-in.
+                # active, seuil relevé (self-echo) ET garde anti-écho — le
+                # wake ne compte que si l'énergie micro dépasse nettement
+                # l'écho prédit (vraie voix par-dessus, pas Yui elle-même).
+                mic_rms = echo.gate.feed_mic(chunk)
+                if time.time() - self._last_echo_est > 1.0:
+                    self._last_echo_est = time.time()
+                    echo.gate.maybe_estimate()
                 threshold = min(0.95, self.tuning.threshold + WAKE_SPEAKING_BOOST)
-                hot = hot + 1 if score >= threshold else 0
+                credible = echo.gate.allow_barge_in(mic_rms)
+                hot = hot + 1 if (score >= threshold and credible) else 0
                 if hot >= WAKE_PATIENCE:
                     hot = 0
                     self._interrupt_speaker()
@@ -511,7 +526,14 @@ def main() -> None:
             target=tts_module.speak, args=(text,), daemon=True
         ).start()
 
-    hub = DebugHub(tuning, on_tuning_change, DEBUG_WS_PORT, on_say=on_say)
+    hub = DebugHub(
+        tuning,
+        on_tuning_change,
+        DEBUG_WS_PORT,
+        on_say=on_say,
+        on_label=label_wake,
+        corpus_counts=corpus_counts,
+    )
     stt = WhisperSTT(args.whisper_model, args.whisper_device, args.whisper_compute)
     pipeline = VoicePipeline(stt, hub, tuning)
 
