@@ -80,14 +80,14 @@ export async function discoverSpeakers(
     );
 }
 
-interface BonjourDevice {
+export interface BonjourDevice {
     name: string;
     host: string;
     port: number;
     model?: string;
 }
 
-function scanBonjour(): Promise<BonjourDevice[]> {
+export function scanBonjour(timeoutMs = 10000): Promise<BonjourDevice[]> {
     return new Promise((resolve) => {
         const instance = new Bonjour();
         const devices: BonjourDevice[] = [];
@@ -121,6 +121,6 @@ function scanBonjour(): Promise<BonjourDevice[]> {
             browser.stop();
             instance.destroy();
             resolve(devices);
-        }, 10000);
+        }, timeoutMs);
     });
 }

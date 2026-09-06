@@ -31,6 +31,7 @@
     "dev:browser": "npx ts-node packages/mcp-browser/src/index.ts",
     "setup:spotify": "npm run setup -w packages/mcp-spotify",
     "setup:spotify:speakers": "npm run setup:speakers -w packages/mcp-spotify",
+    "setup:seeder": "bash scripts/setup-seeder.sh",
     "dev:spotify": "npx ts-node packages/mcp-spotify/src/index.ts",
     "dev:linear": "npx ts-node packages/mcp-linear/src/index.ts",
     "dev:samsung": "npx ts-node packages/mcp-samsung/src/index.ts",

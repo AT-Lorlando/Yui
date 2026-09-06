@@ -1,12 +1,34 @@
 import { ChildProcess, spawn } from 'child_process';
+import fs from 'fs';
 import http from 'http';
 import net from 'net';
 import os from 'os';
+import path from 'path';
 import { PassThrough } from 'stream';
+import { dataRoot } from '@yui/shared';
 import Logger from './logger';
 
 const SEEDER_NAME = process.env.SPOTIFY_SEEDER_NAME || 'Yui-Seeder';
 const STREAM_PORT = parseInt(process.env.SPOTIFY_STREAM_PORT || '7777', 10);
+
+/**
+ * Cache de credentials librespot (data/shared/librespot/credentials.json).
+ * Depuis 2024, Spotify refuse l'enregistrement Connect (spirc) aux tokens
+ * d'apps tierces (« Login request was denied: INVALID_CREDENTIALS ») — seul
+ * l'OAuth du client librespot lui-même passe. `npm run setup:seeder` fait
+ * cet OAuth une fois et remplit ce cache ; ensuite librespot démarre sans
+ * token et s'enregistre normalement.
+ */
+export function seederCacheDir(): string {
+    return (
+        process.env.LIBRESPOT_CACHE ??
+        path.join(dataRoot(), 'shared', 'librespot')
+    );
+}
+
+export function hasSeederCredentials(): boolean {
+    return fs.existsSync(path.join(seederCacheDir(), 'credentials.json'));
+}
 
 let librespotProcess: ChildProcess | null = null;
 let ffmpegProcess: ChildProcess | null = null;
@@ -51,7 +73,18 @@ export function startStreamer(accessToken: string): void {
 
     const bin = process.env.LIBRESPOT_PATH || 'librespot';
 
-    // librespot: output raw S16LE PCM to stdout
+    // librespot: output raw S16LE PCM to stdout. Credentials en cache
+    // (setup:seeder) de préférence — l'access token seul ne peut plus
+    // s'enregistrer dans Connect.
+    const auth = hasSeederCredentials()
+        ? ['--cache', seederCacheDir()]
+        : ['--access-token', accessToken];
+    if (!hasSeederCredentials()) {
+        Logger.warn(
+            'librespot sans credentials en cache (npm run setup:seeder) — ' +
+                "l'enregistrement Spotify Connect échouera probablement",
+        );
+    }
     const librespotArgs = [
         '--name',
         SEEDER_NAME,
@@ -62,8 +95,7 @@ export function startStreamer(accessToken: string): void {
         '--bitrate',
         '160',
         '--disable-audio-cache',
-        '--access-token',
-        accessToken,
+        ...auth,
         '--disable-discovery',
         '--initial-volume',
         '100',

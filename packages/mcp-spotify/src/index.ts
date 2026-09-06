@@ -14,6 +14,14 @@ import { SpotifyAuth } from './SpotifyAuth';
 import { SpotifyController } from './SpotifyController';
 import { AmpController } from './AmpController';
 import { buildSpotifyTools } from './tools';
+import { scanBonjour, type BonjourDevice } from './discovery';
+import { castStream } from './cast';
+import {
+    getStreamUrl,
+    startStreamer,
+    stopStreamer,
+    waitForSeederDevice,
+} from './streamer';
 import { resolveSpeakerDevice } from './resolveDevice';
 import Logger from './logger';
 
@@ -41,6 +49,71 @@ type McpContent = {
  * Resolve a speaker name to a Spotify Connect device ID, then call playFn.
  * Only works with devices currently active in Spotify Connect.
  */
+/**
+ * Les Google Home/Nest ne sont PAS des devices Spotify Connect, et leur
+ * récepteur Spotify refuse les tokens d'apps tierces (setCredentials sans
+ * réponse — testé). Le chemin qui marche : **streamer local** — librespot
+ * s'enregistre comme device Connect (« Yui-Seeder »), son audio est encodé
+ * en MP3 et servi en HTTP, et l'enceinte Cast lit ce flux. Spotify se pilote
+ * ensuite normalement (le seeder est la cible Connect).
+ */
+const activeCastSessions = new Map<string, () => void>();
+
+function closeCastSessions(): void {
+    for (const [host, close] of activeCastSessions) {
+        try {
+            close();
+        } catch {
+            /* déjà fermée */
+        }
+        activeCastSessions.delete(host);
+    }
+}
+
+async function findCastDevice(name: string): Promise<BonjourDevice | null> {
+    const found = await scanBonjour(4000);
+    const lower = name.toLowerCase();
+    return (
+        found.find((d) => d.name.toLowerCase() === lower) ??
+        found.find((d) => d.name.toLowerCase().includes(lower)) ??
+        null
+    );
+}
+
+async function playViaCast(
+    cast: BonjourDevice,
+    playFn: (deviceId?: string) => Promise<string>,
+): Promise<McpContent> {
+    Logger.info(
+        `Lecture via cast : streamer librespot → ${cast.name} (${cast.host})`,
+    );
+    // Redémarrer le streamer avec un token frais (celui d'un vieux run peut
+    // avoir expiré — librespot ne le rafraîchit pas).
+    stopStreamer();
+    closeCastSessions();
+    startStreamer(spotify.getAccessToken());
+    const seederId = await waitForSeederDevice(() => spotify.getDevices());
+    if (!seederId) {
+        stopStreamer();
+        throw new Error(
+            'librespot (Yui-Seeder) ne s’est pas enregistré dans Spotify Connect',
+        );
+    }
+    const close = await castStream(cast.host, getStreamUrl());
+    activeCastSessions.set(cast.host, close);
+    await spotify.transferPlayback(seederId);
+    await new Promise((r) => setTimeout(r, 1200));
+    const description = await playFn(seederId);
+    return {
+        content: [
+            {
+                type: 'text',
+                text: `${description} (diffusé sur ${cast.name})`,
+            },
+        ],
+    };
+}
+
 async function playOnSpeaker(
     speakerName: string | undefined,
     playFn: (deviceId?: string) => Promise<string>,
@@ -73,7 +146,9 @@ async function playOnSpeaker(
     for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) await new Promise((r) => setTimeout(r, 1500));
         devices = await spotify.getDevices();
-        device = resolveSpeakerDevice(devices, speakerName);
+        device = resolveSpeakerDevice(devices, speakerName, {
+            avrFallback: speakerName === DEFAULT_SPEAKER,
+        });
         if (device?.id) break;
         Logger.warn(
             `Speaker "${speakerName}" absent de Spotify Connect (essai ${
@@ -82,6 +157,12 @@ async function playOnSpeaker(
                 devices.map((d) => d.name).join(', ') || 'aucun'
             }`,
         );
+        // Une enceinte Cast pure (Google Home…) n'apparaîtra JAMAIS dans
+        // Connect : basculer sur le chemin streamer sans épuiser les essais.
+        if (attempt === 0) {
+            const cast = await findCastDevice(speakerName).catch(() => null);
+            if (cast) return playViaCast(cast, playFn);
+        }
     }
 
     if (!device?.id) {
@@ -221,7 +302,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const query = String((args as any).query);
 
                 return await playOnSpeaker(
-                    DEFAULT_SPEAKER,
+                    ((args as any).speakerName as string | undefined) ??
+                        DEFAULT_SPEAKER,
                     async (deviceId) => {
                         const results = await spotify.search(query, 'album');
                         if (results.length === 0)
@@ -236,6 +318,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'play_playlist': {
                 const query = String((args as any).query);
                 const shuffle = (args as any).shuffle === true;
+                const speaker =
+                    ((args as any).speakerName as string | undefined) ??
+                    DEFAULT_SPEAKER;
 
                 const play = async (
                     uri: string,
@@ -251,37 +336,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     await spotify.playUriShuffled(uri, deviceId, count);
                 };
 
-                return await playOnSpeaker(
-                    DEFAULT_SPEAKER,
-                    async (deviceId) => {
-                        const suffix = shuffle ? ' (aléatoire)' : '';
-                        const myPlaylists = await spotify.getUserPlaylists();
-                        const match = myPlaylists.find((p) =>
-                            p.name.toLowerCase().includes(query.toLowerCase()),
-                        );
+                return await playOnSpeaker(speaker, async (deviceId) => {
+                    const suffix = shuffle ? ' (aléatoire)' : '';
+                    const myPlaylists = await spotify.getUserPlaylists();
+                    const match = myPlaylists.find((p) =>
+                        p.name.toLowerCase().includes(query.toLowerCase()),
+                    );
 
-                        if (match) {
-                            await play(match.uri, deviceId, match.tracks);
-                            return `Playing your playlist "${match.name}"${suffix}.`;
-                        }
+                    if (match) {
+                        await play(match.uri, deviceId, match.tracks);
+                        return `Playing your playlist "${match.name}"${suffix}.`;
+                    }
 
-                        const results = await spotify.search(query, 'playlist');
-                        if (results.length === 0)
-                            throw new Error(
-                                `No playlists found for "${query}".`,
-                            );
-                        const playlist = results[0];
-                        await play(playlist.uri, deviceId);
-                        return `Playing playlist "${playlist.name}" by ${playlist.owner}${suffix}.`;
-                    },
-                );
+                    const results = await spotify.search(query, 'playlist');
+                    if (results.length === 0)
+                        throw new Error(`No playlists found for "${query}".`);
+                    const playlist = results[0];
+                    await play(playlist.uri, deviceId);
+                    return `Playing playlist "${playlist.name}" by ${playlist.owner}${suffix}.`;
+                });
             }
 
             case 'play_artist_radio': {
                 const artist = String((args as any).artist);
 
                 return await playOnSpeaker(
-                    DEFAULT_SPEAKER,
+                    ((args as any).speakerName as string | undefined) ??
+                        DEFAULT_SPEAKER,
                     async (deviceId) => {
                         const radio = await spotify.getArtistRadio(artist);
                         if (radio.uri) {
@@ -303,6 +384,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
             case 'stop_music': {
                 await spotify.pause();
+                closeCastSessions();
+                stopStreamer();
                 if (amp) {
                     await amp
                         .turnOff()
@@ -511,7 +594,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         .catch((e) => Logger.warn(`Amp power-on failed: ${e}`));
                 }
                 const devices = await spotify.getDevices();
-                const device = resolveSpeakerDevice(devices, target);
+                const device = resolveSpeakerDevice(devices, target, {
+                    avrFallback: target === DEFAULT_SPEAKER,
+                });
                 if (!device?.id) {
                     return {
                         content: [
@@ -583,14 +668,20 @@ async function main() {
     // editor without a restart.
     const refreshToolEnums = async () => {
         try {
-            const [devs, playlists] = await Promise.all([
+            const [devs, playlists, castDevs] = await Promise.all([
                 spotify.getDevices().catch(() => []),
                 spotify.getUserPlaylists().catch(() => []),
+                scanBonjour(5000).catch(() => []),
             ]);
+            const speakerNames = [
+                ...devs.map((d: any) => d.name),
+                // Enceintes Cast (Google Home…) réveillables à la demande.
+                ...castDevs.map((d) => d.name),
+            ].filter(
+                (n: any): n is string => !!n && !/^[0-9a-f]{16,}$/.test(n),
+            );
             SPOTIFY_TOOL_LIST = buildSpotifyTools(
-                devs
-                    .map((d: any) => d.name)
-                    .filter((n: any): n is string => !!n),
+                [...new Set(speakerNames)],
                 playlists
                     .map((p: any) => p.name)
                     .filter((n: any): n is string => !!n),

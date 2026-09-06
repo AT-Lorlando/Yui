@@ -56,11 +56,18 @@ export function buildSpotifyTools(
     speakerNames: string[] = [],
     playlistNames: string[] = [],
 ) {
-    const withEnum = new Set(['play_music', 'play_liked_tracks']);
+    const withEnum = new Set([
+        'play_music',
+        'play_liked_tracks',
+        'play_playlist',
+        'play_album',
+        'play_artist_radio',
+    ]);
     return SPOTIFY_TOOLS.map((t) => {
-        if (withEnum.has(t.name)) return withSpeaker(t, speakerNames);
-        if (t.name === 'play_playlist') return withPlaylists(t, playlistNames);
-        return t;
+        let out = t;
+        if (withEnum.has(t.name)) out = withSpeaker(out, speakerNames);
+        if (t.name === 'play_playlist') out = withPlaylists(out, playlistNames);
+        return out;
     });
 }
 
