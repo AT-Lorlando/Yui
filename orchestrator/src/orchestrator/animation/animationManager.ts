@@ -16,6 +16,13 @@ const MIN_TICK_MS = 800;
 // hung bridge request can never block the off/colour command that follows.
 const DRAIN_TIMEOUT_MS = 1500;
 
+// Durée de vie max d'une boucle flottante. Vécu (07/09) : l'ambiance de la
+// scène Musique a tourné 4 h 36 sans que personne ne touche aux lumières —
+// charge continue + logs noyés (21 Mo/jour) + l'agenda LLM du dashboard à la
+// traîne. Passé ce plafond, la boucle s'éteint d'elle-même (les lampes
+// gardent leur dernière couleur, rien ne s'éteint).
+const FLOATING_MAX_MS = Number(process.env.FLOATING_MAX_MIN ?? 240) * 60_000;
+
 /** Light-affecting tools whose invocation must cancel an active animation. */
 const LIGHT_TOOLS = new Set([
     'set_lights',
@@ -276,6 +283,15 @@ class AnimationManager {
             // Boucle d'une génération révolue : elle n'écrit plus et se désarme.
             if (epoch !== this.epoch) {
                 if (loop.timer) clearInterval(loop.timer);
+                return;
+            }
+            if (Date.now() - startedAt > FLOATING_MAX_MS) {
+                Logger.info(
+                    `[animation] boucle flottante arrêtée après ${Math.round(
+                        FLOATING_MAX_MS / 60_000,
+                    )} min (plafond FLOATING_MAX_MIN)`,
+                );
+                void this.stopAll();
                 return;
             }
             const colors = floatingFrameColors(
