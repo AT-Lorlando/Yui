@@ -10,6 +10,7 @@ import { createStateReader } from './deviceConditions';
 import { migrateLegacyActions } from './legacyActions';
 import type { PresenceState } from './presence';
 import { logActivity } from './activityLog';
+import { animationManager } from './animation/animationManager';
 
 /**
  * Hue v2 SSE watcher — dispatches remote button/dial events to scenes & tools.
@@ -53,6 +54,7 @@ interface HueEvent {
         id: string;
         type: string;
         button?: { last_event?: string; button_report?: { event?: string } };
+        on?: { on?: boolean };
         relative_rotary?: {
             last_event?: {
                 action?: string;
@@ -134,6 +136,11 @@ const CONFIG_PATH = dataPath('hue-remotes.json');
 const buttons = new Map<string, ButtonInfo>();
 const rotaries = new Map<string, RotaryInfo>();
 const roomGroupId = new Map<string, string>(); // room name (lc) → grouped_light uuid
+// Pour relayer les événements lumière du SSE à l'animation manager : une
+// lampe/pièce animée modifiée par un AUTRE chemin (app Hue, interrupteur,
+// scène du bridge) doit couper la boucle flottante immédiatement.
+const lightRidName = new Map<string, string>(); // light uuid → nom de lampe
+const groupRidRoom = new Map<string, string>(); // grouped_light uuid → pièce
 const roomNames: string[] = []; // preserved with original casing
 const deviceCatalog = new Map<string, RemoteDeviceInfo>();
 let config: RemotesConfig = {};
@@ -175,7 +182,7 @@ function loadConfig(): void {
 }
 
 async function buildResourceMaps(host: string, key: string): Promise<void> {
-    const [buttonsResp, rotariesResp, devicesResp, roomsResp] =
+    const [buttonsResp, rotariesResp, devicesResp, roomsResp, lightsResp] =
         await Promise.all([
             hueRequest(host, key, '/clip/v2/resource/button'),
             hueRequest(host, key, '/clip/v2/resource/relative_rotary').catch(
@@ -183,6 +190,9 @@ async function buildResourceMaps(host: string, key: string): Promise<void> {
             ),
             hueRequest(host, key, '/clip/v2/resource/device'),
             hueRequest(host, key, '/clip/v2/resource/room'),
+            hueRequest(host, key, '/clip/v2/resource/light').catch(() => ({
+                data: [],
+            })),
         ]);
 
     const devs = new Map<string, DeviceResource>();
@@ -203,13 +213,19 @@ async function buildResourceMaps(host: string, key: string): Promise<void> {
         rotaries.set(r.id, { deviceName: dev?.metadata?.name ?? 'unknown' });
     }
     roomGroupId.clear();
+    groupRidRoom.clear();
     roomNames.length = 0;
     for (const r of (roomsResp.data ?? []) as RoomResource[]) {
         const grouped = r.services?.find((s) => s.rtype === 'grouped_light');
         if (grouped && r.metadata?.name) {
             roomGroupId.set(r.metadata.name.toLowerCase(), grouped.rid);
+            groupRidRoom.set(grouped.rid, r.metadata.name);
             roomNames.push(r.metadata.name);
         }
+    }
+    lightRidName.clear();
+    for (const l of (lightsResp.data ?? []) as DeviceResource[]) {
+        if (l.metadata?.name) lightRidName.set(l.id, l.metadata.name);
     }
 
     // Build device catalog: aggregate buttons + dial presence per device.
@@ -263,6 +279,9 @@ async function setRoomDimmingDelta(
         Logger.warn(`[hue-remotes] room "${room}" not found for brightness`);
         return;
     }
+    // La molette est une reprise en main : une boucle flottante sur cette
+    // pièce s'efface AVANT le PUT (sinon le prochain tick écrase le réglage).
+    await animationManager.interruptIfRoomTouched(room);
     await hueRequest(
         bridgeHost,
         bridgeKey,
@@ -281,6 +300,7 @@ async function setRoomDimming(room: string, value: number): Promise<void> {
     }
     const clamped = Math.min(100, Math.max(0, value));
     const on = clamped > 0;
+    await animationManager.interruptIfRoomTouched(room);
     await hueRequest(
         bridgeHost,
         bridgeKey,
@@ -576,6 +596,23 @@ function handleSseChunk(buffer: string, deps: HueRemotesDeps): string {
                                 'longRelease',
                                 deps,
                             );
+                        }
+                    } else if (item.type === 'light') {
+                        const name = lightRidName.get(item.id);
+                        if (name) {
+                            animationManager.onLightEvent({
+                                name,
+                                off: item.on?.on === false,
+                            });
+                        }
+                    } else if (item.type === 'grouped_light') {
+                        const room = groupRidRoom.get(item.id);
+                        if (room) {
+                            animationManager.onLightEvent({
+                                room,
+                                grouped: true,
+                                off: item.on?.on === false,
+                            });
                         }
                     } else if (item.type === 'relative_rotary') {
                         const info = rotaries.get(item.id);

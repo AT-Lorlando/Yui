@@ -752,7 +752,7 @@ export class Orchestrator {
         // ce que l'utilisateur vient de demander. Les actions internes d'une
         // scène passent par callToolRaw et ne déclenchent pas cette garde.
         if (shouldCancel(toolName)) bumpSceneRun();
-        await animationManager.cancelIfAffected(toolName);
+        await animationManager.cancelIfAffected(toolName, args);
         return this.callToolInner(toolName, args);
     }
 
