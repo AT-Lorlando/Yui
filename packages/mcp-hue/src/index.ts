@@ -14,6 +14,7 @@ import type { LightEntity } from '@yui/shared';
 import HueBridge from './HueBridge';
 import HueController from './HueController';
 import GoveeClient from './GoveeClient';
+import { fadeSteps, hexToRgb as goveeHexToRgb, type Rgb } from './goveeFade';
 import {
     startAmbiance,
     stopAmbiance,
@@ -60,6 +61,8 @@ interface GoveeOps {
     color?: string; // hex (#RRGGBB) — interpretation depends on channel
     /** Température de blanc en kelvin — colorwc kelvin, quel que soit le canal. */
     colorTempK?: number;
+    /** Fondu émulé (rampe UDP) — l'API LAN Govee n'a pas de transition native. */
+    transitionMs?: number;
 }
 
 /** Rough hex → kelvin estimate for CCT channels. Warm reds → 2700, cold blues → 6500. */
@@ -76,6 +79,46 @@ function hexToKelvin(hex: string): number {
     return 4000;
 }
 
+// ── Fondu Govee ──────────────────────────────────────────────────────────────
+// Rampe RGB en tâche de fond (l'appelant — tick d'animation, scène — ne doit
+// pas attendre la durée de la transition). Un jeton par IP : toute nouvelle
+// commande couleur/off sur la lampe annule la rampe en cours, sinon les
+// paquets restants écraseraient l'état demandé.
+const goveeFadeToken = new Map<string, number>();
+const goveeLastRgb = new Map<string, Rgb>();
+
+function cancelGoveeFade(ip: string): void {
+    goveeFadeToken.set(ip, (goveeFadeToken.get(ip) ?? 0) + 1);
+}
+
+async function goveeColorSmooth(
+    g: GoveeClient,
+    hex: string,
+    transitionMs?: number,
+): Promise<void> {
+    const token = (goveeFadeToken.get(g.ip) ?? 0) + 1;
+    goveeFadeToken.set(g.ip, token);
+    let to: Rgb;
+    try {
+        to = goveeHexToRgb(hex);
+    } catch {
+        return g.color(hex); // hex invalide → l'erreur d'origine du client
+    }
+    const from = goveeLastRgb.get(g.ip);
+    goveeLastRgb.set(g.ip, to);
+    // Sans transition demandée (ou sans couleur de départ connue) → direct.
+    if (!from || !transitionMs || transitionMs < 250) return g.colorRgb(to);
+    const steps = fadeSteps(from, to, transitionMs);
+    const stepMs = Math.max(60, Math.floor(transitionMs / steps.length));
+    void (async () => {
+        for (const c of steps) {
+            if (goveeFadeToken.get(g.ip) !== token) return;
+            await g.colorRgb(c).catch(() => {});
+            await new Promise((r) => setTimeout(r, stepMs));
+        }
+    })();
+}
+
 async function applyGovee(
     g: GoveeClient,
     opts: GoveeOps,
@@ -85,6 +128,7 @@ async function applyGovee(
     if (!turnOn) {
         // Shared physical device — caller is responsible for the trade-off
         // (turning off one logical light kills the whole lamp).
+        cancelGoveeFade(g.ip); // une rampe en cours rallumerait la couleur
         await g.on(false);
         return;
     }
@@ -96,7 +140,8 @@ async function applyGovee(
         if (opts.color !== undefined)
             await g.colorTemperature(hexToKelvin(opts.color));
     } else {
-        if (opts.color !== undefined) await g.color(opts.color);
+        if (opts.color !== undefined)
+            await goveeColorSmooth(g, opts.color, opts.transitionMs);
     }
     if (opts.brightness !== undefined) await g.brightness(opts.brightness);
     if (
@@ -318,6 +363,7 @@ async function applyLightTarget(
                 brightnessDelta,
                 color,
                 colorTempK,
+                transitionMs,
             }).catch(() => {});
         }
         return msg;
@@ -352,6 +398,7 @@ async function applyLightTarget(
             brightnessDelta,
             color,
             colorTempK,
+            transitionMs,
         });
     } else {
         const lightId = Number(light.id);
@@ -633,6 +680,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 }
                 const g = goveeById.get(String(light.id));
                 if (!g) throw new Error('Govee client not registered');
+                cancelGoveeFade(g.ip);
                 const preset = startAmbiance(String(light.id), presetId, g);
                 return {
                     content: [

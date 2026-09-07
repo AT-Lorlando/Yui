@@ -66,7 +66,11 @@ export default class GoveeClient {
      * `colorTemInKelvin: 0` tells the lamp to apply RGB (not CCT).
      */
     public color(hex: string): Promise<void> {
-        const color = hexToRgb(hex);
+        return this.colorRgb(hexToRgb(hex));
+    }
+
+    /** Variante RGB brute — utilisée par la rampe de fondu (goveeFade). */
+    public colorRgb(color: { r: number; g: number; b: number }): Promise<void> {
         return this.send({
             msg: {
                 cmd: 'colorwc',
