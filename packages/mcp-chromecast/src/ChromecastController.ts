@@ -519,6 +519,19 @@ export class ChromecastController {
             run(['prep']).catch(() => {}),
             launchOnTv(FULLY_PACKAGE, FULLY_PACKAGE),
         ]);
+        // Charger explicitement l'URL du dashboard plutôt que de compter sur
+        // la Start URL configurée DANS Fully : c'est elle qui a cassé en août
+        // (yui.home.arpa → 301 https → cert mkcert que la webview du Shield ne
+        // connaît pas → page du cache, données mortes). Un intent VIEW épinglé
+        // sur Fully est déterministe et se moque du DNS/TLS de la config Fully.
+        const url = process.env.DASHBOARD_URL ?? '';
+        if (url && ATV_ADB_HOST) {
+            try {
+                await adbLaunch(url, FULLY_PACKAGE);
+            } catch (e) {
+                Logger.warn(`launchFully: loadURL via intent: ${e}`);
+            }
+        }
         return result;
     }
 
