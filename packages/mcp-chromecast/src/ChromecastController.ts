@@ -36,6 +36,12 @@ function execAdb(args: string[], timeout = 15_000): Promise<string> {
     });
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function adbShell(args: string[], timeout?: number): Promise<string> {
+    return execAdb(['-s', ATV_ADB_HOST, 'shell', ...args], timeout);
+}
+
 /** Connexion idempotente — adb garde le device ensuite. */
 async function adbConnect(): Promise<void> {
     const out = await execAdb(['connect', ATV_ADB_HOST], 8_000);
@@ -44,8 +50,84 @@ async function adbConnect(): Promise<void> {
     }
 }
 
+async function adbIsAwake(): Promise<boolean> {
+    const out = await adbShell(['dumpsys', 'power'], 8_000);
+    return /mWakefulness=Awake/.test(out);
+}
+
+/** Package de l'activité au premier plan (best-effort, '' si illisible). */
+async function foregroundPackage(): Promise<string> {
+    try {
+        const out = await adbShell(
+            ['dumpsys', 'activity', 'activities'],
+            8_000,
+        );
+        return (
+            /(?:topResumedActivity|mResumedActivity)[^\n]*?\s([\w.]+)\//.exec(
+                out,
+            )?.[1] ?? ''
+        );
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * Shield prêt à recevoir un intent : connecté ET réveillé. Vécu : un deep-link
+ * envoyé pendant que le Shield sort de veille part dans le vide (Prime/Fully
+ * « ne se lancent pas ») — le premier `adb connect` après la veille réseau
+ * échoue parfois aussi. Donc : connect avec retries, WAKEUP si endormi, et on
+ * ATTEND que l'appareil se dise réveillé avant de lancer quoi que ce soit.
+ */
+async function ensureShieldReady(): Promise<void> {
+    let lastErr: unknown;
+    for (let i = 0; i < 3; i++) {
+        try {
+            await adbConnect();
+            lastErr = undefined;
+            break;
+        } catch (e) {
+            lastErr = e;
+            await sleep(1_200);
+        }
+    }
+    if (lastErr) throw lastErr;
+    // « connected » ne veut pas dire autorisé : si la clé RSA du serveur adb
+    // n'est pas acceptée par le Shield, TOUT shell échoue en « device
+    // unauthorized » (vécu 08/09 : dev et prod partagent le serveur adb de la
+    // machine — port 5037, premier utilisateur servi — et sa clé avait été
+    // révoquée : plus aucun lancement Prime/Fully). Erreur claire plutôt
+    // qu'un échec silencieux par commande.
+    try {
+        await execAdb(['-s', ATV_ADB_HOST, 'get-state'], 8_000);
+    } catch (e) {
+        if (/unauthorized/i.test(String(e))) {
+            throw new Error(
+                'Shield ADB non autorisé — accepter « Toujours autoriser » ' +
+                    'dans la boîte de dialogue sur le Shield (elle apparaît ' +
+                    'à la prochaine connexion, écran allumé)',
+            );
+        }
+        throw e;
+    }
+    try {
+        if (await adbIsAwake()) return;
+        Logger.info('Shield endormi — WAKEUP + attente du réveil');
+        await adbShell(['input', 'keyevent', '224']); // KEYCODE_WAKEUP
+        for (let i = 0; i < 10; i++) {
+            await sleep(700);
+            if (await adbIsAwake()) break;
+        }
+        // Petite marge : le launcher se pose avant de recevoir l'intent.
+        await sleep(800);
+    } catch (e) {
+        // Best-effort : un dumpsys illisible ne doit pas empêcher le lancement.
+        Logger.warn(`ensureShieldReady: ${e}`);
+    }
+}
+
 async function adbLaunch(target: string, pkg?: string): Promise<string> {
-    await adbConnect();
+    await ensureShieldReady();
     // Épingler le package est indispensable pour les liens que l'app link ne
     // couvre pas (ex. primevideo /watch) : sans lui, `am start` résout sur le
     // launcher et il ne se passe rien.
@@ -73,13 +155,34 @@ async function adbLaunch(target: string, pkg?: string): Promise<string> {
               'android.intent.category.LAUNCHER',
               '1',
           ];
-    const out = await execAdb(args);
-    // `am start` sort en 0 même sur échec — l'erreur est dans la sortie.
-    if (/^Error|Exception|No activities found/im.test(out)) {
-        throw new Error(`adb launch: ${out.slice(0, 200)}`);
+    const wanted = pkg ?? (target.startsWith('http') ? '' : target);
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const out = await execAdb(args);
+        // `am start` sort en 0 même sur échec — l'erreur est dans la sortie.
+        if (/^Error|Exception|No activities found/im.test(out)) {
+            throw new Error(`adb launch: ${out.slice(0, 200)}`);
+        }
+        if (!wanted) {
+            Logger.debug(`adb launch OK: ${target}`);
+            return `Lancé via ADB : ${target}`;
+        }
+        // Vérifier que l'app passe VRAIMENT au premier plan : au sortir de
+        // veille, un intent accepté peut quand même se perdre (launcher pas
+        // prêt) — c'était le « Prime ne se lance pas » des lancements à froid.
+        for (let i = 0; i < 5; i++) {
+            await sleep(900);
+            if ((await foregroundPackage()).startsWith(wanted)) {
+                Logger.debug(`adb launch OK: ${target}`);
+                return `Lancé via ADB : ${target}`;
+            }
+        }
+        Logger.warn(
+            `adb launch: ${wanted} pas au premier plan — relance (${
+                attempt + 1
+            })`,
+        );
     }
-    Logger.debug(`adb launch OK: ${target}`);
-    return `Lancé via ADB : ${target}`;
+    throw new Error(`adb launch: ${wanted} n'est pas passé au premier plan`);
 }
 
 /** Touches média Android (KEYCODE_*) — pilotent l'app au premier plan. */
@@ -97,14 +200,7 @@ async function sendMediaKey(action: string): Promise<string> {
     if (code === undefined) throw new Error(`Action inconnue : ${action}`);
     if (!ATV_ADB_HOST) throw new Error('ATV_ADB_HOST non configuré');
     await adbConnect();
-    await execAdb([
-        '-s',
-        ATV_ADB_HOST,
-        'shell',
-        'input',
-        'keyevent',
-        String(code),
-    ]);
+    await adbShell(['input', 'keyevent', String(code)]);
     Logger.info(`Shield media key: ${action}`);
     return `TV : ${action.replace('_', '/')}`;
 }
@@ -143,6 +239,12 @@ async function nudgePrimeProfile(): Promise<void> {
             );
             const state = await primePlaybackState();
             if (state === '3') return;
+            // Jamais d'OK à l'aveugle : si Prime n'est pas au premier plan
+            // (Shield en plein réveil, lancement via le repli ATV), l'appui
+            // partirait dans le launcher et ouvrirait n'importe quoi.
+            if (!(await foregroundPackage()).startsWith(PRIME_PACKAGE)) {
+                continue;
+            }
             Logger.info(
                 `Prime pas en lecture (state=${state ?? '?'}) — OK profil (${
                     attempt + 1
