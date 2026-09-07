@@ -298,6 +298,33 @@ export interface AgendaSecretaryDeps {
 
 const DEFAULT_TTL_MS = 30 * 60_000;
 
+// Un appel LLM sans borne héritait du timeout du client OpenAI (10 min,
+// retries compris) : UN aller-retour accroché gelait la tuile agenda en
+// « pending » jusqu'à ~30 min (vécu le 07/09). Au-delà de cette borne, on
+// abandonne → le front affiche le repli brut, et on retente au prochain
+// rafraîchissement.
+const LLM_TIMEOUT_MS = Number(process.env.AGENDA_LLM_TIMEOUT_MS ?? 60_000);
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const t = setTimeout(
+            () => reject(new Error(`agenda LLM timeout (${ms} ms)`)),
+            ms,
+        );
+        t.unref?.();
+        promise.then(
+            (v) => {
+                clearTimeout(t);
+                resolve(v);
+            },
+            (e) => {
+                clearTimeout(t);
+                reject(e);
+            },
+        );
+    });
+}
+
 export class AgendaSecretary {
     private cache: { hash: string; data: AgendaData; at: number } | null = null;
     private inflight: Promise<AgendaData | null> | null = null;
@@ -343,9 +370,14 @@ export class AgendaSecretary {
         const { system, user } = buildSecretaryPrompt(events, now);
         let data: AgendaData | null;
         try {
-            data = parseJudgment(await this.deps.complete(system, user));
+            data = parseJudgment(
+                await withTimeout(
+                    this.deps.complete(system, user),
+                    LLM_TIMEOUT_MS,
+                ),
+            );
         } catch {
-            return null; // LLM KO → null, pas de mise en cache
+            return null; // LLM KO ou trop lent → repli brut, pas de cache
         }
         if (!data) return null; // JSON invalide → null, pas de mise en cache
 
