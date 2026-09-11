@@ -19,7 +19,7 @@ export const DEVICE_SUBJECTS: Record<DeviceSubject, string[]> = {
 };
 
 /** L'ampli n'a pas de retour d'état : mcp-spotify persiste le dernier ordre IR. */
-function readAmpState(): string {
+export function readAmpState(): 'on' | 'off' {
     try {
         const raw = JSON.parse(
             fs.readFileSync(dataPath('amp-state.json'), 'utf-8'),

@@ -1,5 +1,6 @@
 // Contrôle direct des appareils (bypasse le LLM) — monté sur /devices.
 import express from 'express';
+import { readAmpState } from '../../orchestrator/deviceConditions';
 import type { DeviceHandler } from '../InputSource';
 import type { RequireAuth } from './helpers';
 
@@ -113,6 +114,12 @@ export function deviceRoutes(
     dev.patch(
         '/spotify/volume',
         callWith('set_volume', (req) => ({ percent: +req.body.percent })),
+    );
+
+    // ── Ampli (IR — pas de retour d'état : dernier ordre persisté par
+    // mcp-spotify dans amp-state.json, même lecture que les conditions) ──
+    dev.get('/amp', (_req: any, res: any) =>
+        res.json({ state: readAmpState() }),
     );
 
     // ── TV (mcp-smartthings : WoL + SmartThings cloud) ────────────────
