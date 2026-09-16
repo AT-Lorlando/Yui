@@ -58,6 +58,26 @@ export interface DeliveriesWatcherConfig {
     query?: string;
 }
 
+/** Écarts par brique — tout ce qui n'est pas listé garde son défaut. */
+export type BrickOverrides = Record<
+    string,
+    { enabled?: boolean; settings?: Record<string, unknown> }
+>;
+
+export interface ConciergeRule {
+    /** Sous-chaîne cherchée dans l'expéditeur (adresse ou domaine). */
+    match: string;
+    category: string;
+}
+
+export interface ConciergeConfig {
+    pollMinutes?: number;
+    /** Catégories appliquées sans validation (labels + archivage promo/news). */
+    autoCategories?: string[];
+    /** Règles apprises des corrections — appliquées avant le LLM (0 token). */
+    rules?: ConciergeRule[];
+}
+
 export interface ProactiveConfig {
     enabled: boolean;
     chattiness: Chattiness;
@@ -65,6 +85,10 @@ export interface ProactiveConfig {
     digestTime: string;
     defaultCooldownMin: number;
     automationGuardWindowMin: number;
+    /** Budget d'interruptions quotidien du juge (speak=1, notify=0.5). */
+    budgetPerDay?: number;
+    bricks?: BrickOverrides;
+    concierge?: ConciergeConfig;
     whitelist: WhitelistAction[];
     /** Editable system prompts for proactive message formulation. */
     prompts?: { phrase?: string; digest?: string };

@@ -34,7 +34,7 @@ export class GmailClient {
         const minutes = Math.floor(diff / 60_000);
         const hours = Math.floor(diff / 3_600_000);
         const days = Math.floor(diff / 86_400_000);
-        if (minutes < 1) return 'a l\'instant';
+        if (minutes < 1) return "a l'instant";
         if (minutes < 60) return `il y a ${minutes} min`;
         if (hours < 24) return `il y a ${hours}h`;
         if (days === 1) return 'hier';
@@ -43,7 +43,9 @@ export class GmailClient {
     }
 
     /** Decode base64url-encoded Gmail payload body recursively. */
-    private decodeBody(payload: gmail_v1.Schema$MessagePart | undefined): string {
+    private decodeBody(
+        payload: gmail_v1.Schema$MessagePart | undefined,
+    ): string {
         if (!payload) return '';
 
         // Prefer text/plain, fall back to text/html (stripped)
@@ -52,14 +54,21 @@ export class GmailClient {
         }
 
         if (payload.mimeType === 'text/html' && payload.body?.data) {
-            const html = Buffer.from(payload.body.data, 'base64').toString('utf-8');
+            const html = Buffer.from(payload.body.data, 'base64').toString(
+                'utf-8',
+            );
             // Strip HTML tags for clean text
-            return html.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
+            return html
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
         }
 
         // Multipart — recurse into parts, prefer text/plain part
         if (payload.parts) {
-            const plainPart = payload.parts.find((p) => p.mimeType === 'text/plain');
+            const plainPart = payload.parts.find(
+                (p) => p.mimeType === 'text/plain',
+            );
             if (plainPart) return this.decodeBody(plainPart);
 
             // Fall back to first non-attachment part
@@ -69,7 +78,9 @@ export class GmailClient {
                     if (nested) return nested;
                 }
             }
-            const htmlPart = payload.parts.find((p) => p.mimeType === 'text/html');
+            const htmlPart = payload.parts.find(
+                (p) => p.mimeType === 'text/html',
+            );
             if (htmlPart) return this.decodeBody(htmlPart);
         }
 
@@ -129,11 +140,13 @@ export class GmailClient {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    async listEmails(options: {
-        maxResults?: number;
-        query?: string;
-        labelIds?: string[];
-    } = {}): Promise<string> {
+    async listEmails(
+        options: {
+            maxResults?: number;
+            query?: string;
+            labelIds?: string[];
+        } = {},
+    ): Promise<string> {
         const maxResults = Math.min(options.maxResults ?? 20, 50);
         const labelIds = options.labelIds ?? ['INBOX'];
 
@@ -159,7 +172,9 @@ export class GmailClient {
             ),
         );
 
-        const lines = full.map((r, i) => `[${i + 1}]\n${this.formatMessageSummary(r.data)}`);
+        const lines = full.map(
+            (r, i) => `[${i + 1}]\n${this.formatMessageSummary(r.data)}`,
+        );
         return `${messages.length} email(s) :\n\n${lines.join('\n\n---\n\n')}`;
     }
 
@@ -208,7 +223,8 @@ export class GmailClient {
         });
 
         const messages = listRes.data.messages ?? [];
-        if (messages.length === 0) return `Aucun email pour la recherche : "${query}"`;
+        if (messages.length === 0)
+            return `Aucun email pour la recherche : "${query}"`;
 
         const full = await Promise.all(
             messages.map((m) =>
@@ -221,8 +237,12 @@ export class GmailClient {
             ),
         );
 
-        const lines = full.map((r, i) => `[${i + 1}]\n${this.formatMessageSummary(r.data)}`);
-        return `${messages.length} résultat(s) pour "${query}" :\n\n${lines.join('\n\n---\n\n')}`;
+        const lines = full.map(
+            (r, i) => `[${i + 1}]\n${this.formatMessageSummary(r.data)}`,
+        );
+        return `${
+            messages.length
+        } résultat(s) pour "${query}" :\n\n${lines.join('\n\n---\n\n')}`;
     }
 
     async sendEmail(
@@ -253,7 +273,9 @@ export class GmailClient {
         const subject = this.header(orig.data, 'Subject');
         const originalMessageId = this.header(orig.data, 'Message-ID');
         const threadId = orig.data.threadId!;
-        const replySubject = subject.startsWith('Re: ') ? subject : `Re: ${subject}`;
+        const replySubject = subject.startsWith('Re: ')
+            ? subject
+            : `Re: ${subject}`;
 
         const raw = this.buildRaw(from, replySubject, body, {
             inReplyTo: originalMessageId,
@@ -269,7 +291,11 @@ export class GmailClient {
         return `Réponse envoyée à ${from} — objet : "${replySubject}"`;
     }
 
-    async createDraft(to: string, subject: string, body: string): Promise<string> {
+    async createDraft(
+        to: string,
+        subject: string,
+        body: string,
+    ): Promise<string> {
         const raw = this.buildRaw(to, subject, body);
         const res = await this.gmail.users.drafts.create({
             userId: 'me',
@@ -313,6 +339,58 @@ export class GmailClient {
         return `Email ${messageId} marqué comme non lu.`;
     }
 
+    /** Id d'un label par son nom, créé s'il n'existe pas (cache process). */
+    private labelIds = new Map<string, string>();
+    async ensureLabel(name: string): Promise<string> {
+        const cached = this.labelIds.get(name);
+        if (cached) return cached;
+        const res = await this.gmail.users.labels.list({ userId: 'me' });
+        for (const l of res.data.labels ?? []) {
+            if (l.name && l.id) this.labelIds.set(l.name, l.id);
+        }
+        const hit = this.labelIds.get(name);
+        if (hit) return hit;
+        const created = await this.gmail.users.labels.create({
+            userId: 'me',
+            requestBody: {
+                name,
+                labelListVisibility: 'labelShow',
+                messageListVisibility: 'show',
+            },
+        });
+        const id = created.data.id ?? '';
+        if (id) this.labelIds.set(name, id);
+        Logger.info(`Label créé : ${name} (${id})`);
+        return id;
+    }
+
+    /** Pose/retire des labels PAR NOM (créés au besoin) ± archivage. */
+    async modifyLabels(
+        messageId: string,
+        opts: { add?: string[]; remove?: string[]; archive?: boolean },
+    ): Promise<string> {
+        const addLabelIds = await Promise.all(
+            (opts.add ?? []).map((n) => this.ensureLabel(n)),
+        );
+        const removeLabelIds = await Promise.all(
+            (opts.remove ?? []).map((n) => this.ensureLabel(n)),
+        );
+        if (opts.archive) removeLabelIds.push('INBOX');
+        await this.gmail.users.messages.modify({
+            userId: 'me',
+            id: messageId,
+            requestBody: {
+                ...(addLabelIds.length ? { addLabelIds } : {}),
+                ...(removeLabelIds.length ? { removeLabelIds } : {}),
+            },
+        });
+        return `Labels de ${messageId} mis à jour (${[
+            ...(opts.add ?? []).map((l) => `+${l}`),
+            ...(opts.remove ?? []).map((l) => `-${l}`),
+            ...(opts.archive ? ['archivé'] : []),
+        ].join(', ')}).`;
+    }
+
     async listLabels(): Promise<string> {
         const res = await this.gmail.users.labels.list({ userId: 'me' });
         const labels = res.data.labels ?? [];
@@ -321,7 +399,9 @@ export class GmailClient {
         const user = labels.filter((l) => l.type === 'user');
 
         const fmt = (l: gmail_v1.Schema$Label) =>
-            `  ${l.name} (ID: ${l.id})${l.messagesUnread ? ` — ${l.messagesUnread} non lu(s)` : ''}`;
+            `  ${l.name} (ID: ${l.id})${
+                l.messagesUnread ? ` — ${l.messagesUnread} non lu(s)` : ''
+            }`;
 
         const lines = [
             'Labels système :',

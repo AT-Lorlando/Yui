@@ -34,71 +34,132 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         switch (name) {
             case 'list_emails':
                 return {
-                    content: [{
-                        type: 'text',
-                        text: await gmail.listEmails({
-                            maxResults: a.maxResults,
-                            query: a.query,
-                            labelIds: a.labelIds,
-                        }),
-                    }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.listEmails({
+                                maxResults: a.maxResults,
+                                query: a.query,
+                                labelIds: a.labelIds,
+                            }),
+                        },
+                    ],
                 };
 
             case 'get_email':
                 return {
-                    content: [{ type: 'text', text: await gmail.getEmail(a.messageId) }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.getEmail(a.messageId),
+                        },
+                    ],
                 };
 
             case 'search_emails':
                 return {
-                    content: [{
-                        type: 'text',
-                        text: await gmail.searchEmails(a.query, a.maxResults),
-                    }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.searchEmails(
+                                a.query,
+                                a.maxResults,
+                            ),
+                        },
+                    ],
                 };
 
             case 'send_email':
                 return {
-                    content: [{
-                        type: 'text',
-                        text: await gmail.sendEmail(a.to, a.subject, a.body, a.cc),
-                    }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.sendEmail(
+                                a.to,
+                                a.subject,
+                                a.body,
+                                a.cc,
+                            ),
+                        },
+                    ],
                 };
 
             case 'reply_email':
                 return {
-                    content: [{
-                        type: 'text',
-                        text: await gmail.replyEmail(a.messageId, a.body),
-                    }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.replyEmail(a.messageId, a.body),
+                        },
+                    ],
                 };
 
             case 'create_draft':
                 return {
-                    content: [{
-                        type: 'text',
-                        text: await gmail.createDraft(a.to, a.subject, a.body),
-                    }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.createDraft(
+                                a.to,
+                                a.subject,
+                                a.body,
+                            ),
+                        },
+                    ],
                 };
 
             case 'trash_email':
                 return {
-                    content: [{ type: 'text', text: await gmail.trashEmail(a.messageId) }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.trashEmail(a.messageId),
+                        },
+                    ],
                 };
 
             case 'archive_email':
                 return {
-                    content: [{ type: 'text', text: await gmail.archiveEmail(a.messageId) }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.archiveEmail(a.messageId),
+                        },
+                    ],
                 };
 
             case 'mark_read':
                 return {
-                    content: [{ type: 'text', text: await gmail.markRead(a.messageId) }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.markRead(a.messageId),
+                        },
+                    ],
                 };
 
             case 'mark_unread':
                 return {
-                    content: [{ type: 'text', text: await gmail.markUnread(a.messageId) }],
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.markUnread(a.messageId),
+                        },
+                    ],
+                };
+
+            case 'modify_labels':
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: await gmail.modifyLabels(a.messageId, {
+                                add: a.add,
+                                remove: a.remove,
+                                archive: a.archive === true,
+                            }),
+                        },
+                    ],
                 };
 
             case 'list_labels':
@@ -107,7 +168,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
 
             default:
-                throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+                throw new McpError(
+                    ErrorCode.MethodNotFound,
+                    `Unknown tool: ${name}`,
+                );
         }
     } catch (error) {
         if (error instanceof McpError) throw error;

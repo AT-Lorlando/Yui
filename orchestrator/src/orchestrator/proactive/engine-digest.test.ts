@@ -15,6 +15,9 @@ function cfg(): ProactiveConfig {
         defaultCooldownMin: 30,
         automationGuardWindowMin: 60,
         whitelist: [],
+        // Ces tests valident le pipeline HISTORIQUE (seuil de bavardage +
+        // reformulation) — le juge à budget a les siens (judge.test.ts).
+        bricks: { judge: { enabled: false } },
     };
 }
 

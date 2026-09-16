@@ -1,17 +1,20 @@
 export const GMAIL_TOOLS = [
     {
         name: 'list_emails',
-        description: 'List recent emails in the inbox. Returns sender, subject, date, snippet and read status.',
+        description:
+            'List recent emails in the inbox. Returns sender, subject, date, snippet and read status.',
         inputSchema: {
             type: 'object' as const,
             properties: {
                 maxResults: {
                     type: 'number',
-                    description: 'Max number of emails to return (default 20, max 50)',
+                    description:
+                        'Max number of emails to return (default 20, max 50)',
                 },
                 query: {
                     type: 'string',
-                    description: 'Optional Gmail query to filter (e.g. "is:unread", "from:alice@example.com")',
+                    description:
+                        'Optional Gmail query to filter (e.g. "is:unread", "from:alice@example.com")',
                 },
                 labelIds: {
                     type: 'array',
@@ -24,7 +27,8 @@ export const GMAIL_TOOLS = [
     },
     {
         name: 'get_email',
-        description: 'Get the full content of an email by its message ID, including decoded body.',
+        description:
+            'Get the full content of an email by its message ID, including decoded body.',
         inputSchema: {
             type: 'object' as const,
             properties: {
@@ -38,13 +42,15 @@ export const GMAIL_TOOLS = [
     },
     {
         name: 'search_emails',
-        description: 'Search emails using Gmail query syntax. Examples: "from:alice subject:invoice", "is:unread after:2026/01/01".',
+        description:
+            'Search emails using Gmail query syntax. Examples: "from:alice subject:invoice", "is:unread after:2026/01/01".',
         inputSchema: {
             type: 'object' as const,
             properties: {
                 query: {
                     type: 'string',
-                    description: 'Gmail search query (same syntax as the Gmail search bar)',
+                    description:
+                        'Gmail search query (same syntax as the Gmail search bar)',
                 },
                 maxResults: {
                     type: 'number',
@@ -177,8 +183,36 @@ export const GMAIL_TOOLS = [
         },
     },
     {
+        name: 'modify_labels',
+        description:
+            'Add/remove Gmail labels on a message by label NAME (labels are created if missing), optionally archiving it. Used by the mail concierge.',
+        inputSchema: {
+            type: 'object' as const,
+            'x-audience': ['system'],
+            properties: {
+                messageId: { type: 'string', description: 'Gmail message ID' },
+                add: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Label names to add',
+                },
+                remove: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Label names to remove',
+                },
+                archive: {
+                    type: 'boolean',
+                    description: 'Also remove from INBOX',
+                },
+            },
+            required: ['messageId'],
+        },
+    },
+    {
         name: 'list_labels',
-        description: 'List all Gmail labels (inbox, sent, drafts, custom labels, etc.).',
+        description:
+            'List all Gmail labels (inbox, sent, drafts, custom labels, etc.).',
         inputSchema: {
             type: 'object' as const,
             properties: {},

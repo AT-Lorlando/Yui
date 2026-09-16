@@ -73,6 +73,14 @@ export function validateConfig(raw: Partial<ProactiveConfig>): string[] {
     };
     nonNeg(o.defaultCooldownMin, 'defaultCooldownMin');
     nonNeg(o.automationGuardWindowMin, 'automationGuardWindowMin');
+    nonNeg(o.budgetPerDay, 'budgetPerDay');
+    if (
+        o.bricks !== undefined &&
+        (typeof o.bricks !== 'object' ||
+            o.bricks === null ||
+            Array.isArray(o.bricks))
+    )
+        e.push('bricks doit être un objet { id: { enabled, settings } }');
     if (o.whitelist !== undefined && !Array.isArray(o.whitelist))
         e.push('whitelist doit être une liste');
     if (o.prompts !== undefined) {

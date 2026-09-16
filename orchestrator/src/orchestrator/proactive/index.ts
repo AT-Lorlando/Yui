@@ -17,6 +17,23 @@ import { createPresenceWatcher } from './watchers/presence';
 import { createCalendarWatcher } from './watchers/calendar';
 import { createMailWatcher } from './watchers/mail';
 import { createDeliveriesWatcher } from './watchers/deliveries';
+import { isBrickEnabled, bricksView } from './bricks';
+import { ProactiveJournal } from './journal';
+import type { Feedback, JournalEntry } from './journal';
+import { Judge } from './judge';
+import type { JudgeInput, JudgeVerdict } from './judge';
+import {
+    buildSituation,
+    diffSituation,
+    loadSituation,
+    saveSituation,
+} from './situation';
+import type { Situation } from './situation';
+import { detectMoments, returnMomentFacts } from './moments';
+import { MailConcierge } from './mail/concierge';
+import type { MailCategory } from './mail/concierge';
+import { saveConfig } from './config';
+import type { MomentKind, MomentState } from './moments';
 import type {
     CandidateEvent,
     ProactiveConfig,
@@ -25,6 +42,9 @@ import type {
 } from './types';
 
 const DEDUP_FILE = dataPath('proactive-dedup.json');
+/** Cadence de reconstruction du journal de situation (lectures store, pas cher). */
+const SITUATION_POLL_MS = 2 * 60_000;
+const DEFAULT_BUDGET_PER_DAY = 3;
 
 export class ProactiveEngine {
     private dedup: Dedup;
@@ -32,16 +52,190 @@ export class ProactiveEngine {
     private watchers: Watcher[] = [];
     private now: () => number;
     private digestTimer?: ReturnType<typeof setInterval>;
+    private situationTimer?: ReturnType<typeof setInterval>;
+    readonly journal: ProactiveJournal;
+    readonly concierge: MailConcierge;
+    private conciergeTimer?: ReturnType<typeof setInterval>;
+    private judge: Judge;
+    private situation: Situation | null;
+    private momentState: MomentState = { firedDepartures: [] };
+    private lastDeltas: string[] = [];
 
     constructor(
         private cfg: ProactiveConfig,
         private deps: ProactiveDeps,
         digest?: DigestBuffer,
         dedup?: Dedup,
+        journal?: ProactiveJournal,
     ) {
         this.now = deps.now ?? (() => Date.now());
         this.digest = digest ?? new DigestBuffer();
         this.dedup = dedup ?? new Dedup(DEDUP_FILE);
+        this.journal = journal ?? new ProactiveJournal();
+        this.situation = loadSituation();
+        this.judge = new Judge({
+            complete: (sys, user) => this.deps.complete(sys, user),
+            journal: this.journal,
+            budgetPerDay: () => this.cfg.budgetPerDay ?? DEFAULT_BUDGET_PER_DAY,
+            now: this.now,
+        });
+        this.concierge = new MailConcierge({
+            deviceHandler: (t, a) => this.deps.deviceHandler(t, a),
+            complete: (sys, user) => this.deps.complete(sys, user),
+            getRules: () => this.cfg.concierge?.rules ?? [],
+            addRule: (rule) => {
+                const rules = [
+                    ...(this.cfg.concierge?.rules ?? []).filter(
+                        (r) => r.match !== rule.match,
+                    ),
+                    rule,
+                ];
+                this.cfg.concierge = { ...this.cfg.concierge, rules };
+                try {
+                    saveConfig({ concierge: this.cfg.concierge });
+                } catch (err) {
+                    Logger.warn(`concierge: règle non persistée — ${err}`);
+                }
+            },
+            getAutoCategories: () =>
+                (this.cfg.concierge?.autoCategories ?? []) as MailCategory[],
+            now: this.now,
+        });
+    }
+
+    /** Résumé du tri courrier pour le dashboard (tuile Briefing). */
+    getTriageSummary(): {
+        pendingCount: number;
+        actions: Array<{ subject: string; from: string }>;
+        classifiedToday: number;
+    } {
+        const st = this.concierge.getState();
+        const today = new Date(this.now()).toDateString();
+        return {
+            pendingCount: this.concierge.pending().length,
+            actions: st.proposals
+                .filter((p) => p.category === 'action')
+                .slice(-8)
+                .map((p) => ({ subject: p.subject, from: p.from })),
+            classifiedToday: st.proposals.filter(
+                (p) =>
+                    p.appliedAt &&
+                    new Date(p.appliedAt).toDateString() === today,
+            ).length,
+        };
+    }
+
+    getBricks() {
+        return bricksView(this.cfg);
+    }
+
+    getJournal(limit = 50): JournalEntry[] {
+        return this.journal.list(limit);
+    }
+
+    setFeedback(id: string, feedback: Feedback): boolean {
+        return this.journal.setFeedback(id, feedback);
+    }
+
+    getSituation(): Situation | null {
+        return this.situation;
+    }
+
+    /** Tick du journal de situation : reconstruit, diffe, détecte les moments. */
+    async situationTick(): Promise<void> {
+        try {
+            const next = await buildSituation({
+                callTool: (t, a) => this.deps.deviceHandler(t, a),
+                presenceState: () => this.deps.presenceState(),
+                now: this.now,
+            });
+            const prev = this.situation;
+            this.lastDeltas = diffSituation(prev, next);
+            const { moments, state } = detectMoments(
+                prev,
+                next,
+                this.momentState,
+                (kind: MomentKind) => isBrickEnabled(this.cfg, kind),
+            );
+            this.momentState = state;
+            this.situation = next;
+            saveSituation(next);
+            for (const m of moments) {
+                await this.handleMoment(m.kind, m.facts);
+            }
+        } catch (err) {
+            Logger.warn(`proactive: situation tick — ${err}`);
+        }
+    }
+
+    /** Moment de vie détecté → le juge compose (ou se tait). */
+    async handleMoment(
+        kind: MomentKind | string,
+        facts: string,
+    ): Promise<void> {
+        const nowMs = this.now();
+        // Un moment par fenêtre de 2 h max, quoi qu'il arrive.
+        if (this.dedup.isDuplicate(kind, nowMs, 2 * 3600_000)) return;
+        Logger.info(`proactive: moment "${kind}" — ${facts.slice(0, 120)}`);
+        const verdict = await this.judge.evaluate(
+            {
+                source: kind,
+                subject: kind,
+                facts,
+                importance: 'utile',
+                kind: 'moment',
+                budgetExempt: true,
+            },
+            this.situation,
+            this.lastDeltas,
+        );
+        await this.applyVerdict(
+            { source: kind, subject: kind, facts },
+            verdict,
+            nowMs,
+        );
+    }
+
+    /** Applique un verdict du juge : sortie + journal + dédup. */
+    private async applyVerdict(
+        input: { source: string; subject: string; facts: string },
+        verdict: JudgeVerdict,
+        nowMs: number,
+    ): Promise<void> {
+        const message = verdict.message || input.facts;
+        this.journal.record({
+            at: nowMs,
+            source: input.source,
+            subject: input.subject,
+            channel: verdict.channel,
+            message,
+            reason: verdict.reason,
+        });
+        switch (verdict.channel) {
+            case 'speak':
+                await this.emit(message);
+                this.dedup.record(input.subject, nowMs, message);
+                this.digest.remove(input.subject);
+                break;
+            case 'notify':
+                Logger.info(`proactive: → notification seule « ${message} »`);
+                await this.deps.notify(message);
+                this.dedup.record(input.subject, nowMs, message);
+                this.digest.remove(input.subject);
+                break;
+            case 'digest':
+                this.digest.add({
+                    watcherId: input.source,
+                    subject: input.subject,
+                    importance: 'info',
+                    facts: message,
+                });
+                this.dedup.record(input.subject, nowMs);
+                break;
+            case 'skip':
+                this.dedup.record(input.subject, nowMs);
+                break;
+        }
     }
 
     setWatchers(ws: Watcher[]): void {
@@ -73,7 +267,44 @@ export class ProactiveEngine {
                 this.digest.add(ev);
                 return;
             }
-            // 2. seuil de bavardage
+            // 2. juge à budget (brique) — il remplace le seuil de bavardage :
+            // situation + deltas + retours 👍/👎 + budget → verdict.
+            if (!critical && isBrickEnabled(this.cfg, 'judge')) {
+                const cooldownJ =
+                    ev.cooldownMs ?? this.cfg.defaultCooldownMin * 60_000;
+                if (this.dedup.isDuplicate(ev.subject, nowMs, cooldownJ)) {
+                    Logger.info(
+                        `proactive: ⊘ IGNORÉ "${ev.subject}" (anti-répétition avant juge)`,
+                    );
+                    return;
+                }
+                if (ev.proposedAction) {
+                    await this.tryAction(ev.proposedAction, nowMs);
+                }
+                const verdict = await this.judge.evaluate(
+                    {
+                        source: ev.watcherId,
+                        subject: ev.subject,
+                        facts: ev.facts,
+                        importance: ev.importance,
+                        kind: 'event',
+                    } satisfies JudgeInput,
+                    this.situation,
+                    this.lastDeltas,
+                );
+                await this.applyVerdict(
+                    {
+                        source: ev.watcherId,
+                        subject: ev.subject,
+                        facts: ev.facts,
+                    },
+                    verdict,
+                    nowMs,
+                );
+                return;
+            }
+
+            // 2 bis. pipeline historique (juge désactivé) : seuil de bavardage
             if (
                 !critical &&
                 !passesThreshold(ev.importance, this.cfg.chattiness)
@@ -208,6 +439,24 @@ export class ProactiveEngine {
             () => void this.maybeFlushDigest(),
             60_000,
         );
+        this.situationTimer = setInterval(
+            () => void this.situationTick(),
+            SITUATION_POLL_MS,
+        );
+        void this.situationTick();
+        if (isBrickEnabled(this.cfg, 'mail-concierge')) {
+            const pollMs = (this.cfg.concierge?.pollMinutes ?? 30) * 60_000;
+            this.conciergeTimer = setInterval(
+                () => void this.concierge.scan().catch(() => {}),
+                pollMs,
+            );
+            void this.concierge.scan().catch(() => {});
+            Logger.info(
+                `proactive: concierge courrier actif (poll ${Math.round(
+                    pollMs / 60000,
+                )} min)`,
+            );
+        }
         Logger.info(
             `proactive: démarré — watchers=[${this.watchers
                 .map((w) => w.id)
@@ -234,6 +483,8 @@ export class ProactiveEngine {
             }
         }
         if (this.digestTimer) clearInterval(this.digestTimer);
+        if (this.situationTimer) clearInterval(this.situationTimer);
+        if (this.conciergeTimer) clearInterval(this.conciergeTimer);
     }
 
     /** Dernier message proactif réellement communiqué (tous sujets), ou null. */
@@ -334,11 +585,15 @@ export class ProactiveEngine {
 
 function buildWatchers(cfg: ProactiveConfig, deps: ProactiveDeps): Watcher[] {
     const watchers: Watcher[] = [];
-    if (cfg.weather) watchers.push(createWeatherWatcher(cfg.weather, deps));
-    watchers.push(createPresenceWatcher(deps));
-    if (cfg.calendar) watchers.push(createCalendarWatcher(cfg.calendar, deps));
-    if (cfg.mail) watchers.push(createMailWatcher(cfg.mail, deps));
-    if (cfg.deliveries)
+    const on = (brick: string) => isBrickEnabled(cfg, brick);
+    if (cfg.weather && on('weather'))
+        watchers.push(createWeatherWatcher(cfg.weather, deps));
+    if (on('presence')) watchers.push(createPresenceWatcher(deps));
+    if (cfg.calendar && on('calendar'))
+        watchers.push(createCalendarWatcher(cfg.calendar, deps));
+    if (cfg.mail && on('mail-important'))
+        watchers.push(createMailWatcher(cfg.mail, deps));
+    if (cfg.deliveries && on('deliveries'))
         watchers.push(createDeliveriesWatcher(cfg.deliveries, deps));
     return watchers;
 }
@@ -347,6 +602,21 @@ export function initProactive(deps: ProactiveDeps): ProactiveEngine {
     const cfg = loadConfig();
     const engine = new ProactiveEngine(cfg, deps);
     engine.setWatchers(buildWatchers(cfg, deps));
+    // Moment « retour » : ancré sur la transition de présence, pas sur le tick.
+    deps.subscribePresence((prev, next) => {
+        if (prev !== 'home' && next === 'home') {
+            void engine
+                .situationTick()
+                .then(() =>
+                    isBrickEnabled(loadConfig(), 'moment-return')
+                        ? engine.handleMoment(
+                              'moment-return',
+                              returnMomentFacts(engine.getSituation()),
+                          )
+                        : undefined,
+                );
+        }
+    });
     engine.start();
     return engine;
 }

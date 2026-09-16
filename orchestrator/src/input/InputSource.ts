@@ -111,6 +111,20 @@ export interface IntegrationsHandler {
 /** Reloads the proactive engine to apply data/proactive.json edits. */
 export interface ProactiveHandler {
     reload: () => void;
+    /** Briques (défs + état effectif) pour la page /proactive. */
+    bricks?: () => unknown;
+    /** Journal des interventions (récval du juge) + feedback 👍/👎. */
+    journal?: (limit?: number) => unknown;
+    feedback?: (id: string, value: 'up' | 'down') => boolean;
+    situation?: () => unknown;
+    /** Concierge courrier : état, scan, application, correction. */
+    triage?: () => unknown;
+    triageScan?: (query?: string, max?: number) => Promise<unknown>;
+    triageApply?: (filter?: {
+        category?: string;
+        mailIds?: string[];
+    }) => Promise<number>;
+    triageCorrect?: (mailId: string, category: string) => Promise<boolean>;
 }
 
 export type DashboardHandler = () => Promise<

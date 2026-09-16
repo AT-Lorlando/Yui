@@ -72,6 +72,76 @@ export function configRoutes(
         }
     });
 
+    // ── Proactivité : briques, journal du juge, feedback ─────────────
+    r.get('/proactive/bricks', requireAuth, (_req: any, res: any) => {
+        res.json(proactiveHandler?.bricks?.() ?? []);
+    });
+    r.get('/proactive/journal', requireAuth, (req: any, res: any) => {
+        const limit = Number(req.query?.limit ?? 50) || 50;
+        res.json(proactiveHandler?.journal?.(limit) ?? []);
+    });
+    r.post(
+        '/proactive/journal/:id/feedback',
+        requireAuth,
+        (req: any, res: any) => {
+            const value = req.body?.value;
+            if (value !== 'up' && value !== 'down') {
+                res.status(400).json({ error: 'value doit être up ou down' });
+                return;
+            }
+            const ok =
+                proactiveHandler?.feedback?.(String(req.params.id), value) ??
+                false;
+            if (!ok) res.status(404).json({ error: 'intervention inconnue' });
+            else res.json({ ok: true });
+        },
+    );
+    r.get('/proactive/situation', requireAuth, (_req: any, res: any) => {
+        res.json(proactiveHandler?.situation?.() ?? null);
+    });
+
+    // ── Concierge courrier (tri Gmail) ───────────────────────────────
+    r.get('/mail/triage', requireAuth, (_req: any, res: any) => {
+        res.json(proactiveHandler?.triage?.() ?? null);
+    });
+    r.post('/mail/triage/scan', requireAuth, async (req: any, res: any) => {
+        try {
+            res.json(
+                (await proactiveHandler?.triageScan?.(
+                    req.body?.query,
+                    req.body?.max,
+                )) ?? null,
+            );
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+    r.post('/mail/triage/apply', requireAuth, async (req: any, res: any) => {
+        try {
+            const applied =
+                (await proactiveHandler?.triageApply?.({
+                    category: req.body?.category,
+                    mailIds: req.body?.mailIds,
+                })) ?? 0;
+            res.json({ applied });
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+    r.post('/mail/triage/correct', requireAuth, async (req: any, res: any) => {
+        try {
+            const ok =
+                (await proactiveHandler?.triageCorrect?.(
+                    String(req.body?.mailId ?? ''),
+                    String(req.body?.category ?? ''),
+                )) ?? false;
+            if (!ok) res.status(404).json({ error: 'mail inconnu' });
+            else res.json({ ok: true });
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     // ── Raw data/*.json editor (guardrailed) ─────────────────────────
     r.get('/data', requireAuth, (_req: any, res: any) => {
         res.json({ files: listDataFiles() });

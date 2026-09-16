@@ -232,6 +232,7 @@ async function main() {
 
     const dashboardProvider = createDashboardProvider({
         callTool: (tool, args) => orchestrator.callTool(tool, args ?? {}),
+        mailTriage: () => proactive.getTriageSummary(),
         presenceState: () => presence.getState(),
         automations: () => loadAutomations(),
         proactiveLastMessage: () => proactive.getLastMessage(),
@@ -254,7 +255,35 @@ async function main() {
             presenceHandler,
             conversationsHandler,
             { reconnect: (name: string) => orchestrator.reconnectServer(name) },
-            { reload: () => proactive.reload() },
+            {
+                reload: () => proactive.reload(),
+                bricks: () => proactive.getBricks(),
+                journal: (limit?: number) => proactive.getJournal(limit),
+                feedback: (id: string, value: 'up' | 'down') =>
+                    proactive.setFeedback(id, value),
+                situation: () => proactive.getSituation(),
+                triage: () => ({
+                    ...proactive.concierge.getState(),
+                    pending: proactive.concierge.pending(),
+                }),
+                triageScan: (query?: string, max?: number) =>
+                    proactive.concierge.scan(query, max),
+                triageApply: (filter?: {
+                    category?: string;
+                    mailIds?: string[];
+                }) =>
+                    proactive.concierge.apply(
+                        filter as {
+                            category?: import('./orchestrator/proactive/mail/concierge').MailCategory;
+                            mailIds?: string[];
+                        },
+                    ),
+                triageCorrect: (mailId: string, category: string) =>
+                    proactive.concierge.correct(
+                        mailId,
+                        category as import('./orchestrator/proactive/mail/concierge').MailCategory,
+                    ),
+            },
             () => dashboardProvider(),
         );
     }
