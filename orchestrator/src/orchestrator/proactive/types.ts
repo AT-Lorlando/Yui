@@ -70,12 +70,23 @@ export interface ConciergeRule {
     category: string;
 }
 
+export interface CustomCategory {
+    id: string;
+    label?: string;
+    description?: string;
+    archive?: boolean;
+}
+
 export interface ConciergeConfig {
     pollMinutes?: number;
     /** Catégories appliquées sans validation (labels + archivage promo/news). */
     autoCategories?: string[];
     /** Règles apprises des corrections — appliquées avant le LLM (0 token). */
     rules?: ConciergeRule[];
+    /** Règles en français injectées dans le prompt (acceptées depuis les doutes). */
+    promptRules?: string[];
+    /** Catégories ajoutées par Jérémy (ou proposées par le LLM et acceptées). */
+    customCategories?: CustomCategory[];
 }
 
 export interface ProactiveConfig {

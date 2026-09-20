@@ -125,6 +125,10 @@ export interface ProactiveHandler {
         mailIds?: string[];
     }) => Promise<number>;
     triageCorrect?: (mailId: string, category: string) => Promise<boolean>;
+    triageResolveDoubt?: (
+        id: string,
+        opts: { category?: string; accept?: number[] },
+    ) => Promise<boolean>;
 }
 
 export type DashboardHandler = () => Promise<

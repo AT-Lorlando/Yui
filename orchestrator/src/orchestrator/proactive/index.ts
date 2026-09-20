@@ -31,7 +31,7 @@ import {
 import type { Situation } from './situation';
 import { detectMoments, returnMomentFacts } from './moments';
 import { MailConcierge } from './mail/concierge';
-import type { MailCategory } from './mail/concierge';
+import type { MailCategory, TriageDoubt } from './mail/concierge';
 import { saveConfig } from './config';
 import type { MomentKind, MomentState } from './moments';
 import type {
@@ -90,22 +90,70 @@ export class ProactiveEngine {
                     ),
                     rule,
                 ];
-                this.cfg.concierge = { ...this.cfg.concierge, rules };
-                try {
-                    saveConfig({ concierge: this.cfg.concierge });
-                } catch (err) {
-                    Logger.warn(`concierge: règle non persistée — ${err}`);
-                }
+                this.patchConcierge({ rules });
             },
             getAutoCategories: () =>
                 (this.cfg.concierge?.autoCategories ?? []) as MailCategory[],
+            getPromptRules: () => this.cfg.concierge?.promptRules ?? [],
+            addPromptRule: (text) => {
+                const promptRules = [
+                    ...(this.cfg.concierge?.promptRules ?? []).filter(
+                        (r) => r !== text,
+                    ),
+                    text,
+                ];
+                this.patchConcierge({ promptRules });
+            },
+            getCustomCategories: () =>
+                this.cfg.concierge?.customCategories ?? [],
+            addCustomCategory: (c) => {
+                const customCategories = [
+                    ...(this.cfg.concierge?.customCategories ?? []).filter(
+                        (x) => x.id !== c.id,
+                    ),
+                    c,
+                ];
+                this.patchConcierge({ customCategories });
+            },
+            onDoubts: (doubts) => void this.notifyDoubts(doubts),
             now: this.now,
+        });
+    }
+
+    private patchConcierge(
+        patch: Partial<NonNullable<ProactiveConfig['concierge']>>,
+    ): void {
+        this.cfg.concierge = { ...this.cfg.concierge, ...patch };
+        try {
+            saveConfig({ concierge: this.cfg.concierge });
+        } catch (err) {
+            Logger.warn(`concierge: config non persistée — ${err}`);
+        }
+    }
+
+    /** Doutes de tri → une notification (jamais parlée), via le juge. */
+    private async notifyDoubts(doubts: TriageDoubt[]): Promise<void> {
+        const n = doubts.length;
+        const sample = doubts
+            .slice(0, 2)
+            .map((d) => `« ${d.subject.slice(0, 50)} »`)
+            .join(', ');
+        await this.processCandidate({
+            watcherId: 'mail-concierge',
+            subject: 'mail-doubts',
+            importance: 'utile',
+            facts: `Le concierge courrier hésite sur ${n} mail(s) (${sample}) et propose des règles de tri — à trancher dans l'app, page Courrier.`,
+            template: `J'ai un doute sur ${n} mail${
+                n > 1 ? 's' : ''
+            } — tranche-les dans la page Courrier.`,
+            cooldownMs: 3 * 3600_000,
         });
     }
 
     /** Résumé du tri courrier pour le dashboard (tuile Briefing). */
     getTriageSummary(): {
         pendingCount: number;
+        doubtCount: number;
         actions: Array<{ subject: string; from: string }>;
         classifiedToday: number;
     } {
@@ -113,6 +161,7 @@ export class ProactiveEngine {
         const today = new Date(this.now()).toDateString();
         return {
             pendingCount: this.concierge.pending().length,
+            doubtCount: this.concierge.openDoubts().length,
             actions: st.proposals
                 .filter((p) => p.category === 'action')
                 .slice(-8)

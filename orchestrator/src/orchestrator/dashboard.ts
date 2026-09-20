@@ -43,6 +43,7 @@ export interface DashboardData {
     briefing: {
         mailActions: Array<{ subject: string; from: string }>;
         pendingCount: number;
+        doubtCount: number;
         classifiedToday: number;
     } | null;
     generatedAt: string;
@@ -65,6 +66,7 @@ export interface DashboardDeps {
     /** Résumé du tri courrier (concierge) — null si brique inactive. */
     mailTriage?: () => {
         pendingCount: number;
+        doubtCount?: number;
         actions: Array<{ subject: string; from: string }>;
         classifiedToday: number;
     } | null;
@@ -340,6 +342,7 @@ export async function buildDashboard(
                 return {
                     mailActions: t.actions,
                     pendingCount: t.pendingCount,
+                    doubtCount: t.doubtCount ?? 0,
                     classifiedToday: t.classifiedToday,
                 };
             } catch {

@@ -142,6 +142,29 @@ export function configRoutes(
         }
     });
 
+    r.post(
+        '/mail/triage/doubts/:id/resolve',
+        requireAuth,
+        async (req: any, res: any) => {
+            try {
+                const ok =
+                    (await proactiveHandler?.triageResolveDoubt?.(
+                        String(req.params.id),
+                        {
+                            category: req.body?.category,
+                            accept: Array.isArray(req.body?.accept)
+                                ? req.body.accept.map(Number)
+                                : [],
+                        },
+                    )) ?? false;
+                if (!ok) res.status(404).json({ error: 'doute inconnu' });
+                else res.json({ ok: true });
+            } catch (e: any) {
+                res.status(500).json({ error: e.message });
+            }
+        },
+    );
+
     // ── Raw data/*.json editor (guardrailed) ─────────────────────────
     r.get('/data', requireAuth, (_req: any, res: any) => {
         res.json({ files: listDataFiles() });

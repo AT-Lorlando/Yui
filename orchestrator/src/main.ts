@@ -265,24 +265,19 @@ async function main() {
                 triage: () => ({
                     ...proactive.concierge.getState(),
                     pending: proactive.concierge.pending(),
+                    openDoubts: proactive.concierge.openDoubts(),
+                    categories: proactive.concierge.categories(),
                 }),
+                triageResolveDoubt: (id, opts) =>
+                    proactive.concierge.resolveDoubt(id, opts),
                 triageScan: (query?: string, max?: number) =>
                     proactive.concierge.scan(query, max),
                 triageApply: (filter?: {
                     category?: string;
                     mailIds?: string[];
-                }) =>
-                    proactive.concierge.apply(
-                        filter as {
-                            category?: import('./orchestrator/proactive/mail/concierge').MailCategory;
-                            mailIds?: string[];
-                        },
-                    ),
+                }) => proactive.concierge.apply(filter),
                 triageCorrect: (mailId: string, category: string) =>
-                    proactive.concierge.correct(
-                        mailId,
-                        category as import('./orchestrator/proactive/mail/concierge').MailCategory,
-                    ),
+                    proactive.concierge.correct(mailId, category),
             },
             () => dashboardProvider(),
         );
