@@ -137,12 +137,13 @@ export function senderDomain(from: string): string {
 }
 
 const CLASSIFY_SYSTEM = `Tu tries la boîte mail de Jérémy. Pour chaque mail numéroté, choisis UNE catégorie :
-- "action" : demande une réponse ou une démarche de sa part (relance, facture à payer, RDV à confirmer, document à renvoyer).
-- "lire" : mérite d'être lu mais sans action (info personnelle, réponse attendue, suivi de dossier).
-- "admin" : administratif à garder sans lecture urgente (confirmations, reçus, attestations, banque).
-- "commande" : achats/livraisons (confirmations de commande, expédition, factures d'achat en ligne).
-- "newsletter" : lettres d'information éditoriales auxquelles il est abonné.
-- "promo" : marketing pur, soldes, relances commerciales non sollicitées.
+- "action" : UNIQUEMENT si le mail attend explicitement quelque chose de lui — une réponse, un paiement, une échéance, une décision, un document à fournir, un incident à corriger. Un mail qui « le concerne » sans rien lui demander n'est PAS une action.
+- "lire" : mérite d'être lu, sans action : message personnel, suivi d'un dossier ou d'un projet auquel il participe, information ponctuelle qui le touche directement.
+- "admin" : à garder sans lecture urgente : reçus, relevés, confirmations (inscription, paiement, contribution), avis de sécurité automatiques (nouvelle connexion, clé d'accès activée, données partagées), mises à jour de CGU/politique, messages de bienvenue d'un service.
+- "commande" : achats et livraisons : confirmation de commande, expédition, suivi de colis, facture d'achat en ligne.
+- "newsletter" : lettres d'information éditoriales ou récapitulatives (contenu, actualités d'un service, remerciements de campagne).
+- "promo" : marketing : soldes, offres, relances commerciales, jeux en ligne, demandes d'avis produit.
+En cas d'hésitation entre "action" et autre chose : ce n'est pas une action.
 Réponds UNIQUEMENT en JSON : [{"i":1,"category":"promo"}, ...] — un objet par mail, dans l'ordre.`;
 
 /** Prompt utilisateur du lot. Pur, testé. */
