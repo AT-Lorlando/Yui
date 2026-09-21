@@ -4,9 +4,18 @@ export interface Caster {
     crunchyroll: (title?: string) => Promise<string>;
     disney: (title?: string) => Promise<string>;
     prime: (title?: string) => Promise<string>;
+    /** Moonlight (streaming de jeu) — lancement d'app, pas de titre. */
+    moonlight: () => Promise<string>;
 }
 
-const APPS = ['netflix', 'youtube', 'crunchyroll', 'disney', 'prime'] as const;
+const APPS = [
+    'netflix',
+    'youtube',
+    'crunchyroll',
+    'disney',
+    'prime',
+    'moonlight',
+] as const;
 
 export const CAST_APP_TOOL = {
     name: 'cast_app',

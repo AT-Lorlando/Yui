@@ -14,6 +14,7 @@ const PORT = String(process.env.CHROMECAST_PORT ?? '8009');
 const FULLY_PACKAGE = process.env.FULLY_PACKAGE ?? 'de.ozerov.fully';
 const PRIME_PACKAGE =
     process.env.PRIME_PACKAGE ?? 'com.amazon.amazonvideo.livingroom';
+const MOONLIGHT_PACKAGE = process.env.MOONLIGHT_PACKAGE ?? 'com.limelight';
 
 // ── Lancement d'apps sur l'Android TV ────────────────────────────────────────
 // Deux transports, du plus fiable au moins fiable :
@@ -511,6 +512,16 @@ export class ChromecastController {
     // Lance l'app Fully Kiosk sur la Google TV (affiche le dashboard).
     tvMediaKey(action: string): Promise<string> {
         return sendMediaKey(action);
+    }
+
+    /** Moonlight (streaming de jeu depuis le PC) sur le Shield. */
+    async launchMoonlight(): Promise<string> {
+        Logger.info(`Chromecast: launch Moonlight (${MOONLIGHT_PACKAGE})`);
+        const [, result] = await Promise.all([
+            run(['prep']).catch(() => {}),
+            launchOnTv(MOONLIGHT_PACKAGE, MOONLIGHT_PACKAGE),
+        ]);
+        return result;
     }
 
     async launchFully(): Promise<string> {

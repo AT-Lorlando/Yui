@@ -122,6 +122,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         crunchyroll: (t) => chromecast.castCrunchyroll(t),
                         disney: (t) => chromecast.castDisney(t),
                         prime: (t) => chromecast.castPrime(t),
+                        moonlight: () => chromecast.launchMoonlight(),
                     }),
                 );
                 return { content: [{ type: 'text', text }] };

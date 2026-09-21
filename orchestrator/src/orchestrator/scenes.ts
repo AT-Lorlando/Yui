@@ -12,6 +12,12 @@ import {
     type StateReader,
 } from './deviceConditions';
 import { migrateLegacyActions } from './legacyActions';
+import {
+    DEFAULT_RESET_MIN,
+    loadCycleState,
+    nextCycleIndex,
+    saveCycleState,
+} from './sceneCycle';
 import { logActivity } from './activityLog';
 import {
     resolveFloating,
@@ -540,6 +546,49 @@ export async function runVirtualAction(
 
         case '_doors_lock_all': {
             await callTool('lock_door', {});
+            break;
+        }
+
+        case '_scene_cycle': {
+            // Un bouton, plusieurs scènes : chaque appui lance la suivante.
+            // Repart de la première si la pièce cible est éteinte ou si le
+            // dernier appui est trop vieux (cf. sceneCycle.ts).
+            const ids = (
+                Array.isArray(action.args.scenes) ? action.args.scenes : []
+            )
+                .map(String)
+                .filter(Boolean);
+            if (!ids.length) {
+                Logger.warn('_scene_cycle: aucune scène configurée');
+                break;
+            }
+            const target = action.args.target as string | undefined;
+            let roomOff = false;
+            if (target) {
+                if (!context.stateReader) {
+                    context.stateReader = createStateReader(callTool);
+                }
+                roomOff =
+                    (await context.stateReader('lights', target)) === 'off';
+            }
+            const resetMin = Number(
+                action.args.resetAfterMin ?? DEFAULT_RESET_MIN,
+            );
+            const st = loadCycleState();
+            const key = ids.join(',');
+            const idx = nextCycleIndex(st, key, ids.length, Date.now(), {
+                roomOff,
+                resetMs: resetMin * 60_000,
+            });
+            const id = ids[idx]!;
+            st[key] = { index: idx, at: Date.now() };
+            saveCycleState(st);
+            Logger.info(
+                `_scene_cycle: ${idx + 1}/${ids.length} → ${id}${
+                    roomOff ? ' (pièce éteinte, reprise au début)' : ''
+                }`,
+            );
+            await callTool('scene_trigger', { id });
             break;
         }
 

@@ -26,6 +26,10 @@ function fakeCaster() {
                 calls.push({ app: 'prime', t });
                 return 'ok';
             },
+            moonlight: async () => {
+                calls.push({ app: 'moonlight', t: undefined });
+                return 'ok';
+            },
         },
     };
 }
@@ -55,7 +59,7 @@ async function run(): Promise<void> {
     // schéma
     assert.deepStrictEqual(
         (CAST_APP_TOOL.inputSchema as any).properties.app.enum,
-        ['netflix', 'youtube', 'crunchyroll', 'disney', 'prime'],
+        ['netflix', 'youtube', 'crunchyroll', 'disney', 'prime', 'moonlight'],
     );
     console.log('All castAppHandler tests passed');
 }
