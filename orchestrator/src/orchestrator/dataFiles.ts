@@ -15,7 +15,7 @@ export type DataKind = 'secret' | 'state' | 'editable';
 const SECRET_NAME_RE =
     /(token|secret|credential|service-account|firebase|fcm)/i;
 const SECRET_CONTENT_RE =
-    /"(private_key|client_secret|refresh_token|access_token|client_email)"\s*:/;
+    /"(private_key|client_secret|refresh_token|access_token|client_email|[A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD))"\s*:/;
 
 // Runtime state written by the system — viewable but not editable by hand.
 const STATE_FILES = new Set([

@@ -23,6 +23,9 @@ import {
     waitForSeederDevice,
 } from './streamer';
 import { resolveSpeakerDevice } from './resolveDevice';
+import { playlists as playlistsModule } from './playlists';
+import { library as libraryModule } from './library';
+import type { ToolHandler, ToolContext } from './types';
 import Logger from './logger';
 
 const DEFAULT_SPEAKER =
@@ -34,6 +37,15 @@ let amp: AmpController | null = null;
 let spotify: SpotifyController;
 
 let SPOTIFY_TOOL_LIST = buildSpotifyTools();
+
+// Modules portés du mcp-spotify standalone (gestion de playlists, bibliothèque,
+// suivis, top/récents) : mêmes définitions + handlers, contexte {api}.
+const EXTRA_MODULES = [playlistsModule, libraryModule];
+const EXTRA_TOOLS = EXTRA_MODULES.flatMap((m) => m.tools);
+const EXTRA_HANDLERS: Record<string, ToolHandler> = Object.assign(
+    {},
+    ...EXTRA_MODULES.map((m) => m.handlers),
+);
 
 const server = new Server(
     { name: 'mcp-spotify', version: '1.0.0' },
@@ -206,7 +218,7 @@ async function playOnSpeaker(
 }
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: SPOTIFY_TOOL_LIST };
+    return { tools: [...SPOTIFY_TOOL_LIST, ...EXTRA_TOOLS] };
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -618,11 +630,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
 
-            default:
-                throw new McpError(
-                    ErrorCode.MethodNotFound,
-                    `Unknown tool: ${name}`,
+            default: {
+                const extra = EXTRA_HANDLERS[name];
+                if (!extra) {
+                    throw new McpError(
+                        ErrorCode.MethodNotFound,
+                        `Unknown tool: ${name}`,
+                    );
+                }
+                const ctx: ToolContext = {
+                    api: spotify.rawApi(),
+                    defaultSpeaker: DEFAULT_SPEAKER,
+                };
+                return await extra(
+                    (args ?? {}) as Record<string, unknown>,
+                    ctx,
                 );
+            }
         }
     } catch (error) {
         if (error instanceof McpError) throw error;

@@ -4,6 +4,11 @@ import Logger from './logger';
 export class SpotifyController {
     constructor(private api: SpotifyWebApi) {}
 
+    /** Client brut — pour les modules playlists/bibliothèque portés. */
+    rawApi(): SpotifyWebApi {
+        return this.api;
+    }
+
     getAccessToken(): string {
         const token = this.api.getAccessToken();
         if (!token) throw new Error('No Spotify access token available');

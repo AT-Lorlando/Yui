@@ -4,6 +4,10 @@ import './env';
 import http from 'http';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
 import { initProactive } from './orchestrator/proactive';
+import {
+    applyOrchestratorEnv,
+    loadIntegrations,
+} from './orchestrator/integrations';
 import { initHueRemotes } from './orchestrator/hueRemotes';
 import { InputSource, StdinSource, HttpSource } from './input';
 import {
@@ -82,6 +86,9 @@ async function speakViaPipeline(text: string): Promise<void> {
 }
 
 async function main() {
+    // Clés saisies depuis l'app (Claude, DeepSeek, La Poste…) — avant tout
+    // consommateur ; ré-appliquées à chaque PUT /integrations.
+    applyOrchestratorEnv(loadIntegrations());
     Logger.info('Starting Yui…');
 
     const servers = buildServerConfigs();

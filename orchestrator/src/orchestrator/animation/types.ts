@@ -33,8 +33,8 @@ export interface Keyframe {
 /** Continuous floating-colour config attached to a scene. */
 export interface FloatingConfig {
     engine: 'software' | 'native';
-    /** Room name or individual light name. */
-    target: string;
+    /** Room name, individual light name, or a LIST of rooms/lights (union). */
+    target: string | string[];
     /** Global gradient, 2+ hex colours. */
     palette: string[];
     /** Duration (s) of one full palette cycle. */

@@ -13,6 +13,16 @@ const SCOPES = [
     // Token d'avant ce scope → relancer `npm run setup:spotify`.
     'user-library-read',
     'playlist-read-private',
+    // Modules playlists/bibliothèque (page Musique) — token d'avant : relancer
+    // `npm run setup:spotify`.
+    'playlist-read-collaborative',
+    'playlist-modify-public',
+    'playlist-modify-private',
+    'user-library-modify',
+    'user-follow-read',
+    'user-follow-modify',
+    'user-top-read',
+    'user-read-recently-played',
 ];
 
 export class SpotifyAuth {

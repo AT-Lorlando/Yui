@@ -9,6 +9,7 @@ import {
     loadIntegrations,
     saveIntegrations,
     maskIntegrations,
+    applyOrchestratorEnv,
 } from '../../orchestrator/integrations';
 import {
     listDataFiles,
@@ -203,7 +204,10 @@ export function configRoutes(
     r.put('/integrations', requireAuth, async (req: any, res: any) => {
         try {
             const patch = req.body?.servers ?? req.body ?? {};
-            saveIntegrations(patch);
+            const saved = saveIntegrations(patch);
+            // Clés de l'orchestrateur : effectives tout de suite (routeur LLM,
+            // providers colis lisent process.env par requête).
+            applyOrchestratorEnv(saved);
             // Respawn only the servers touched by this patch.
             const affected = Object.keys(patch);
             const reconnected: string[] = [];

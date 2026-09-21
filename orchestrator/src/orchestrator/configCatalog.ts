@@ -39,9 +39,19 @@ export interface CatalogKey {
     key: string;
     label: string;
     example: string;
-    /** Secret → stays in .env, shown read-only on the front (not set here). */
+    /**
+     * Secret → saisi en écriture seule depuis l'app (jamais renvoyé en clair,
+     * masqué par GET /integrations, fichier refusé par l'éditeur brut).
+     */
     secret?: boolean;
 }
+
+/**
+ * Pseudo-serveur « orchestrator » : clés lues par l'orchestrateur lui-même
+ * (routeur LLM, suivi de colis). Appliquées à process.env au boot et à
+ * chaque sauvegarde — les consommateurs par requête les voient aussitôt.
+ */
+export const ORCHESTRATOR_SERVER = 'orchestrator';
 
 /**
  * Per-server connection env vars the orchestrator reads. Non-secret keys are
@@ -49,6 +59,26 @@ export interface CatalogKey {
  * in .env). Mirrors .env.example + each package's process.env usage.
  */
 export const INTEGRATIONS_CATALOG: Record<string, CatalogKey[]> = {
+    [ORCHESTRATOR_SERVER]: [
+        {
+            key: 'ANTHROPIC_API_KEY',
+            label: 'Clé API Claude (profil claude / smartProfile)',
+            example: 'sk-ant-…',
+            secret: true,
+        },
+        {
+            key: 'DEEPSEEK_API_KEY',
+            label: 'Clé API DeepSeek (profil deepseek)',
+            example: 'sk-…',
+            secret: true,
+        },
+        {
+            key: 'LAPOSTE_API_KEY',
+            label: 'Clé La Poste Okapi (suivi Colissimo/Chronopost)',
+            example: '',
+            secret: true,
+        },
+    ],
     'mcp-hue': [
         {
             key: 'HUE_BRIDGE_IP',
@@ -121,6 +151,12 @@ export const INTEGRATIONS_CATALOG: Record<string, CatalogKey[]> = {
             key: 'CHROMECAST_HOST',
             label: 'IP Chromecast salon',
             example: '10.0.0.192',
+        },
+        {
+            key: 'TMDB_API_KEY',
+            label: 'Clé TMDB (repli plateformes streaming)',
+            example: '',
+            secret: true,
         },
     ],
     'mcp-somfy': [

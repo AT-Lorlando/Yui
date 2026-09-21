@@ -55,6 +55,27 @@ export function validateIntegrations(map: IntegrationsMap): string[] {
     return errors;
 }
 
+/**
+ * Applique l'entrée « orchestrator » (clés lues par l'orchestrateur lui-même)
+ * à process.env — au boot et après chaque sauvegarde. Une valeur vide efface
+ * la clé. Pur sur `env` (injectable pour les tests).
+ */
+export function applyOrchestratorEnv(
+    map: IntegrationsMap,
+    env: NodeJS.ProcessEnv = process.env,
+    server = 'orchestrator',
+): string[] {
+    const entry = map[server] ?? {};
+    const applied: string[] = [];
+    for (const [key, value] of Object.entries(entry)) {
+        if (!ENV_KEY_RE.test(key)) continue;
+        if (value === '' || value === undefined) delete env[key];
+        else env[key] = String(value);
+        applied.push(key);
+    }
+    return applied;
+}
+
 /** Mask sensitive values (in case a token slipped in) for GET responses. */
 export function maskIntegrations(map: IntegrationsMap): IntegrationsMap {
     const out: IntegrationsMap = {};

@@ -454,10 +454,10 @@ export class ChromecastController {
                     .pop() ?? 'LINK:';
             link = last.slice(5);
         }
-        // JustWatch donne la fiche (`/detail`) : Prime y met en avant S1E1.
-        // `/watch` sur le même GTI lance la lecture avec la reprise Amazon
-        // (l'épisode en cours du profil) — c'est le comportement voulu.
-        if (link) link = link.replace('/detail?', '/watch?');
+        // JustWatch donne la fiche (`/detail`). On y reste : `/watch` sur le
+        // même GTI ne reprenait PAS l'épisode en cours mais relançait S1E1 à
+        // chaque fois (vécu sur Mentalist) — la fiche laisse le bouton
+        // « Reprendre » d'Amazon faire son travail, sans autoplay.
         const [, result] = await Promise.all([
             prep,
             launchOnTv(link || PRIME_PACKAGE, PRIME_PACKAGE),

@@ -40,7 +40,8 @@ export interface IntroRef {
 }
 export interface FloatingRef {
     effectId: string;
-    target: string;
+    /** Pièce, lampe, ou liste de pièces/lampes. */
+    target: string | string[];
     brightness?: number;
 }
 

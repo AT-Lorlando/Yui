@@ -416,7 +416,9 @@ export async function runVirtualAction(
             // passent par le chemin raw (sinon l'effet s'annulerait lui-même).
             const animCall = context.callToolRaw ?? callTool;
             const id = String(action.args.id ?? '');
-            const target = String(action.args.target ?? '');
+            const target: string | string[] = Array.isArray(action.args.target)
+                ? action.args.target.map(String)
+                : String(action.args.target ?? '');
             const floating = resolveFloating({
                 effectId: id,
                 target,
@@ -428,7 +430,10 @@ export async function runVirtualAction(
                 await animationManager.startFloating(floating, animCall);
                 break;
             }
-            const frames = resolveIntro({ effectId: id, target });
+            const frames = resolveIntro({
+                effectId: id,
+                target: Array.isArray(target) ? target[0] : target,
+            });
             if (frames.length) {
                 await animationManager.playIntro(frames, animCall);
             } else {
@@ -773,7 +778,12 @@ async function runSceneInternal(
     context.stateReader = createStateReader(callTool);
 
     const floatingCfg = resolveFloating(scene.floating);
-    const introFrames = resolveIntro(scene.intro, floatingCfg?.target);
+    const introFrames = resolveIntro(
+        scene.intro,
+        Array.isArray(floatingCfg?.target)
+            ? floatingCfg?.target[0]
+            : floatingCfg?.target,
+    );
 
     logActivity('scene', scene.name);
     Logger.info(

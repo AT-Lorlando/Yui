@@ -490,21 +490,31 @@ class AnimationManager {
             );
             return;
         }
-        const t = cfg.target.toLowerCase();
-        const matched = lights.filter(
-            (l) =>
-                (l.room ?? '').toLowerCase() === t ||
-                l.name.toLowerCase() === t,
+        // Cible : pièce, lampe, ou liste (union, sans doublon) — une scène peut
+        // ainsi faire dériver seulement ses lampes d'ambiance et laisser les
+        // plafonniers en blanc chaud.
+        const wanted = (Array.isArray(cfg.target) ? cfg.target : [cfg.target])
+            .map((t) => String(t).trim().toLowerCase())
+            .filter(Boolean);
+        const matched = lights.filter((l) =>
+            wanted.some(
+                (t) =>
+                    (l.room ?? '').toLowerCase() === t ||
+                    l.name.toLowerCase() === t,
+            ),
         );
         const names = matched.map((l) => l.name);
+        const targetLabel = Array.isArray(cfg.target)
+            ? cfg.target.join(', ')
+            : cfg.target;
         if (!names.length) {
             Logger.warn(
-                `[animation] floating target "${cfg.target}" matched no lights`,
+                `[animation] floating target "${targetLabel}" matched no lights`,
             );
             return;
         }
         const targets: LoopTargets = {
-            target: cfg.target,
+            target: targetLabel,
             names,
             rooms: [
                 ...new Set(

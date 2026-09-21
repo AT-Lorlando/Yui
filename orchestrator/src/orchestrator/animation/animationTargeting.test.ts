@@ -231,8 +231,31 @@ async function testSlowBridgeNoBacklog(): Promise<void> {
     console.log('pas de backlog OK');
 }
 
+/** Cible = liste de lampes : seules celles-là dérivent (plafonniers épargnés). */
+async function testMultiLampTarget(): Promise<void> {
+    const { calls, callTool } = recorder();
+    await animationManager.startFloating(
+        { ...CFG, target: ['Sapin'] },
+        callTool,
+    );
+    await sleep(50);
+    const written = new Set(calls.map((c) => c.args.target));
+    assert.deepStrictEqual(
+        [...written],
+        ['Sapin'],
+        'seule la lampe listée est écrite',
+    );
+    // Une commande sur l'autre lampe de la pièce ne coupe pas la boucle.
+    await animationManager.cancelIfAffected('set_lights', { target: 'Bureau' });
+    assert.ok(animationManager.isFloating(), 'lampe hors liste → survit');
+    await animationManager.cancelIfAffected('set_lights', { target: 'Salon' });
+    assert.ok(!animationManager.isFloating(), 'sa pièce → coupée');
+    console.log('cible multi-lampes OK');
+}
+
 async function run(): Promise<void> {
     testToolTouchesLoop();
+    await testMultiLampTarget();
     testExternalEventVerdict();
     await testTargetedCancel();
     await testCancelNeverBlocks();
