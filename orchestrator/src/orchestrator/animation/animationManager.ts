@@ -412,23 +412,31 @@ class AnimationManager {
             };
             this.introWaiters.add(finish);
 
+            // Écritures en vol : l'intro n'est « finie » que quand la DERNIÈRE
+            // est retombée côté bridge. Sinon la scène pose son état pendant
+            // que la dernière frame voyage encore, et c'est la frame qui gagne
+            // (vu : l'état final de l'intro écrasait la scène).
+            const inflight = new Set<Promise<unknown>>();
             for (const f of frames) {
                 const timer = setTimeout(() => {
                     this.introTimers.delete(timer);
                     if (epoch !== this.epoch) return;
-                    this.applyFrame(f, callTool);
+                    const p = this.applyFrame(f, callTool);
+                    inflight.add(p);
+                    void p.finally(() => inflight.delete(p));
                 }, f.atMs);
                 this.introTimers.add(timer);
             }
             const end = setTimeout(() => {
                 this.introTimers.delete(end);
-                finish();
+                void Promise.allSettled([...inflight]).then(finish);
             }, totalMs);
             this.introTimers.add(end);
         });
     }
 
-    private applyFrame(f: Keyframe, callTool: CallTool): void {
+    /** Envoie une frame ; la promesse retombe quand l'écriture est faite. */
+    private applyFrame(f: Keyframe, callTool: CallTool): Promise<unknown> {
         const args: Record<string, unknown> = {
             target: f.lightName,
             on: true,
@@ -437,7 +445,7 @@ class AnimationManager {
         if (f.color !== undefined) args.color = f.color;
         if (f.brightness !== undefined) args.brightness = f.brightness;
         if (f.fadeFrom !== undefined) args.fadeFrom = f.fadeFrom;
-        void callTool('set_lights', args).catch(() => {});
+        return callTool('set_lights', args).catch(() => {});
     }
 
     /**

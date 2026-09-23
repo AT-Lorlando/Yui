@@ -185,7 +185,46 @@ async function testSlowBridgeNoLateRelight(): Promise<void> {
     );
 }
 
+/**
+ * L'intro doit attendre ses écritures en vol : avec un bridge lent, la
+ * dernière frame retombe APRÈS la fin de la timeline — si playIntro rend la
+ * main avant, l'état de scène qui suit est écrasé par cette frame.
+ */
+async function testIntroWaitsForLastWrite(): Promise<void> {
+    const order: string[] = [];
+    const callTool = async (tool: string, args: any): Promise<unknown> => {
+        if (tool === 'list_lights')
+            return [
+                { name: 'L1', room: 'Salon' },
+                { name: 'L2', room: 'Salon' },
+            ];
+        await sleep(400); // écriture lente
+        order.push(`${tool}:${args.target}`);
+        return null;
+    };
+    const intro: AnimationEffect[] = [
+        {
+            type: 'sweep',
+            target: 'Salon',
+            colors: ['#0000FF'],
+            staggerMs: 200,
+            transitionMs: 100,
+            startAtMs: 0,
+        },
+    ];
+    await animationManager.playIntro(intro, callTool);
+    order.push('scene-state');
+    assert.deepStrictEqual(
+        order,
+        ['set_lights:L1', 'set_lights:L2', 'scene-state'],
+        `l'état de scène doit venir après la dernière frame : ${order.join(
+            ' → ',
+        )}`,
+    );
+}
+
 async function run(): Promise<void> {
+    await testIntroWaitsForLastWrite();
     await testSlowBridgeNoLateRelight();
     await testConcurrentStartLeavesNoOrphan();
     await testStopAllCancelsIntro();
