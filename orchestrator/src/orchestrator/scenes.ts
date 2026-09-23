@@ -430,10 +430,7 @@ export async function runVirtualAction(
                 await animationManager.startFloating(floating, animCall);
                 break;
             }
-            const frames = resolveIntro({
-                effectId: id,
-                target: Array.isArray(target) ? target[0] : target,
-            });
+            const frames = resolveIntro({ effectId: id, target });
             if (frames.length) {
                 await animationManager.playIntro(frames, animCall);
             } else {
@@ -778,12 +775,7 @@ async function runSceneInternal(
     context.stateReader = createStateReader(callTool);
 
     const floatingCfg = resolveFloating(scene.floating);
-    const introFrames = resolveIntro(
-        scene.intro,
-        Array.isArray(floatingCfg?.target)
-            ? floatingCfg?.target[0]
-            : floatingCfg?.target,
-    );
+    const introFrames = resolveIntro(scene.intro, floatingCfg?.target);
 
     logActivity('scene', scene.name);
     Logger.info(

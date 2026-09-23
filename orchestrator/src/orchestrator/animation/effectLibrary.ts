@@ -36,7 +36,8 @@ export interface LightEffect {
 /** Références persistées dans une scène (à la place de la config inline). */
 export interface IntroRef {
     effectId: string;
-    target?: string;
+    /** Pièce, lampe, ou liste de pièces/lampes. */
+    target?: string | string[];
 }
 export interface FloatingRef {
     effectId: string;
@@ -205,7 +206,7 @@ function isRef(v: unknown): v is { effectId: string } {
  */
 export function resolveIntro(
     intro: AnimationEffect[] | IntroRef | undefined,
-    fallbackTarget?: string,
+    fallbackTarget?: string | string[],
 ): AnimationEffect[] {
     if (!intro) return [];
     if (Array.isArray(intro)) return intro;

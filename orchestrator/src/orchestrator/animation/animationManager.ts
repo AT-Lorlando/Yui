@@ -391,14 +391,22 @@ class AnimationManager {
             Logger.info('[animation] intro doublée pendant list_lights — stop');
             return;
         }
-        const resolve = (target: string): string[] => {
-            const t = target.toLowerCase();
-            const byRoom = lights
-                .filter((l) => (l.room ?? '').toLowerCase() === t)
-                .map((l) => l.name);
-            if (byRoom.length) return byRoom;
-            const one = lights.find((l) => l.name.toLowerCase() === t);
-            return one ? [one.name] : [];
+        // Cible : pièce, lampe, ou liste (union ordonnée, sans doublon).
+        const resolve = (target: string | string[]): string[] => {
+            const out: string[] = [];
+            for (const raw of Array.isArray(target) ? target : [target]) {
+                const t = String(raw).trim().toLowerCase();
+                const byRoom = lights
+                    .filter((l) => (l.room ?? '').toLowerCase() === t)
+                    .map((l) => l.name);
+                const hits = byRoom.length
+                    ? byRoom
+                    : lights
+                          .filter((l) => l.name.toLowerCase() === t)
+                          .map((l) => l.name);
+                for (const n of hits) if (!out.includes(n)) out.push(n);
+            }
+            return out;
         };
         const { frames, totalMs } = expandIntro(effects, resolve);
 

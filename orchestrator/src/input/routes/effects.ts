@@ -86,8 +86,11 @@ export function effectRoutes(
         requireAuth,
         async (req: any, res: any) => {
             const id = String(req.params.id);
-            const target = String(req.body?.target ?? '');
-            if (!target) {
+            const raw = req.body?.target;
+            const target: string | string[] = Array.isArray(raw)
+                ? raw.map(String).filter(Boolean)
+                : String(raw ?? '');
+            if (!target || (Array.isArray(target) && !target.length)) {
                 return res.status(400).json({ error: 'target requis' });
             }
             try {

@@ -1,10 +1,27 @@
 // orchestrator/src/orchestrator/animation/types.ts
 
+/**
+ * Types d'étape d'intro.
+ *  - bruts (sweep/flash/pulse/fade) : paramètres bridge (décalage, transition) ;
+ *  - gabarits (loading/wave/blink/breathe) : une DURÉE TOTALE, répartie à
+ *    l'expansion sur le nombre réel de lampes — « 1,5 s max » tient quel que
+ *    soit le nombre de lampes de la pièce.
+ */
+export type EffectStepType =
+    | 'sweep'
+    | 'flash'
+    | 'pulse'
+    | 'fade'
+    | 'loading'
+    | 'wave'
+    | 'blink'
+    | 'breathe';
+
 /** A single parameterized effect that generates keyframes. */
 export interface AnimationEffect {
-    type: 'sweep' | 'flash' | 'pulse' | 'fade';
-    /** Room name ("Salon") or individual light name. */
-    target: string;
+    type: EffectStepType;
+    /** Room name ("Salon"), light name, or a list of rooms/lights. */
+    target: string | string[];
     /** 1+ hex colours, e.g. ["#00FF00"]. */
     colors: string[];
     /** Absolute offset (ms) from anim start. If omitted, chains after the previous effect. */
@@ -15,11 +32,17 @@ export interface AnimationEffect {
     transitionMs?: number;
     /** 0–100. */
     brightness?: number;
-    /** Luminosité de DÉPART du fondu (sweep/fade) : ON instantané à cette
-     *  valeur avec la couleur, puis montée vers `brightness` sur transitionMs. */
+    /** Luminosité de DÉPART du fondu (sweep/fade/gabarits) : ON instantané à
+     *  cette valeur avec la couleur, puis montée vers `brightness`. */
     fadeFrom?: number;
     /** Hold (ms) added after the effect before the next chains. Default 0. */
     holdMs?: number;
+    /** Gabarits : durée totale du step (ms). Défaut 1500. */
+    durationMs?: number;
+    /** loading/wave : ordre de parcours des lampes. Défaut forward. */
+    order?: 'forward' | 'reverse' | 'random';
+    /** blink : nombre d'éclats. Défaut 2. */
+    count?: number;
 }
 
 /** A resolved, concrete light command at an absolute time. */
