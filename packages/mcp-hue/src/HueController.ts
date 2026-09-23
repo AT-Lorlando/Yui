@@ -36,14 +36,23 @@ export default class HueController {
         return this.groupCache.map((g) => g.name);
     }
 
+    /**
+     * Pièce par nom : exact d'abord, puis partiel UNIQUEMENT si la cible est
+     * plus courte que le nom de la pièce (« chamb » → Chambre). L'ancien
+     * `cible.includes(pièce)` faisait passer « Plafond Chambre » pour la
+     * pièce Chambre : le premier frame d'une intro allumait les 4 lampes
+     * d'un coup (vu au bridge, 23/09) et toute commande sur cette lampe
+     * touchait la pièce entière.
+     */
     private findGroup(roomName: string): RoomGroup | null {
         const lc = roomName.toLowerCase().trim();
+        if (!lc) return null;
         return (
             this.groupCache.find((g) => g.name.toLowerCase() === lc) ??
             this.groupCache.find(
                 (g) =>
-                    g.name.toLowerCase().includes(lc) ||
-                    lc.includes(g.name.toLowerCase()),
+                    lc.length < g.name.length &&
+                    g.name.toLowerCase().includes(lc),
             ) ??
             null
         );
