@@ -436,6 +436,7 @@ class AnimationManager {
         };
         if (f.color !== undefined) args.color = f.color;
         if (f.brightness !== undefined) args.brightness = f.brightness;
+        if (f.fadeFrom !== undefined) args.fadeFrom = f.fadeFrom;
         void callTool('set_lights', args).catch(() => {});
     }
 

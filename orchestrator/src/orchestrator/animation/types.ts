@@ -15,6 +15,9 @@ export interface AnimationEffect {
     transitionMs?: number;
     /** 0–100. */
     brightness?: number;
+    /** Luminosité de DÉPART du fondu (sweep/fade) : ON instantané à cette
+     *  valeur avec la couleur, puis montée vers `brightness` sur transitionMs. */
+    fadeFrom?: number;
     /** Hold (ms) added after the effect before the next chains. Default 0. */
     holdMs?: number;
 }
@@ -27,6 +30,7 @@ export interface Keyframe {
     lightName: string;
     color?: string;
     brightness?: number;
+    fadeFrom?: number;
     transitionMs: number;
 }
 

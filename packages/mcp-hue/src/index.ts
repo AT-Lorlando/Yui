@@ -284,6 +284,8 @@ interface LightOpts {
     color?: string;
     colorTempK?: number;
     transitionMs?: number;
+    /** Luminosité de départ du fondu (ON instantané à cette valeur, puis rampe). */
+    fadeFrom?: number;
 }
 
 /** Whole-flat on/off. Ambiance devices follow the off, never the on. */
@@ -335,8 +337,15 @@ async function applyLightTarget(
     target: string,
     opts: LightOpts,
 ): Promise<string> {
-    const { on, brightness, brightnessDelta, color, colorTempK, transitionMs } =
-        opts;
+    const {
+        on,
+        brightness,
+        brightnessDelta,
+        color,
+        colorTempK,
+        transitionMs,
+        fadeFrom,
+    } = opts;
     const turningOff = on === false;
 
     // Try room first
@@ -406,19 +415,28 @@ async function applyLightTarget(
             await hue.setLightState(lightId, false);
             store.updateState(lightId, { on: false });
         } else {
-            const ops: Promise<void>[] = [];
-            if (brightnessDelta !== undefined)
-                ops.push(hue.incLightBrightness(lightId, brightnessDelta));
-            else if (brightness !== undefined)
-                ops.push(hue.setLightBrightness(lightId, brightness));
-            if (colorTempK !== undefined)
-                ops.push(
-                    hue.setLightColorTemp(lightId, colorTempK, transitionMs),
-                );
-            else if (color !== undefined)
-                ops.push(hue.setLightColor(lightId, color, transitionMs));
-            if (ops.length === 0) ops.push(hue.setLightState(lightId, true));
-            await Promise.all(ops);
+            if (brightnessDelta !== undefined) {
+                await hue.incLightBrightness(lightId, brightnessDelta);
+            } else if (
+                brightness !== undefined ||
+                color !== undefined ||
+                colorTempK !== undefined
+            ) {
+                // UNE écriture (luminosité + couleur + transition), départ en
+                // fondu si demandé ou si la lampe est éteinte — cf.
+                // HueController.planLightWrites.
+                await hue.applyLightState(lightId, {
+                    brightness,
+                    color,
+                    colorTempK,
+                    transitionMs,
+                    fadeFrom,
+                    currentlyOff:
+                        (store.getById(lightId) as any)?.state?.on === false,
+                });
+            } else {
+                await hue.setLightState(lightId, true);
+            }
             // Delta : l'état exact revient par le flux SSE du bridge.
             if (brightnessDelta === undefined) {
                 store.updateState(lightId, {
@@ -481,6 +499,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     transitionMs:
                         a.transitionMs !== undefined
                             ? Number(a.transitionMs)
+                            : undefined,
+                    fadeFrom:
+                        a.fadeFrom !== undefined
+                            ? Number(a.fadeFrom)
                             : undefined,
                 });
                 return { content: [{ type: 'text', text: msg }] };

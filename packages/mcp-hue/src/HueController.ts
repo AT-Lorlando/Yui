@@ -259,6 +259,108 @@ export default class HueController {
         return light;
     }
 
+    /**
+     * Écritures à envoyer pour UNE lampe, dans l'ordre. Pur, testé.
+     *
+     * Une seule écriture porte luminosité + couleur + transition : deux PUT
+     * parallèles (l'ancien chemin) allumaient la lampe à son ancienne couleur
+     * puis transitionnaient — « ça s'allume en rouge puis tout de suite bleu ».
+     *
+     * Départ en fondu (`fadeFrom`, ou lampe éteinte + transition + couleur) :
+     * d'abord ON instantané à la luminosité de départ AVEC la couleur cible
+     * (transitiontime 0 → aucun flash de l'ancien état), puis la rampe vers
+     * la cible sur `transitionMs`. C'est ce qui rend un « chargement »
+     * lampe par lampe possible.
+     */
+    public static planLightWrites(opts: {
+        brightness?: number;
+        color?: string;
+        colorTempK?: number;
+        transitionMs?: number;
+        fadeFrom?: number;
+        currentlyOff?: boolean;
+        hueSat?: { hue: number; sat: number };
+    }): Array<{
+        on: true;
+        bri?: number;
+        hue?: number;
+        sat?: number;
+        ct?: number;
+        transitiontime: number;
+    }> {
+        const colour: { hue?: number; sat?: number; ct?: number } =
+            opts.colorTempK !== undefined
+                ? { ct: HueController.kelvinToMirek(opts.colorTempK) }
+                : opts.hueSat
+                ? { hue: opts.hueSat.hue, sat: opts.hueSat.sat }
+                : {};
+        const hasColour = Object.keys(colour).length > 0;
+        const target =
+            opts.brightness !== undefined
+                ? { bri: HueController.pctToBri(opts.brightness) }
+                : {};
+        const transition =
+            opts.transitionMs !== undefined
+                ? Math.round(opts.transitionMs / 100)
+                : 0;
+        const softStart =
+            opts.fadeFrom !== undefined ||
+            (opts.currentlyOff === true && transition > 0 && hasColour);
+        if (softStart && transition > 0) {
+            const from = HueController.pctToBri(opts.fadeFrom ?? 1);
+            return [
+                { on: true, bri: from, ...colour, transitiontime: 0 },
+                {
+                    on: true,
+                    bri: target.bri ?? HueController.pctToBri(100),
+                    transitiontime: transition,
+                },
+            ];
+        }
+        return [{ on: true, ...target, ...colour, transitiontime: transition }];
+    }
+
+    private static pctToBri(pct: number): number {
+        return Math.max(1, Math.min(254, Math.round((pct * 254) / 100)));
+    }
+
+    /** Luminosité + couleur/blanc + transition en une seule écriture (cf. planLightWrites). */
+    public async applyLightState(
+        lightId: number,
+        opts: {
+            brightness?: number;
+            color?: string;
+            colorTempK?: number;
+            transitionMs?: number;
+            fadeFrom?: number;
+            currentlyOff?: boolean;
+        },
+    ): Promise<void> {
+        await this.getLightById(lightId);
+        const plan = HueController.planLightWrites({
+            ...opts,
+            hueSat:
+                opts.color !== undefined && opts.colorTempK === undefined
+                    ? this.hexToHueSat(opts.color)
+                    : undefined,
+        });
+        for (const step of plan) {
+            const st = new v3.lightStates.LightState().on();
+            if (step.bri !== undefined) st.bri(step.bri);
+            if (step.hue !== undefined) st.hue(step.hue);
+            if (step.sat !== undefined) st.sat(step.sat);
+            if (step.ct !== undefined) st.ct(step.ct);
+            st.transitiontime(step.transitiontime);
+            await this.api.lights.setLightState(lightId, st);
+        }
+        Logger.info(
+            `Light ${lightId} ← ${JSON.stringify({
+                ...opts,
+                plan: plan.length,
+            })}`,
+        );
+    }
+
     public async setLightState(lightId: number, on: boolean): Promise<void> {
         await this.getLightById(lightId);
         const lightState = new v3.lightStates.LightState().on(on);

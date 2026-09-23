@@ -33,6 +33,9 @@ export function expandEffect(
                     lightName: name,
                     color,
                     brightness: effect.brightness,
+                    ...(effect.fadeFrom !== undefined
+                        ? { fadeFrom: effect.fadeFrom }
+                        : {}),
                     transitionMs: trans,
                 });
             });
@@ -87,6 +90,9 @@ export function expandEffect(
                     lightName: name,
                     color,
                     brightness: effect.brightness,
+                    ...(effect.fadeFrom !== undefined
+                        ? { fadeFrom: effect.fadeFrom }
+                        : {}),
                     transitionMs: trans,
                 });
             });

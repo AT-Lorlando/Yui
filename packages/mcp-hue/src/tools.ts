@@ -125,6 +125,15 @@ export function buildHueTools(
                         description:
                             'Durée du fondu en ms (transition lente côté bridge). Ex: 4000 = fondu sur 4s.',
                     },
+                    fadeFrom: {
+                        type: 'number',
+                        title: 'Fondu depuis (%)',
+                        description:
+                            'Luminosité de départ du fondu : la lampe s’allume instantanément à cette valeur AVEC la couleur cible, puis monte sur transitionMs (lampe individuelle). Ex: 1 pour un allumage progressif depuis le noir.',
+                        minimum: 1,
+                        maximum: 100,
+                        'x-unit': '%',
+                    },
                 },
                 required: ['target'],
             },
