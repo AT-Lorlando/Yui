@@ -1,8 +1,8 @@
 import * as broadlink from 'node-broadlink';
 import * as fs from 'fs';
-import * as path from 'path';
 import Logger from './logger';
 import { dataPath } from '@yui/shared';
+import { AMP_SETTLE_MS, settleDelay } from './ampSettle';
 
 const CODES_FILE = dataPath('broadlink-codes.json');
 const STATE_FILE = dataPath('amp-state.json');
@@ -22,11 +22,19 @@ function writeState(state: 'on' | 'off'): void {
     fs.writeFileSync(STATE_FILE, JSON.stringify({ marantz_amp: state }));
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export class AmpController {
     private host: string;
     private device: any = null;
     private codes: AmpCodes;
     private connecting: Promise<void> | null = null;
+    // Les ordres de puissance sont SÉRIALISÉS et espacés d'AMP_SETTLE_MS :
+    // deux toggles rapprochés (ON puis OFF depuis l'app) partaient en
+    // parallèle, le second était ignoré par l'ampli encore en train de
+    // s'allumer, et l'état persisté disait « off » devant un ampli allumé.
+    private queue: Promise<unknown> = Promise.resolve();
+    private lastToggleAt = 0;
 
     constructor(host: string) {
         this.host = host;
@@ -62,23 +70,39 @@ export class AmpController {
         await this.device.sendData(code);
     }
 
-    async ensureOn(): Promise<void> {
-        if (readState() === 'on') {
-            Logger.info('Amp already on — skipping power toggle');
-            return;
-        }
-        Logger.info('Amp off — sending power_toggle to turn on');
-        await this.sendCode('power_toggle');
-        writeState('on');
+    private run<T>(fn: () => Promise<T>): Promise<T> {
+        const next = this.queue.then(fn, fn);
+        this.queue = next.catch(() => undefined);
+        return next;
     }
 
-    async turnOff(): Promise<void> {
-        if (readState() === 'off') {
-            Logger.info('Amp already off — skipping power toggle');
+    private async setPower(target: 'on' | 'off'): Promise<void> {
+        if (readState() === target) {
+            Logger.info(`Amp already ${target} — skipping power toggle`);
             return;
         }
-        Logger.info('Amp on — sending power_toggle to turn off');
+        const wait = settleDelay(this.lastToggleAt, Date.now(), AMP_SETTLE_MS);
+        if (wait > 0) {
+            Logger.info(
+                `Amp settling — waiting ${wait} ms before power toggle`,
+            );
+            await sleep(wait);
+        }
+        Logger.info(
+            `Amp ${
+                target === 'on' ? 'off' : 'on'
+            } — sending power_toggle to turn ${target}`,
+        );
         await this.sendCode('power_toggle');
-        writeState('off');
+        this.lastToggleAt = Date.now();
+        writeState(target);
+    }
+
+    ensureOn(): Promise<void> {
+        return this.run(() => this.setPower('on'));
+    }
+
+    turnOff(): Promise<void> {
+        return this.run(() => this.setPower('off'));
     }
 }
