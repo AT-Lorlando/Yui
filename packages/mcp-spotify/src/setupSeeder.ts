@@ -21,7 +21,12 @@ import {
     seederTokenFile,
 } from './seederAuth';
 
-dotenv.config({ path: resolve(process.cwd(), '.env') });
+// `npm run … -w` donne un cwd = package : on ancre .env et data/ sur la
+// racine du dépôt (sinon le token atterrit dans packages/mcp-spotify/data/,
+// invisible pour le serveur — vécu le 24/09 sur prod).
+const PROJECT_ROOT = resolve(__dirname, '../../..');
+dotenv.config({ path: resolve(PROJECT_ROOT, '.env') });
+process.env.YUI_DATA_DIR ??= resolve(PROJECT_ROOT, 'data');
 
 const PENDING = path.join(os.tmpdir(), 'yui-seeder-pkce.json');
 const out = (s: string) => process.stdout.write(s + '\n');
