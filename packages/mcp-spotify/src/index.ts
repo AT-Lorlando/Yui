@@ -25,6 +25,8 @@ import {
 import { resolveSpeakerDevice } from './resolveDevice';
 import { playlists as playlistsModule } from './playlists';
 import { library as libraryModule } from './library';
+import { likesSort as likesSortModule } from './likesSort';
+import { getSeederAccessToken, hasSeederToken } from './seederAuth';
 import type { ToolHandler, ToolContext } from './types';
 import Logger from './logger';
 
@@ -40,8 +42,15 @@ let SPOTIFY_TOOL_LIST = buildSpotifyTools();
 
 // Modules portés du mcp-spotify standalone (gestion de playlists, bibliothèque,
 // suivis, top/récents) : mêmes définitions + handlers, contexte {api}.
-const EXTRA_MODULES = [playlistsModule, libraryModule];
-const EXTRA_TOOLS = EXTRA_MODULES.flatMap((m) => m.tools);
+const EXTRA_MODULES = [playlistsModule, libraryModule, likesSortModule];
+// Réservés à l'app (gestion de playlists, bibliothèque, tri des likes) : le
+// LLM garde ses tools de lecture, pas de quoi réorganiser la bibliothèque.
+const EXTRA_TOOLS = EXTRA_MODULES.flatMap((m) =>
+    m.tools.map((t) => ({
+        ...t,
+        inputSchema: { ...t.inputSchema, 'x-audience': ['app'] },
+    })),
+);
 const EXTRA_HANDLERS: Record<string, ToolHandler> = Object.assign(
     {},
     ...EXTRA_MODULES.map((m) => m.handlers),
@@ -100,10 +109,21 @@ async function playViaCast(
         `Lecture via cast : streamer librespot → ${cast.name} (${cast.host})`,
     );
     // Redémarrer le streamer avec un token frais (celui d'un vieux run peut
-    // avoir expiré — librespot ne le rafraîchit pas).
+    // avoir expiré — librespot ne le rafraîchit pas). Token du seeder
+    // (OAuth librespot, `npm run setup:seeder`) en priorité : le token de
+    // notre app est refusé par Spotify Connect.
     stopStreamer();
     closeCastSessions();
-    startStreamer(spotify.getAccessToken());
+    const seederToken = await getSeederAccessToken().catch((e) => {
+        Logger.warn(`Seeder : refresh du token impossible — ${e}`);
+        return null;
+    });
+    if (!seederToken && !hasSeederToken()) {
+        throw new Error(
+            `« ${cast.name} » est une enceinte Cast : il faut autoriser le streamer une fois (npm run setup:seeder) — Spotify refuse l’enregistrement Connect au token de l’app.`,
+        );
+    }
+    startStreamer(seederToken ?? spotify.getAccessToken());
     const seederId = await waitForSeederDevice(() => spotify.getDevices());
     if (!seederId) {
         stopStreamer();

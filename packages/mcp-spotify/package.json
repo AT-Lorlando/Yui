@@ -7,7 +7,8 @@
     "dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
     "setup": "ts-node src/setup.ts",
-    "setup:speakers": "ts-node src/setup.ts speakers"
+    "setup:speakers": "ts-node src/setup.ts speakers",
+    "setup:seeder": "ts-node src/setupSeeder.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

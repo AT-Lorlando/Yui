@@ -97,6 +97,11 @@ export function scanBonjour(timeoutMs = 10000): Promise<BonjourDevice[]> {
         browser.on('up', (service) => {
             const friendlyName = service.txt?.fn || service.name || 'Unknown';
             const model = service.txt?.md;
+            // IPv4 de préférence : un hôte `.local` ne résout que si mDNS
+            // est câblé dans le résolveur du serveur.
+            const ipv4 = (
+                (service as any).addresses as string[] | undefined
+            )?.find((a) => /^\d+\.\d+\.\d+\.\d+$/.test(a));
 
             if (
                 !devices.some(
@@ -105,7 +110,7 @@ export function scanBonjour(timeoutMs = 10000): Promise<BonjourDevice[]> {
             ) {
                 devices.push({
                     name: friendlyName,
-                    host: service.host ?? '',
+                    host: ipv4 ?? service.host ?? '',
                     port: service.port,
                     model,
                 });

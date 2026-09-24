@@ -76,13 +76,17 @@ export function startStreamer(accessToken: string): void {
     // librespot: output raw S16LE PCM to stdout. Credentials en cache
     // (setup:seeder) de préférence — l'access token seul ne peut plus
     // s'enregistrer dans Connect.
-    const auth = hasSeederCredentials()
+    // Token OAuth librespot (seederAuth, rafraîchi par nous) → --access-token.
+    // Repli : cache credentials.json d'un ancien `librespot --enable-oauth`.
+    const auth = accessToken
+        ? ['--access-token', accessToken]
+        : hasSeederCredentials()
         ? ['--cache', seederCacheDir()]
-        : ['--access-token', accessToken];
-    if (!hasSeederCredentials()) {
+        : [];
+    if (!auth.length) {
         Logger.warn(
-            'librespot sans credentials en cache (npm run setup:seeder) — ' +
-                "l'enregistrement Spotify Connect échouera probablement",
+            'librespot sans token ni credentials (npm run setup:seeder) — ' +
+                "l'enregistrement Spotify Connect échouera",
         );
     }
     const librespotArgs = [
