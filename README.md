@@ -185,6 +185,11 @@ pm2 logs             # logs en temps réel
 > Sur le Pi : le service systemd `audio_stream.service` (`satellite/udp_stream.py`) streame l'audio.
 > `sudo systemctl status/restart audio_stream`.
 
+## Notifier le téléphone depuis un autre projet
+
+`POST /notify` (Bearer `BEARER_TOKEN`) pousse une notification — et la lit à voix haute si
+`speak: true` — sans passer par le LLM. Détails et exemples : [`docs/notify-api.md`](docs/notify-api.md).
+
 ## Développement
 
 ```bash

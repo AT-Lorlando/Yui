@@ -25,6 +25,7 @@ import { deviceRoutes } from './routes/devices';
 import { sceneRoutes } from './routes/scenes';
 import { effectRoutes } from './routes/effects';
 import { paletteRoutes } from './routes/palettes';
+import { notifyRoutes } from './routes/notify';
 import { automationRoutes } from './routes/automations';
 import { conversationRoutes } from './routes/conversations';
 import { presenceRoutes } from './routes/presence';
@@ -430,6 +431,7 @@ export class HttpSource implements InputSource {
             );
         }
         app.use('/', paletteRoutes(requireAuth));
+        app.use('/', notifyRoutes(requireAuth));
         if (scenesHandler) {
             app.use('/scenes', sceneRoutes(requireAuth, scenesHandler));
         }

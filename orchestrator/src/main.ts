@@ -1,7 +1,6 @@
 import './bootstrap'; // load .env + settings.json and patch process.env — must be first
 import { startBackupSchedule } from './orchestrator/dataBackup';
 import './env';
-import http from 'http';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
 import { initProactive } from './orchestrator/proactive';
 import {
@@ -20,7 +19,7 @@ import {
     runAutomation,
     type OutputChannel,
 } from './orchestrator/automations';
-import { sendNotification } from './orchestrator/notify';
+import { sendNotification, speakText } from './orchestrator/notify';
 import { PresenceManager, getHomeCoords } from './orchestrator/presence';
 import {
     loadPresenceConfig,
@@ -47,43 +46,9 @@ import {
 import type { ConversationsHandler } from './input/InputSource';
 import { createDashboardProvider } from './orchestrator/dashboard';
 
-// voice/tts.py exposes a /speak endpoint on this port
-const SPEAK_PIPELINE_URL =
-    process.env.SPEAK_PIPELINE_URL ?? 'http://localhost:3001/speak';
-
-/**
- * Sends text to the voice pipeline's /speak endpoint so cron-triggered
- * responses are spoken aloud. Fails silently if the pipeline is not running.
- */
-async function speakViaPipeline(text: string): Promise<void> {
-    return new Promise((resolve) => {
-        try {
-            const body = JSON.stringify({ text });
-            const url = new URL(SPEAK_PIPELINE_URL);
-            const req = http.request(
-                {
-                    hostname: url.hostname,
-                    port: url.port || 80,
-                    path: url.pathname,
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Content-Length': Buffer.byteLength(body),
-                    },
-                },
-                (res) => {
-                    res.resume(); // drain response
-                    resolve();
-                },
-            );
-            req.on('error', () => resolve()); // pipeline not running — ignore
-            req.write(body);
-            req.end();
-        } catch {
-            resolve();
-        }
-    });
-}
+// Parole hors conversation (automations, proactivité) : voir notify.ts.
+const speakViaPipeline = (text: string): Promise<void> =>
+    speakText(text).then(() => undefined);
 
 async function main() {
     // Clés saisies depuis l'app (Claude, DeepSeek, La Poste…) — avant tout

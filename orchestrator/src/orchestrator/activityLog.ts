@@ -16,7 +16,8 @@ export type ActivityKind =
     | 'remote'
     | 'presence'
     | 'automation'
-    | 'order';
+    | 'order'
+    | 'notify';
 
 export interface ActivityEntry {
     ts: number;
