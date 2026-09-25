@@ -37,8 +37,14 @@ async function run(): Promise<void> {
     );
     assert.strictEqual(parseVerdict('{"channel":"yolo","message":"m"}'), null);
     assert.strictEqual(parseVerdict('pas de json'), null);
+    assert.strictEqual(
+        parseVerdict('{"channel":"digest","message":"m","reason":"r"}')
+            ?.channel,
+        'hold',
+        'ancien nom accepté et traduit',
+    );
 
-    // ── Budget : épuisé + non urgent → digest SANS appel LLM ─────────────
+    // ── Budget : épuisé + non urgent → hold SANS appel LLM ─────────────
     const journal = new ProactiveJournal(tmp());
     const now = Date.now();
     journal.record({
@@ -76,7 +82,7 @@ async function run(): Promise<void> {
         null,
         [],
     );
-    assert.strictEqual(v1.channel, 'digest');
+    assert.strictEqual(v1.channel, 'hold');
     assert.strictEqual(llmCalls, 0, 'budget épuisé → pas d’appel LLM');
 
     // Urgent passe malgré le budget ; moment exempté aussi.
@@ -145,7 +151,7 @@ async function run(): Promise<void> {
                 [],
             )
         ).channel,
-        'digest',
+        'hold',
     );
 
     // ── Le prompt embarque situation, deltas, budget et feedback ──────────
@@ -204,7 +210,7 @@ async function run(): Promise<void> {
         at: now,
         source: 'a',
         subject: 'z',
-        channel: 'digest',
+        channel: 'hold',
         message: 'm',
     });
     j2.record({
@@ -215,6 +221,33 @@ async function run(): Promise<void> {
         message: 'm',
     });
     assert.strictEqual(j2.spentToday(now), 1.5);
+
+    // ── Journal : compat lecture — l'ancien canal « digest » devient « hold » ─
+    {
+        const f = path.join(
+            fs.mkdtempSync(path.join(os.tmpdir(), 'yui-jr-')),
+            'j.json',
+        );
+        fs.writeFileSync(
+            f,
+            JSON.stringify([
+                {
+                    id: 'x',
+                    at: 1,
+                    source: 's',
+                    subject: 'sub',
+                    channel: 'digest',
+                    message: 'm',
+                },
+            ]),
+        );
+        const j = new ProactiveJournal(f);
+        assert.strictEqual(
+            j.list()[0]!.channel,
+            'hold',
+            'journal : digest historique lu comme hold',
+        );
+    }
 
     // ── Briques : défauts + overrides + settings ──────────────────────────
     assert.strictEqual(isBrickEnabled({}, 'moment-wake'), true);

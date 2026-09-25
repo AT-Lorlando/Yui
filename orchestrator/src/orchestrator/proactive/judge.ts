@@ -42,19 +42,19 @@ Ton rôle : décider si une information mérite de l'interrompre, et comment. J�
 Canaux possibles :
 - "speak" : Yui parle à voix haute + notification. Réservé à ce qui mérite d'interrompre MAINTENANT, et aux points de moment (réveil, retour) quand il y a de la matière.
 - "notify" : notification téléphone silencieuse. Pour l'utile non urgent.
-- "digest" : à garder pour le prochain point groupé. Pour le contexte sans urgence.
+- "hold" : à garder pour le prochain point (retour, réveil). Pour le contexte sans urgence.
 - "skip" : rien. Déjà connu, banal, ou sans action possible.
 
 Règles :
 - Respecte le budget restant : à 0, seul l'urgent passe en speak/notify.
 - Ne répète JAMAIS ce qui a déjà été dit (voir interventions récentes).
-- Tiens compte des retours 👍/👎 : un type d'intervention régulièrement 👎 doit devenir digest ou skip.
+- Tiens compte des retours 👍/👎 : un type d'intervention régulièrement 👎 doit devenir hold ou skip.
 - Si Jérémy est absent, "speak" ne sert à rien → "notify".
 - Pour un MOMENT (réveil, départ, retour, coucher) : compose un point bref à partir de la situation — uniquement ce qui est utile À CE MOMENT. S'il n'y a vraiment rien, "skip".
 
 Le message : une à trois phrases ORALES en français, naturelles, sans markdown, sans emoji. Yui tutoie Jérémy.
 
-Réponds UNIQUEMENT avec un objet JSON : {"channel":"speak|notify|digest|skip","message":"...","reason":"..."} — reason en une phrase courte (visible dans l'app).`;
+Réponds UNIQUEMENT avec un objet JSON : {"channel":"speak|notify|hold|skip","message":"...","reason":"..."} — reason en une phrase courte (visible dans l'app).`;
 
 /** Construit le prompt utilisateur du juge. Pur, testé. */
 export function buildJudgeUser(
@@ -92,8 +92,12 @@ export function parseVerdict(raw: string): JudgeVerdict | null {
     if (!m) return null;
     try {
         const o = JSON.parse(m[0]);
-        const channel = String(o.channel ?? '');
-        if (!['speak', 'notify', 'digest', 'skip'].includes(channel)) {
+        // Compat : l'ancien nom « digest » (digest quotidien, supprimé) est traduit en « hold ».
+        const channel =
+            String(o.channel ?? '') === 'digest'
+                ? 'hold'
+                : String(o.channel ?? '');
+        if (!['speak', 'notify', 'hold', 'skip'].includes(channel)) {
             return null;
         }
         return {
@@ -119,7 +123,7 @@ export class Judge {
         const spent = this.deps.journal.spentToday(now);
         const remaining = Math.max(0, budget - spent);
 
-        // Garde sans LLM : budget épuisé + rien d'urgent → digest direct.
+        // Garde sans LLM : budget épuisé + rien d'urgent → hold direct.
         if (
             remaining <= 0 &&
             !input.budgetExempt &&
@@ -127,7 +131,7 @@ export class Judge {
             input.importance !== 'critique'
         ) {
             return {
-                channel: 'digest',
+                channel: 'hold',
                 message: input.facts,
                 reason: `budget d'interruptions épuisé (${budget}/jour)`,
             };
@@ -180,7 +184,7 @@ export class Judge {
             };
         }
         return {
-            channel: 'digest',
+            channel: 'hold',
             message: input.facts,
             reason: 'repli sans LLM (info)',
         };

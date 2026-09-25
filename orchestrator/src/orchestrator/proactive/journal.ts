@@ -8,7 +8,7 @@ import * as path from 'path';
 import { dataPath } from '@yui/shared';
 import Logger from '../../logger';
 
-export type JournalChannel = 'speak' | 'notify' | 'digest' | 'skip';
+export type JournalChannel = 'speak' | 'notify' | 'hold' | 'skip';
 export type Feedback = 'up' | 'down';
 
 export interface JournalEntry {
@@ -37,6 +37,10 @@ export class ProactiveJournal {
             if (fs.existsSync(file)) {
                 const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
                 if (Array.isArray(raw)) this.entries = raw;
+                // Compat : le canal « digest » (digest quotidien, supprimé) devient « hold ».
+                for (const e of this.entries) {
+                    if ((e.channel as string) === 'digest') e.channel = 'hold';
+                }
             }
         } catch (err) {
             Logger.warn(`proactive: journal illisible — ${err}`);
