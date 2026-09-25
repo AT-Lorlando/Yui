@@ -2,6 +2,8 @@ import assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { dataPath } from '@yui/shared';
+import type { Event } from './events';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
 import type { PresenceState } from '../presence';
 
@@ -237,6 +239,41 @@ async function run(): Promise<void> {
         await eng.processCandidate(ev({ facts: 'un fait brut' }));
         assert.strictEqual(notified.length, 1);
         assert.strictEqual(notified[0], 'un fait brut');
+    }
+
+    // 12. `declareExternal` fusionne sur la config FRAÎCHE du disque, pas sur
+    // l'instantané de l'engine : un `PUT /proactive` arrivé entre-temps (ici
+    // simulé en écrivant le fichier après la construction) ne doit pas être
+    // écrasé par la déclaration de la nouvelle brique externe.
+    {
+        const { deps } = makeDeps();
+        const eng = engine(baseConfig(), deps);
+        const cfgFile = dataPath('proactive.json');
+        fs.mkdirSync(path.dirname(cfgFile), { recursive: true });
+        fs.writeFileSync(
+            cfgFile,
+            JSON.stringify({
+                enabled: true,
+                bricks: { judge: { enabled: false } },
+            }),
+        );
+        const koyaEvent: Event = {
+            source: 'koya',
+            key: 'x',
+            kind: 'alert',
+            importance: 'utile',
+            subject: 'x',
+            facts: [],
+            at: deps.now!(),
+        };
+        await eng.ingest(koyaEvent);
+        const onDisk = JSON.parse(fs.readFileSync(cfgFile, 'utf-8'));
+        assert.strictEqual(
+            onDisk.bricks.judge.enabled,
+            false,
+            "l'édit admin sur disque n'est pas écrasé",
+        );
+        assert.strictEqual(onDisk.bricks['external:koya'].enabled, true);
     }
 
     console.log('All engine tests passed');

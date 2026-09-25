@@ -160,7 +160,10 @@ export class ProactiveEngine {
     }
 
     /** La brique qui gouverne une source : le connecteur/moment lui-même s'il
-     *  en a une, sinon la brique implicite `external:<source>` (Task 14). */
+     *  en a une, sinon la brique implicite `external:<source>`. Le rameau
+     *  `moment-*` est mort en pratique aujourd'hui (les moments passent par
+     *  `handleMoment`, pas par `ingest`) — il ne fait que garder une future
+     *  ingestion directe d'une source moment de finir en `external:`. */
     private sourceBrick(source: string): string {
         return this.connectors.some((c) => c.id === source) ||
             source.startsWith('moment-')
@@ -169,16 +172,27 @@ export class ProactiveEngine {
     }
 
     /** Une app externe inconnue apparaît sur /proactive dès son premier
-     *  événement — écrit une fois, jamais réécrite ensuite. */
+     *  événement — écrit une fois, jamais réécrite ensuite. `saveConfig`
+     *  remplace tout `bricks` d'un coup, donc écrire à partir du seul
+     *  `this.cfg` périmé écraserait un `PUT /proactive` arrivé sur le disque
+     *  depuis le dernier `reload()` : on part de la config FRAÎCHE du disque
+     *  pour les briques qui y existent (elle gagne sur `this.cfg` en cas de
+     *  divergence), tout en gardant celles qui n'existent qu'en mémoire —
+     *  un cfg construit directement (tests) n'a jamais touché le disque. */
     private declareExternal(source: string): void {
         const id = this.sourceBrick(source);
         if (!id.startsWith('external:') || this.cfg.bricks?.[id]) return;
-        this.cfg.bricks = {
+        const fresh = loadConfig();
+        const bricks = {
             ...(this.cfg.bricks ?? {}),
-            [id]: { enabled: true, settings: {} },
+            ...(fresh.bricks ?? {}),
+            [id]: fresh.bricks?.[id] ?? { enabled: true, settings: {} },
         };
+        // Active pour ce process quoi qu'il arrive, même si l'écriture rate.
+        this.cfg.bricks = bricks;
+        if (fresh.bricks?.[id]) return; // déjà déclarée entre-temps (autre process)
         try {
-            saveConfig({ bricks: this.cfg.bricks });
+            saveConfig({ bricks });
         } catch (err) {
             Logger.warn(`proactive: brique ${id} non persistée — ${err}`);
         }

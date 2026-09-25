@@ -32,9 +32,9 @@ export interface IngestDeps {
      *  active ? Optionnel — défaut « toujours active » pour ne pas casser les
      *  appelants qui ne connaissent pas les briques externes. */
     isSourceEnabled?: (source: string) => boolean;
-    /** Signalée une seule fois par source et par process (Task 14) — permet
-     *  au moteur de faire apparaître une brique `external:<source>` dès le
-     *  premier événement reçu. */
+    /** Signalée une seule fois par source et par process — permet au moteur
+     *  de faire apparaître une brique `external:<source>` dès le premier
+     *  événement reçu. */
     onNewSource?: (source: string) => void;
 }
 
