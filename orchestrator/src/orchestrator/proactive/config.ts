@@ -9,19 +9,15 @@ const CONFIG_FILE = dataPath('proactive.json');
 /** System prompt used to turn a watcher's facts into one short spoken line. */
 export const DEFAULT_PHRASE_PROMPT =
     "Tu es Yui, l'assistante de Jérémy. Reformule ce fait en une phrase orale courte et naturelle, en français, sans aucun markdown. Si ce n'est pas digne d'être signalé, réponds exactement RIEN. Si un message « Déjà signalé récemment » t'est fourni, ne reformule la nouvelle situation que si elle apporte une information vraiment nouvelle par rapport à ce qui a déjà été dit ; sinon réponds exactement RIEN.";
-/** System prompt used to summarise the daily digest. */
-export const DEFAULT_DIGEST_PROMPT =
-    'Tu es Yui. Résume ces points en un court message oral en français, sans markdown, en une ou deux phrases.';
 
 export const DEFAULT_CONFIG: ProactiveConfig = {
     enabled: false,
     chattiness: 'normal',
     quietHours: { start: '23:00', end: '07:00' },
-    digestTime: '07:00',
     defaultCooldownMin: 60,
     automationGuardWindowMin: 60,
     whitelist: [],
-    prompts: { phrase: DEFAULT_PHRASE_PROMPT, digest: DEFAULT_DIGEST_PROMPT },
+    prompts: { phrase: DEFAULT_PHRASE_PROMPT },
     // Livraisons actif par défaut (dès que la proactivité l'est) — la requête
     // Gmail par défaut vit dans le watcher, surchargable ici via `query`.
     deliveries: { pollMinutes: 30 },

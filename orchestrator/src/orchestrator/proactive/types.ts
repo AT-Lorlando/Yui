@@ -87,7 +87,8 @@ export interface ProactiveConfig {
     enabled: boolean;
     chattiness: Chattiness;
     quietHours: { start: string; end: string };
-    digestTime: string;
+    /** obsolète — ignoré */
+    digestTime?: string;
     defaultCooldownMin: number;
     automationGuardWindowMin: number;
     /** Budget d'interruptions quotidien du juge (speak=1, notify=0.5). */

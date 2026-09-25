@@ -15,8 +15,11 @@ function run(): void {
     const merged = mergeConfig({ enabled: true, chattiness: 'bavard' });
     assert.strictEqual(merged.enabled, true);
     assert.strictEqual(merged.chattiness, 'bavard');
-    assert.strictEqual(merged.digestTime, DEFAULT_CONFIG.digestTime);
     assert.deepStrictEqual(merged.whitelist, []);
+
+    // digest retiré : ni dans les défauts, ni requis par validateConfig
+    assert.strictEqual(DEFAULT_CONFIG.digestTime, undefined);
+    assert.deepStrictEqual(validateConfig({ digestTime: '07:00' }), []);
 
     // entrée invalide → défauts sûrs (désactivé)
     const safe = mergeConfig(null);
