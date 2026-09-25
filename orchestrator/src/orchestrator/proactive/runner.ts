@@ -100,10 +100,17 @@ export class ConnectorRunner {
             const { def } = slot;
             if (def.subscribe) {
                 try {
-                    slot.unsubscribe = def.subscribe(
-                        slot.ctx,
-                        (e) => void this.deps.ingest(e),
-                    );
+                    slot.unsubscribe = def.subscribe(slot.ctx, (e) => {
+                        // Contrairement au chemin poll() (ingest() attendu
+                        // dans un try/catch), l'émission de subscribe est
+                        // fire-and-forget : sans ce .catch(), un ingest() qui
+                        // rejette deviendrait une unhandled rejection.
+                        this.deps.ingest(e).catch((err) => {
+                            this.log.warn(
+                                `proactive[${def.id}]: ingest — ${err}`,
+                            );
+                        });
+                    });
                 } catch (err) {
                     this.log.warn(
                         `proactive[${def.id}]: subscribe a échoué — ${err}`,

@@ -15,6 +15,11 @@ const ev = (source: string, key: string): Event => ({
 });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+process.on('unhandledRejection', () => {
+    console.error('unhandled rejection');
+    process.exit(1);
+});
+
 async function run(): Promise<void> {
     const ingested: string[] = [];
     const warnings: string[] = [];
@@ -66,6 +71,10 @@ async function run(): Promise<void> {
         defaultEnabled: true,
         subscribe(_ctx, emit) {
             emit(ev('presence', 'arrived'));
+            // ingest() rejette pour cette clé (voir `ingest` ci-dessous) —
+            // vérifie que le chemin subscribe (fire-and-forget) l'attrape
+            // au lieu de laisser une unhandled rejection.
+            emit(ev('presence', 'boom'));
             return () => {
                 unsubscribed++;
             };
@@ -88,7 +97,12 @@ async function run(): Promise<void> {
         settings: () => ({}),
         callTool: async () => null,
         presence: () => 'home',
-        ingest: async (e) => void ingested.push(`${e.source}:${e.key}`),
+        ingest: async (e) => {
+            if (e.source === 'presence' && e.key === 'boom') {
+                throw new Error('ingest kaboom');
+            }
+            ingested.push(`${e.source}:${e.key}`);
+        },
         now: () => NOW,
         timers: {
             setInterval: ((fn: () => void, ms: number) => {
@@ -124,6 +138,13 @@ async function run(): Promise<void> {
     // start(), avant que le test ne reprenne la main) et sont sautés tous les
     // deux, ce qui rendrait `slowCalls === 2` inatteignable.
     await sleep(40);
+
+    // ingest() a rejeté pour presence:boom — le chemin subscribe (fire-and-
+    // forget) doit l'attraper et journaliser un warning, pas planter en
+    // unhandled rejection (voir process.on('unhandledRejection') ci-dessus).
+    assert.ok(
+        warnings.some((w) => w.includes('presence') && w.includes('ingest')),
+    );
 
     // Poll sérialisé : deux ticks pendant qu'un poll est en cours → un seul appel.
     const p1 = runner.poll('slow');
