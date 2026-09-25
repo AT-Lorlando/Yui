@@ -1,10 +1,15 @@
 // Briques de proactivité — chaque capacité (watcher, moment, anticipation,
-// module) est une brique déclarée ici, activable/désactivable depuis l'app
-// (page /proactive) sans toucher au code. La config ne stocke que les écarts :
+// module) est une brique activable/désactivable depuis l'app (page /proactive)
+// sans toucher au code. La config ne stocke que les écarts :
 // `proactive.json → bricks: { <id>: { enabled, settings } }`.
 //
 // Exemple fondateur : « cohérence arrosage/pluie » n'a pas de sens quand les
 // plantes sont sous un toit — c'est un toggle, pas un fork du code.
+//
+// Les briques `watcher` ne sont PLUS déclarées ici : chaque connecteur
+// (./connectors/*) porte la sienne (identité + réglages) et le moteur les
+// enregistre au démarrage via `registerConnectorBricks`. `CORE_BRICKS` ne garde
+// que ce qui n'a pas de source : moments, anticipations, modules.
 import type { ProactiveConfig } from './types';
 
 export type BrickKind = 'watcher' | 'moment' | 'anticipation' | 'module';
@@ -25,47 +30,7 @@ export interface BrickDef {
     settings?: BrickSetting[];
 }
 
-export const BRICKS: BrickDef[] = [
-    // ── Watchers (sources d'événements) ──────────────────────────────────
-    {
-        id: 'weather',
-        name: 'Météo',
-        description:
-            'Anomalies météo (canicule, pluie forte, écart aux normales).',
-        kind: 'watcher',
-        defaultEnabled: true,
-    },
-    {
-        id: 'presence',
-        name: 'Présence',
-        description:
-            'Événements liés aux départs/arrivées (porte, lumières oubliées).',
-        kind: 'watcher',
-        defaultEnabled: true,
-    },
-    {
-        id: 'calendar',
-        name: 'Agenda',
-        description: 'Rappels avant les événements du calendrier.',
-        kind: 'watcher',
-        defaultEnabled: true,
-    },
-    {
-        id: 'mail-important',
-        name: 'Mails importants',
-        description: 'Signale les mails marqués importants par Gmail.',
-        kind: 'watcher',
-        defaultEnabled: true,
-    },
-    {
-        id: 'deliveries',
-        name: 'Livraisons',
-        description:
-            'Suivi de colis (transporteurs + contenu) et notifications de statut.',
-        kind: 'watcher',
-        defaultEnabled: true,
-    },
-
+export const CORE_BRICKS: BrickDef[] = [
     // ── Moments (briefs accrochés aux transitions de vie) ────────────────
     {
         id: 'moment-wake',
@@ -128,14 +93,6 @@ export const BRICKS: BrickDef[] = [
         defaultEnabled: true,
     },
     {
-        id: 'mail-concierge',
-        name: 'Concierge courrier',
-        description:
-            'Trie la boîte Gmail en continu (labels Yui/…) : action requise, à lire, admin, commandes, newsletters, promo. Mode propositions tant que tu corriges.',
-        kind: 'module',
-        defaultEnabled: false,
-    },
-    {
         id: 'briefing',
         name: 'Briefing (dashboard)',
         description:
@@ -145,21 +102,48 @@ export const BRICKS: BrickDef[] = [
     },
 ];
 
-const byId = new Map(BRICKS.map((b) => [b.id, b]));
+let connectorBricks: BrickDef[] = [];
 
-export function brickDef(id: string): BrickDef | undefined {
-    return byId.get(id);
+/** Les connecteurs déclarent leur brique ; le moteur les enregistre au démarrage. */
+export function registerConnectorBricks(
+    defs: Array<
+        Pick<
+            BrickDef,
+            'id' | 'name' | 'description' | 'defaultEnabled' | 'settings'
+        >
+    >,
+): void {
+    connectorBricks = defs.map((d) => ({ ...d, kind: 'watcher' as const }));
+}
+
+/** Connecteurs enregistrés d'abord (les sources), puis le reste. */
+export function allBricks(): BrickDef[] {
+    return [...connectorBricks, ...CORE_BRICKS];
+}
+
+// La liste dépend des connecteurs enregistrés au runtime : résolue à chaque
+// appel, jamais figée au chargement du module.
+export function brickDef(
+    id: string,
+    list: BrickDef[] = allBricks(),
+): BrickDef | undefined {
+    return list.find((b) => b.id === id);
 }
 
 /** Une brique inconnue de la config garde son défaut ; `enabled` explicite gagne. */
 export function isBrickEnabled(
     cfg: Pick<ProactiveConfig, 'bricks'>,
     id: string,
+    list: BrickDef[] = allBricks(),
 ): boolean {
-    const def = byId.get(id);
     const override = cfg.bricks?.[id]?.enabled;
     if (override !== undefined) return override;
-    return def?.defaultEnabled ?? false;
+    const def = brickDef(id, list);
+    if (def) return def.defaultEnabled;
+    // Source externe (`external:<app>`) : aucune brique déclarée ici, elle
+    // s'annonce en émettant. Active tant qu'un `enabled: false` explicite ne
+    // la coupe pas.
+    return id.startsWith('external:');
 }
 
 export function brickSetting<T>(
@@ -167,18 +151,26 @@ export function brickSetting<T>(
     id: string,
     key: string,
     fallback: T,
+    list: BrickDef[] = allBricks(),
 ): T {
     const v = cfg.bricks?.[id]?.settings?.[key];
-    return (v === undefined ? fallback : v) as T;
+    if (v !== undefined) return v as T;
+    // Le défaut déclaré par la brique précède le fallback de l'appelant : une
+    // source qui annonce `maxPerHour: 12` n'est pas ramenée à 6 par l'ingest.
+    const declared = brickDef(id, list)?.settings?.find(
+        (s) => s.key === key,
+    )?.default;
+    return (declared === undefined ? fallback : declared) as T;
 }
 
 /** Vue complète pour l'app : défs + état effectif (`values` = réglages posés). */
 export function bricksView(
     cfg: Pick<ProactiveConfig, 'bricks'>,
+    list: BrickDef[] = allBricks(),
 ): Array<BrickDef & { enabled: boolean; values: Record<string, unknown> }> {
-    return BRICKS.map((b) => ({
+    return list.map((b) => ({
         ...b,
-        enabled: isBrickEnabled(cfg, b.id),
+        enabled: isBrickEnabled(cfg, b.id, list),
         values: cfg.bricks?.[b.id]?.settings ?? {},
     }));
 }

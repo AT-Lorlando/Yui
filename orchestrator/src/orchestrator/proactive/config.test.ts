@@ -7,6 +7,7 @@ import {
     DEFAULT_CONFIG,
     validateConfig,
     saveConfig,
+    migrateBrickIds,
 } from './config';
 
 function run(): void {
@@ -84,6 +85,33 @@ function run(): void {
     );
 
     fs.rmSync(dir, { recursive: true, force: true });
+
+    // ── migrateBrickIds: mail-important + mail-concierge → connecteur mail ────
+    {
+        const migrated = migrateBrickIds(
+            mergeConfig({
+                bricks: {
+                    'mail-important': {
+                        enabled: false,
+                        settings: { query: 'q' },
+                    },
+                    'mail-concierge': { enabled: true },
+                },
+                concierge: { pollMinutes: 45 },
+            }),
+        );
+        assert.deepStrictEqual(migrated.bricks!.mail, {
+            enabled: false,
+            settings: { query: 'q', triage: true, pollMinutes: 45 },
+        });
+        assert.strictEqual(migrated.bricks!['mail-important'], undefined);
+        assert.strictEqual(migrated.bricks!['mail-concierge'], undefined);
+        // Idempotent et sans effet sans anciens ids.
+        assert.deepStrictEqual(
+            migrateBrickIds(migrated).bricks,
+            migrated.bricks,
+        );
+    }
 
     console.log('All config tests passed');
 }

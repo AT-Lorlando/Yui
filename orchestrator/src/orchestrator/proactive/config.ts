@@ -34,10 +34,47 @@ export function mergeConfig(raw: unknown): ProactiveConfig {
     return { ...DEFAULT_CONFIG, ...(raw as Partial<ProactiveConfig>) };
 }
 
+/**
+ * Anciennes briques `mail-important` + `mail-concierge` → connecteur `mail`.
+ * Pur et idempotent : appliqué à chaque lecture, le fichier n'est pas réécrit
+ * (une config de prod reste valide telle quelle).
+ */
+export function migrateBrickIds(cfg: ProactiveConfig): ProactiveConfig {
+    const b = { ...(cfg.bricks ?? {}) };
+    const legacyMail = b['mail-important'];
+    const legacyTriage = b['mail-concierge'];
+    if (!legacyMail && !legacyTriage) return cfg;
+    const settings: Record<string, unknown> = {
+        ...(legacyMail?.settings ?? {}),
+        ...(b.mail?.settings ?? {}),
+    };
+    if (legacyTriage?.enabled !== undefined && settings.triage === undefined) {
+        settings.triage = legacyTriage.enabled;
+    }
+    if (
+        cfg.concierge?.pollMinutes !== undefined &&
+        settings.pollMinutes === undefined
+    ) {
+        settings.pollMinutes = cfg.concierge.pollMinutes;
+    }
+    b.mail = {
+        ...(b.mail ?? {}),
+        ...(legacyMail?.enabled !== undefined && b.mail?.enabled === undefined
+            ? { enabled: legacyMail.enabled }
+            : {}),
+        settings,
+    };
+    delete b['mail-important'];
+    delete b['mail-concierge'];
+    return { ...cfg, bricks: b };
+}
+
 export function loadConfig(): ProactiveConfig {
     try {
         if (!fs.existsSync(CONFIG_FILE)) return DEFAULT_CONFIG;
-        return mergeConfig(JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')));
+        return migrateBrickIds(
+            mergeConfig(JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'))),
+        );
     } catch (err) {
         Logger.warn(`proactive: config invalide — ${err}`);
         return { ...DEFAULT_CONFIG, enabled: false };
