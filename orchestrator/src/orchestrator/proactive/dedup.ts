@@ -3,6 +3,8 @@ import * as fs from 'fs';
 interface Entry {
     at: number;
     message: string;
+    /** Empreinte des facts au dernier enregistrement (bus d'événements). */
+    fingerprint?: string;
 }
 
 /**
@@ -40,6 +42,9 @@ export class Dedup {
                                     typeof e.message === 'string'
                                         ? e.message
                                         : '',
+                                ...(typeof e.fingerprint === 'string'
+                                    ? { fingerprint: e.fingerprint }
+                                    : {}),
                             });
                         }
                     }
@@ -62,9 +67,18 @@ export class Dedup {
         }
     }
 
-    isDuplicate(subject: string, now: number, cooldownMs: number): boolean {
+    isDuplicate(
+        subject: string,
+        now: number,
+        cooldownMs: number,
+        fingerprint?: string,
+    ): boolean {
         const prev = this.last.get(subject);
-        return prev !== undefined && now - prev.at < cooldownMs;
+        if (prev === undefined || now - prev.at >= cooldownMs) return false;
+        // Une réémission dont les facts ont changé n'est pas une répétition.
+        if (fingerprint && prev.fingerprint && prev.fingerprint !== fingerprint)
+            return false;
+        return true;
     }
 
     /** Dernier message communiqué pour ce sujet, ou undefined si jamais vu. */
@@ -88,11 +102,19 @@ export class Dedup {
      * `message` (cas « ré-arme » après un RIEN), met à jour `at` et conserve le
      * message précédent.
      */
-    record(subject: string, now: number, message?: string): void {
+    record(
+        subject: string,
+        now: number,
+        message?: string,
+        fingerprint?: string,
+    ): void {
         const prev = this.last.get(subject);
         this.last.set(subject, {
             at: now,
             message: message ?? prev?.message ?? '',
+            ...(fingerprint ?? prev?.fingerprint
+                ? { fingerprint: fingerprint ?? prev?.fingerprint }
+                : {}),
         });
         this.save();
     }

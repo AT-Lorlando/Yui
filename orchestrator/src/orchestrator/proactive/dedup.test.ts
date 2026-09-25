@@ -111,6 +111,32 @@ function run(): void {
         );
     }
 
+    // --- fingerprint : empreinte des facts (réémission avec facts différents) ---
+    {
+        const d = new Dedup();
+        d.record('koya:disk', 1000, 'Disque à 90 %', 'fp1');
+        assert.strictEqual(
+            d.isDuplicate('koya:disk', 2000, 60_000, 'fp1'),
+            true,
+            'même empreinte → doublon',
+        );
+        assert.strictEqual(
+            d.isDuplicate('koya:disk', 2000, 60_000, 'fp2'),
+            false,
+            'facts différents → passe',
+        );
+        assert.strictEqual(
+            d.isDuplicate('koya:disk', 2000, 60_000),
+            true,
+            'sans empreinte : comportement historique',
+        );
+        d.record('koya:disk', 3000); // ré-arme sans empreinte → garde fp1
+        assert.strictEqual(
+            d.isDuplicate('koya:disk', 3500, 60_000, 'fp1'),
+            true,
+        );
+    }
+
     console.log('All dedup tests passed');
 }
 
