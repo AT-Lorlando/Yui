@@ -8,6 +8,7 @@ import { ProactiveEngine } from './index';
 import { Dedup } from './dedup';
 import { HeldQueue } from './held';
 import { ProactiveJournal } from './journal';
+import type { Event } from './events';
 import type { ProactiveConfig, ProactiveDeps } from './types';
 import type { PresenceState } from '../presence';
 
@@ -88,13 +89,22 @@ async function run(): Promise<void> {
     assert.ok(bricks.some((b) => b.id === 'judge' && b.enabled));
     assert.ok(bricks.some((b) => b.id === 'irrigation-rain' && !b.enabled));
 
-    // Verdict hold → l'événement est retenu, aucune sortie, et un moment le récupère.
+    // ── Verdict hold : retenu, rien d'émis, et la file survit jusqu'à ce qu'un
+    // moment le livre vraiment ────────────────────────────────────────────────
+    let verdict = '{"channel":"hold","message":"","reason":"pas urgent"}';
+    const prompts: string[] = [];
+    const holdNotified: string[] = [];
+    const holdSpoken: string[] = [];
     const holdEngine = new ProactiveEngine(
         cfg(),
         {
             ...deps,
-            complete: async () =>
-                '{"channel":"hold","message":"","reason":"pas urgent"}',
+            complete: async (_s, u) => {
+                prompts.push(u);
+                return verdict;
+            },
+            notify: async (t) => void holdNotified.push(t),
+            speak: async (t) => void holdSpoken.push(t),
         },
         {
             dedup: new Dedup(),
@@ -102,7 +112,7 @@ async function run(): Promise<void> {
             held: new HeldQueue(),
         },
     );
-    await holdEngine.ingest({
+    const heldEvent: Event = {
         source: 'genkin',
         key: 'resto',
         kind: 'digest',
@@ -110,10 +120,50 @@ async function run(): Promise<void> {
         subject: 'Resto à 130 % du budget',
         facts: ['130 %'],
         at: deps.now!(),
-    });
-    assert.strictEqual(notified.length, 1, 'hold : rien d’émis');
+    };
+    await holdEngine.ingest(heldEvent);
+    assert.deepStrictEqual(holdNotified, [], 'hold : rien d’émis');
     assert.ok(holdEngine.heldForMoment().includes('Resto à 130 % du budget'));
-    assert.strictEqual(holdEngine.heldForMoment(), '', 'la file est vidée');
+    assert.strictEqual(
+        holdEngine.heldForMoment(),
+        holdEngine.heldForMoment(),
+        'heldForMoment ne consomme pas la file',
+    );
+    assert.strictEqual(holdEngine.heldCount(), 1, 'toujours retenu');
+
+    // Moment livré (speak) → les retenus entrent dans ses faits, PUIS sont vidés.
+    prompts.length = 0;
+    verdict =
+        '{"channel":"speak","message":"Point du matin.","reason":"il y a de la matière"}';
+    await holdEngine.handleMoment('moment-wake', 'facts du réveil');
+    const momentPrompt = prompts[prompts.length - 1] ?? '';
+    assert.ok(
+        momentPrompt.includes('Retenu depuis la dernière fois'),
+        'le juge voit les retenus',
+    );
+    assert.ok(
+        momentPrompt.includes('Resto à 130 % du budget'),
+        'le sujet retenu est dans le prompt du moment',
+    );
+    assert.deepStrictEqual(holdNotified, ['Point du matin.']);
+    assert.deepStrictEqual(holdSpoken, ['Point du matin.']);
+    assert.strictEqual(holdEngine.heldCount(), 0, 'livré → file vidée');
+
+    // Moment qui se tait (skip) → le retenu survit pour la prochaine fois.
+    verdict = '{"channel":"hold","message":"","reason":"pas urgent"}';
+    await holdEngine.ingest({
+        ...heldEvent,
+        key: 'courses',
+        subject: 'Courses à 80 % du budget',
+    });
+    assert.strictEqual(holdEngine.heldCount(), 1);
+    verdict = '{"channel":"skip","message":"","reason":"rien à dire"}';
+    await holdEngine.handleMoment('moment-return', 'facts du retour');
+    assert.strictEqual(
+        holdEngine.heldCount(),
+        1,
+        'skip : les retenus ne sont pas détruits',
+    );
 
     console.log('All engine-judge tests passed');
 }

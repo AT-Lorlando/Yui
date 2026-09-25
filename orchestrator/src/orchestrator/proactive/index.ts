@@ -269,6 +269,12 @@ export class ProactiveEngine {
             verdict,
             nowMs,
         );
+        // Les retenus ne sont vidés que s'ils ont VRAIMENT été livrés : un
+        // verdict hold/skip (ou un repli du juge) doit les garder pour le
+        // prochain moment, sinon ils disparaissent sans jamais avoir été dits.
+        if (verdict.channel === 'speak' || verdict.channel === 'notify') {
+            this.clearHeld();
+        }
     }
 
     /** Applique un verdict du juge : sortie + journal + dédup. */
@@ -332,17 +338,24 @@ export class ProactiveEngine {
 
     /** Adaptateur pour les sources legacy (CandidateEvent). */
     async processCandidate(ev: CandidateEvent): Promise<void> {
-        await this.ingest(fromCandidate(ev, this.now()));
+        // Appelé en fire-and-forget par les watchers : il ne doit jamais lever.
+        try {
+            await this.ingest(fromCandidate(ev, this.now()));
+        } catch (err) {
+            Logger.error(
+                `proactive: processCandidate "${ev.watcherId}:${ev.subject}" — ${err}`,
+            );
+        }
     }
 
     heldCount(): number {
         return this.held.size();
     }
 
-    /** Les retenus, rendus au prochain moment (et vidés). */
+    /** Les retenus, mis en forme pour le prochain moment. Sans effet de bord. */
     heldForMoment(): string {
-        const items = this.held.take(this.now());
-        return items
+        return this.held
+            .peek(this.now())
             .map(
                 (e) =>
                     `- [${e.source}] ${e.subject}${
@@ -350,6 +363,11 @@ export class ProactiveEngine {
                     }`,
             )
             .join('\n');
+    }
+
+    /** Vide la file des retenus — à n'appeler qu'après une livraison effective. */
+    clearHeld(): void {
+        this.held.take(this.now());
     }
 
     /** Après les filtres d'ingest : juge à budget, ou pipeline legacy si la brique est off. */
@@ -360,8 +378,10 @@ export class ProactiveEngine {
         Logger.info(
             `proactive: candidat [${e.source}] key="${e.key}" importance=${e.importance} | "${e.subject}"`,
         );
-        if (e.action) await this.tryAction(e.action, nowMs);
+        const dedupKey = `${e.source}:${e.key}`;
+        const fp = factsFingerprint(e);
         if (!critical && isBrickEnabled(this.cfg, 'judge')) {
+            if (e.action) await this.tryAction(e.action, nowMs);
             const verdict = await this.judge.evaluate(
                 {
                     source: e.source,
@@ -386,10 +406,13 @@ export class ProactiveEngine {
                 `proactive: ⏸ retenu "${e.key}" (importance ${e.importance} sous le seuil ${this.cfg.chattiness})`,
             );
             this.held.add(e, nowMs);
-            this.dedup.record(`${e.source}:${e.key}`, nowMs);
+            this.dedup.record(dedupKey, nowMs, undefined, fp);
             return;
         }
-        const lastMessage = this.dedup.lastMessage(`${e.source}:${e.key}`);
+        // L'action n'est tentée que si l'événement passe le seuil : un retenu ne
+        // déclenche rien (contrat de l'ancien pipeline).
+        if (e.action) await this.tryAction(e.action, nowMs);
+        const lastMessage = this.dedup.lastMessage(dedupKey);
         const message = await this.phrase(
             { template: e.template, facts },
             lastMessage,
@@ -398,12 +421,12 @@ export class ProactiveEngine {
             // RIEN : rien de neuf à dire — on ré-arme le cooldown (sans toucher
             // au dernier message) pour ne pas re-consulter le LLM à chaque poll.
             Logger.info(`proactive: ✕ RIEN "${e.key}" — cooldown ré-armé`);
-            this.dedup.record(`${e.source}:${e.key}`, nowMs);
+            this.dedup.record(dedupKey, nowMs, undefined, fp);
             return;
         }
         Logger.info(`proactive: ✓ ÉMET "${e.key}" → "${message}"`);
         await this.emit(message);
-        this.dedup.record(`${e.source}:${e.key}`, nowMs, message);
+        this.dedup.record(dedupKey, nowMs, message, fp);
     }
 
     private async phrase(

@@ -13,6 +13,7 @@ import type { PresenceState } from '../presence';
 process.env.YUI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-ea-'));
 const { ProactiveEngine } = require('./index') as typeof import('./index');
 const { Dedup } = require('./dedup') as typeof import('./dedup');
+const { HeldQueue } = require('./held') as typeof import('./held');
 
 const WL = [
     {
@@ -103,6 +104,24 @@ async function run(): Promise<void> {
             });
             await eng.processCandidate(evt());
             assert.strictEqual(calls.length, 0); // action bridée
+        }
+
+        // c. pipeline historique (juge off) : un événement sous le seuil est
+        //    retenu SANS exécuter son action.
+        fs.writeFileSync(autoFile, '[]');
+        {
+            const calls: { tool: string }[] = [];
+            const eng = new ProactiveEngine(
+                cfg({
+                    chattiness: 'discret',
+                    bricks: { judge: { enabled: false } },
+                }),
+                deps(calls),
+                { dedup: new Dedup(), held: new HeldQueue() },
+            );
+            await eng.processCandidate(evt()); // importance "utile" < urgent
+            assert.strictEqual(calls.length, 0, 'retenu → action non exécutée');
+            assert.strictEqual(eng.heldCount(), 1);
         }
 
         console.log('All engine-action tests passed');

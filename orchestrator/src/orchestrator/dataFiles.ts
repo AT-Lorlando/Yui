@@ -22,7 +22,6 @@ const STATE_FILES = new Set([
     'story-index.json',
     'amp-state.json',
     'proactive-dedup.json',
-    'proactive-digest.json',
     'automation-history.json',
 ]);
 
