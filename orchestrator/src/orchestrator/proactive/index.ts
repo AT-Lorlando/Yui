@@ -89,11 +89,14 @@ export class ProactiveEngine {
             maxPerHour: (source) =>
                 brickSetting(
                     this.cfg,
-                    source,
+                    this.sourceBrick(source),
                     'maxPerHour',
                     DEFAULT_MAX_PER_HOUR,
                 ),
             quietHours: () => this.cfg.quietHours,
+            isSourceEnabled: (source) =>
+                isBrickEnabled(this.cfg, this.sourceBrick(source)),
+            onNewSource: (source) => this.declareExternal(source),
             judge: (e) => this.consume(e),
         });
         this.judge = new Judge({
@@ -154,6 +157,31 @@ export class ProactiveEngine {
         // État de module : les briques des connecteurs doivent être connues de
         // `getBricks()`/`isBrickEnabled` dès la construction, pas au `start()`.
         registerConnectorBricks(this.connectors);
+    }
+
+    /** La brique qui gouverne une source : le connecteur/moment lui-même s'il
+     *  en a une, sinon la brique implicite `external:<source>` (Task 14). */
+    private sourceBrick(source: string): string {
+        return this.connectors.some((c) => c.id === source) ||
+            source.startsWith('moment-')
+            ? source
+            : `external:${source}`;
+    }
+
+    /** Une app externe inconnue apparaît sur /proactive dès son premier
+     *  événement — écrit une fois, jamais réécrite ensuite. */
+    private declareExternal(source: string): void {
+        const id = this.sourceBrick(source);
+        if (!id.startsWith('external:') || this.cfg.bricks?.[id]) return;
+        this.cfg.bricks = {
+            ...(this.cfg.bricks ?? {}),
+            [id]: { enabled: true, settings: {} },
+        };
+        try {
+            saveConfig({ bricks: this.cfg.bricks });
+        } catch (err) {
+            Logger.warn(`proactive: brique ${id} non persistée — ${err}`);
+        }
     }
 
     private patchConcierge(

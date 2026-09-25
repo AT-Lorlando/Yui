@@ -11,7 +11,12 @@ import type { Dedup } from './dedup';
 import type { HeldQueue } from './held';
 import type { RateWindow } from './rate';
 
-export type IngestOutcome = 'accepted' | 'expired' | 'deduplicated' | 'held';
+export type IngestOutcome =
+    | 'accepted'
+    | 'expired'
+    | 'deduplicated'
+    | 'held'
+    | 'ignored';
 
 export interface IngestDeps {
     dedup: Dedup;
@@ -23,12 +28,32 @@ export interface IngestDeps {
     quietHours: () => { start: string; end: string };
     /** Le consommateur final (le juge + sortie). Appelé seulement si accepté. */
     judge: (e: Event) => Promise<void>;
+    /** Une source (brique `external:<source>` ou connecteur) est-elle
+     *  active ? Optionnel — défaut « toujours active » pour ne pas casser les
+     *  appelants qui ne connaissent pas les briques externes. */
+    isSourceEnabled?: (source: string) => boolean;
+    /** Signalée une seule fois par source et par process (Task 14) — permet
+     *  au moteur de faire apparaître une brique `external:<source>` dès le
+     *  premier événement reçu. */
+    onNewSource?: (source: string) => void;
 }
 
 export class Ingest {
+    /** Sources déjà vues par CETTE instance — `onNewSource` n'est appelé
+     *  qu'à la première ingestion de chacune. */
+    private known = new Set<string>();
+
     constructor(private deps: IngestDeps) {}
 
     async ingest(e: Event): Promise<IngestOutcome> {
+        if (!this.known.has(e.source)) {
+            this.known.add(e.source);
+            this.deps.onNewSource?.(e.source);
+        }
+        if (!(this.deps.isSourceEnabled?.(e.source) ?? true)) {
+            return 'ignored';
+        }
+
         const now = this.deps.now();
         const key = eventKey(e);
         const critical = e.importance === 'critique';
@@ -88,6 +113,7 @@ export class Ingest {
             expired: 0,
             deduplicated: 0,
             held: 0,
+            ignored: 0,
         };
         for (const e of events) counts[await this.ingest(e)]++;
         return counts;

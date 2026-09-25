@@ -39,6 +39,7 @@ async function run(): Promise<void> {
                     deduplicated: 0,
                     expired: 0,
                     held: 0,
+                    ignored: 0,
                 };
             },
         }),
@@ -67,6 +68,7 @@ async function run(): Promise<void> {
         deduplicated: 0,
         expired: 0,
         held: 0,
+        ignored: 0,
     });
     assert.strictEqual(seen.length, 1);
 

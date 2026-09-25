@@ -1,9 +1,19 @@
 import assert from 'assert';
-import { ProactiveEngine } from './index';
-import { Dedup } from './dedup';
-import { HeldQueue } from './held';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
 import type { PresenceState } from '../presence';
+
+// La source de test ('w') n'est ni un connecteur ni un moment : sa première
+// ingestion déclare la brique implicite `external:w` (declareExternal →
+// saveConfig). YUI_DATA_DIR doit donc être posé AVANT que les modules ne
+// résolvent leurs dataPath() au chargement — via require(), pas un import
+// hissé (même contrainte que engine-action.test.ts).
+process.env.YUI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-e-'));
+const { ProactiveEngine } = require('./index') as typeof import('./index');
+const { Dedup } = require('./dedup') as typeof import('./dedup');
+const { HeldQueue } = require('./held') as typeof import('./held');
 
 function baseConfig(over: Partial<ProactiveConfig> = {}): ProactiveConfig {
     return {

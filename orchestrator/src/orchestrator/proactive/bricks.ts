@@ -12,7 +12,12 @@
 // que ce qui n'a pas de source : moments, anticipations, modules.
 import type { ProactiveConfig } from './types';
 
-export type BrickKind = 'watcher' | 'moment' | 'anticipation' | 'module';
+export type BrickKind =
+    | 'watcher'
+    | 'moment'
+    | 'anticipation'
+    | 'module'
+    | 'external';
 
 export interface BrickSetting {
     key: string;
@@ -168,9 +173,34 @@ export function bricksView(
     cfg: Pick<ProactiveConfig, 'bricks'>,
     list: BrickDef[] = allBricks(),
 ): Array<BrickDef & { enabled: boolean; values: Record<string, unknown> }> {
-    return list.map((b) => ({
+    const known = list.map((b) => ({
         ...b,
         enabled: isBrickEnabled(cfg, b.id, list),
         values: cfg.bricks?.[b.id]?.settings ?? {},
     }));
+    // Sources externes (`POST /events`) inconnues du registre : elles
+    // n'existent dans `cfg.bricks` qu'après `declareExternal` (premier
+    // événement reçu) — pas de brique déclarée en dur, la liste dépend donc
+    // de la config, pas de `allBricks()`.
+    const registered = new Set(list.map((b) => b.id));
+    const external = Object.keys(cfg.bricks ?? {})
+        .filter((id) => id.startsWith('external:') && !registered.has(id))
+        .map((id) => ({
+            id,
+            name: id.slice(9),
+            description: 'Source externe (POST /events).',
+            kind: 'external' as const,
+            defaultEnabled: true,
+            settings: [
+                {
+                    key: 'maxPerHour',
+                    label: 'Max événements / heure',
+                    type: 'number' as const,
+                    default: 6,
+                },
+            ],
+            enabled: isBrickEnabled(cfg, id, list),
+            values: cfg.bricks?.[id]?.settings ?? {},
+        }));
+    return [...known, ...external];
 }

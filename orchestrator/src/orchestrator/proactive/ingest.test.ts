@@ -22,6 +22,7 @@ async function run(): Promise<void> {
     let now = NOW;
     const judged: string[] = [];
     const held = new HeldQueue();
+    const newSources: string[] = [];
     // Ingest lui-même ne dédup jamais un accepté (c'est le rôle du
     // consommateur — `applyVerdict` du moteur, Task 7 — cf. la Note du
     // brief). Le juge factice simule donc ici ce consommateur pour que le
@@ -37,6 +38,8 @@ async function run(): Promise<void> {
             defaultCooldownMs: () => 30 * 60_000,
             maxPerHour: (s) => (s === 'koya' ? 2 : 6),
             quietHours: () => quiet,
+            isSourceEnabled: (s) => s !== 'muted',
+            onNewSource: (s) => void newSources.push(s),
             judge: async (e) => {
                 judged.push(e.key);
                 dedup.record(eventKey(e), now, undefined, factsFingerprint(e));
@@ -84,6 +87,15 @@ async function run(): Promise<void> {
     now = NOW + 3600_001;
     assert.strictEqual(await ing.ingest(ev('later')), 'accepted');
 
+    // 3b. Source désactivée (brique off) → ignorée, sans passer par le juge ;
+    // une nouvelle source n'est signalée qu'une fois (Set mémorisé par Ingest).
+    assert.strictEqual(
+        await mk().ingest(ev('m', { source: 'muted' })),
+        'ignored',
+    );
+    assert.ok(newSources.includes('koya'), 'source inconnue signalée une fois');
+    assert.strictEqual(newSources.filter((s) => s === 'koya').length, 1);
+
     // 4. Heures de silence → retenu (sauf urgent) ; critique ignore tout.
     now = new Date('2026-09-25T23:30:00').getTime();
     const quietIng = mk();
@@ -129,6 +141,7 @@ async function run(): Promise<void> {
         deduplicated: 1,
         expired: 1,
         held: 0,
+        ignored: 0,
     });
 
     console.log('All ingest tests passed');
