@@ -145,7 +145,7 @@ function makeDeps(over: Partial<DashboardDeps> = {}): DashboardDeps {
             message: 'Pense à fermer les volets.',
             at: 1750000000000,
         }),
-        mailQuery: 'is:important is:unread',
+        mailQuery: () => 'is:important is:unread',
         judgedAgenda: async () => null, // défaut : repli chronologique
         ...over,
     };

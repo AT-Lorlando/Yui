@@ -35,7 +35,7 @@ import {
 import type { Situation } from './situation';
 import { detectMoments, returnMomentFacts } from './moments';
 import { MailConcierge } from './mail/concierge';
-import type { MailCategory, TriageDoubt } from './mail/concierge';
+import type { MailCategory } from './mail/concierge';
 import { saveConfig } from './config';
 import type { MomentKind, MomentState } from './moments';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
@@ -46,6 +46,9 @@ const SITUATION_POLL_MS = 2 * 60_000;
 const DEFAULT_BUDGET_PER_DAY = 3;
 /** Plafond par source et par heure — barrière anti-flood sans LLM (spec §5.3.4). */
 const DEFAULT_MAX_PER_HOUR = 6;
+/** Sections historiques de proactive.json fusionnées dans les réglages du
+ *  connecteur de même id (config d'avant les briques ; jamais étendu). */
+const LEGACY_SECTIONS = new Set(['weather', 'calendar', 'mail', 'deliveries']);
 
 export class ProactiveEngine {
     private dedup: Dedup;
@@ -135,7 +138,6 @@ export class ProactiveEngine {
                 ];
                 this.patchConcierge({ customCategories });
             },
-            onDoubts: (doubts) => void this.notifyDoubts(doubts),
             now: this.now,
         });
         this.connectors = buildConnectors({
@@ -163,25 +165,6 @@ export class ProactiveEngine {
         } catch (err) {
             Logger.warn(`concierge: config non persistée — ${err}`);
         }
-    }
-
-    /** Doutes de tri → une notification (jamais parlée), via le juge. */
-    private async notifyDoubts(doubts: TriageDoubt[]): Promise<void> {
-        const n = doubts.length;
-        const sample = doubts
-            .slice(0, 2)
-            .map((d) => `« ${d.subject.slice(0, 50)} »`)
-            .join(', ');
-        await this.processCandidate({
-            watcherId: 'mail-concierge',
-            subject: 'mail-doubts',
-            importance: 'utile',
-            facts: `Le concierge courrier hésite sur ${n} mail(s) (${sample}) et propose des règles de tri — à trancher dans l'app, page Courrier.`,
-            template: `J'ai un doute sur ${n} mail${
-                n > 1 ? 's' : ''
-            } — tranche-les dans la page Courrier.`,
-            cooldownMs: 3 * 3600_000,
-        });
     }
 
     /** Résumé du tri courrier pour le dashboard (tuile Briefing). */
@@ -493,15 +476,32 @@ export class ProactiveEngine {
     private connectorSettings(def: ConnectorDef): Record<string, unknown> {
         const out: Record<string, unknown> = {};
         for (const s of def.settings ?? []) out[s.key] = s.default;
-        const legacy = (
-            this.cfg as unknown as Record<
-                string,
-                Record<string, unknown> | undefined
-            >
-        )[def.id];
-        if (legacy && typeof legacy === 'object') Object.assign(out, legacy);
+        // Ensemble FERMÉ : seules ces quatre sections historiques de
+        // proactive.json sont fusionnées, sinon un futur connecteur hériterait
+        // d'un champ de config homonyme qui ne le concerne pas.
+        if (LEGACY_SECTIONS.has(def.id)) {
+            const legacy = (
+                this.cfg as unknown as Record<
+                    string,
+                    Record<string, unknown> | undefined
+                >
+            )[def.id];
+            if (legacy && typeof legacy === 'object')
+                Object.assign(out, legacy);
+        }
         Object.assign(out, this.cfg.bricks?.[def.id]?.settings ?? {});
         return out;
+    }
+
+    /** Cadence effective d'un connecteur (réglage de brique ← définition) —
+     *  `undefined` = connecteur jamais pollé (événementiel) ou inconnu. */
+    connectorPollMinutes(id: string): number | undefined {
+        const def = this.connectors.find((c) => c.id === id);
+        if (!def) return undefined;
+        return (
+            Number(this.connectorSettings(def).pollMinutes ?? 0) ||
+            def.pollMinutes
+        );
     }
 
     private buildRunner(): ConnectorRunner {
@@ -510,9 +510,7 @@ export class ProactiveEngine {
             // brique doit donc être reportée sur la définition elle-même.
             connectors: this.connectors.map((d) => ({
                 ...d,
-                pollMinutes:
-                    Number(this.connectorSettings(d).pollMinutes ?? 0) ||
-                    d.pollMinutes,
+                pollMinutes: this.connectorPollMinutes(d.id),
             })),
             isEnabled: (id) => isBrickEnabled(this.cfg, id),
             settings: (def) => this.connectorSettings(def),
@@ -556,6 +554,7 @@ export class ProactiveEngine {
         this.runner?.stop();
         this.runner = null;
         if (this.situationTimer) clearInterval(this.situationTimer);
+        this.situationTimer = undefined;
     }
 
     /** Dernier message proactif réellement communiqué (tous sujets), ou null. */

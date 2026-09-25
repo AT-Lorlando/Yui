@@ -38,7 +38,10 @@ export interface ConnectorServices {
     concierge: MailConcierge;
     complete: (system: string, user: string) => Promise<string>;
     subscribePresence: ProactiveDeps['subscribePresence'];
-    /** Sections historiques de proactive.json (weather/calendar/mail/deliveries). */
+    /** Sections historiques de proactive.json (weather/calendar/mail/deliveries).
+     *  Aucun connecteur ne les lit : la précédence (défauts ← legacy ← brique)
+     *  est appliquée par `connectorSettings` du moteur, qui remplit
+     *  `ConnectorContext.settings`. */
     legacy: Pick<
         ProactiveConfig,
         'weather' | 'calendar' | 'mail' | 'deliveries'

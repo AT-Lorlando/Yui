@@ -57,7 +57,9 @@ export interface DashboardDeps {
     presenceState: () => string;
     automations: () => Automation[];
     proactiveLastMessage: () => { message: string; at: number } | null;
-    mailQuery?: string;
+    /** Requête Gmail des mails « importants » — lue à CHAQUE build : un
+     *  PUT /proactive doit changer la tuile sans redémarrage. */
+    mailQuery?: () => string | undefined;
     judgedAgenda: () => Promise<import('./agendaSecretary').AgendaData | null>;
     /** true si l'analyse LLM de l'agenda tourne sans résultat encore disponible. */
     agendaPending?: () => boolean;
@@ -258,6 +260,7 @@ function nextAutomation(
 export async function buildDashboard(
     deps: DashboardDeps,
 ): Promise<DashboardData> {
+    const mailQuery = deps.mailQuery?.();
     const [
         weatherRaw,
         forecastRaw,
@@ -272,10 +275,8 @@ export async function buildDashboard(
         safe(() => deps.callTool('get_forecast', { days: 5 })),
         safe(() => deps.callTool('get_today')),
         safe(() => deps.callTool('get_week')),
-        deps.mailQuery
-            ? safe(() =>
-                  deps.callTool('search_emails', { query: deps.mailQuery }),
-              )
+        mailQuery
+            ? safe(() => deps.callTool('search_emails', { query: mailQuery }))
             : Promise.resolve(null),
         safe(() => deps.callTool('list_lights')),
         safe(() => deps.callTool('list_doors')),

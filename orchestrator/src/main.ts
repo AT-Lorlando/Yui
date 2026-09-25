@@ -208,7 +208,7 @@ async function main() {
         presenceState: () => presence.getState(),
         automations: () => loadAutomations(),
         proactiveLastMessage: () => proactive.getLastMessage(),
-        mailQuery: proactive.getMailQuery(),
+        mailQuery: () => proactive.getMailQuery(),
         judgedAgenda: () => agendaSecretary.getAgenda(),
         agendaPending: () => agendaSecretary.isPending(),
         todoProject: process.env.DASHBOARD_TODO_PROJECT ?? 'todos/Personal',
