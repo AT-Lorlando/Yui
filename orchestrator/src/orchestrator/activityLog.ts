@@ -17,7 +17,8 @@ export type ActivityKind =
     | 'presence'
     | 'automation'
     | 'order'
-    | 'notify';
+    | 'notify'
+    | 'event';
 
 export interface ActivityEntry {
     ts: number;

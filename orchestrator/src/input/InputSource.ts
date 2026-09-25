@@ -129,6 +129,12 @@ export interface ProactiveHandler {
         id: string,
         opts: { category?: string; accept?: number[] },
     ) => Promise<boolean>;
+    /** `POST /events` : le bus reçoit, filtre (péremption/dédup/cooldown) et compte. */
+    ingest?: (
+        events: import('../orchestrator/proactive/events').Event[],
+    ) => Promise<
+        Record<import('../orchestrator/proactive/ingest').IngestOutcome, number>
+    >;
 }
 
 export type DashboardHandler = () => Promise<

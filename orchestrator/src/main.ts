@@ -250,6 +250,7 @@ async function main() {
                 }) => proactive.concierge.apply(filter),
                 triageCorrect: (mailId: string, category: string) =>
                     proactive.concierge.correct(mailId, category),
+                ingest: (events) => proactive.ingestAll(events),
             },
             () => dashboardProvider(),
         );
