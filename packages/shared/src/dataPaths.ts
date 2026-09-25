@@ -63,6 +63,11 @@ export function dataRoot(): string {
     return process.env.YUI_DATA_DIR ?? path.resolve(process.cwd(), 'data');
 }
 
+/** Sous-dossier d'état runtime (data/state/<sub>), pour les fichiers dynamiques non listés au registre. */
+export function stateDir(sub: string): string {
+    return path.join(dataRoot(), 'state', sub);
+}
+
 /**
  * Folder a file belongs in. Registry first; unknown credential-ish basenames
  * fall back to 'shared', everything else to 'config'. Pure (no I/O —

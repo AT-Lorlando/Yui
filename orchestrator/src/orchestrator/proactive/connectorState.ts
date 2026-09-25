@@ -2,13 +2,11 @@
 // data/state/connectors/<id>.json, écriture synchrone best-effort.
 import * as fs from 'fs';
 import * as path from 'path';
-import { dataRoot } from '@yui/shared';
+import { stateDir } from '@yui/shared';
 
 export function connectorStateFile(id: string): string {
     return path.join(
-        dataRoot(),
-        'state',
-        'connectors',
+        stateDir('connectors'),
         `${id.replace(/[^a-z0-9:_-]/gi, '_')}.json`,
     );
 }
