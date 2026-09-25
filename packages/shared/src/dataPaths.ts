@@ -41,6 +41,7 @@ const REGISTRY: Record<string, DataCategory> = {
     'proactive-dedup.json': 'state',
     'proactive-digest.json': 'state',
     'proactive-journal.json': 'state',
+    'held-events.json': 'state',
     'situation.json': 'state',
     'mail-triage.json': 'state',
     'scene-cycle.json': 'state',
