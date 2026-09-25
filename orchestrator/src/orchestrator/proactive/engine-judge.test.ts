@@ -5,8 +5,8 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ProactiveEngine } from './index';
-import { DigestBuffer } from './digest';
 import { Dedup } from './dedup';
+import { HeldQueue } from './held';
 import { ProactiveJournal } from './journal';
 import type { ProactiveConfig, ProactiveDeps } from './types';
 import type { PresenceState } from '../presence';
@@ -49,13 +49,11 @@ async function run(): Promise<void> {
         now: () => new Date('2026-09-16T14:00:00').getTime(),
     };
     const journal = new ProactiveJournal(tmpFile('journal.json'));
-    const engine = new ProactiveEngine(
-        cfg(),
-        deps,
-        new DigestBuffer(),
-        new Dedup(tmpFile('dedup.json')),
+    const engine = new ProactiveEngine(cfg(), deps, {
+        dedup: new Dedup(tmpFile('dedup.json')),
         journal,
-    );
+        held: new HeldQueue(),
+    });
 
     await engine.processCandidate({
         watcherId: 'deliveries',
@@ -89,6 +87,33 @@ async function run(): Promise<void> {
     const bricks = engine.getBricks();
     assert.ok(bricks.some((b) => b.id === 'judge' && b.enabled));
     assert.ok(bricks.some((b) => b.id === 'irrigation-rain' && !b.enabled));
+
+    // Verdict hold → l'événement est retenu, aucune sortie, et un moment le récupère.
+    const holdEngine = new ProactiveEngine(
+        cfg(),
+        {
+            ...deps,
+            complete: async () =>
+                '{"channel":"hold","message":"","reason":"pas urgent"}',
+        },
+        {
+            dedup: new Dedup(),
+            journal: new ProactiveJournal(tmpFile('j2.json')),
+            held: new HeldQueue(),
+        },
+    );
+    await holdEngine.ingest({
+        source: 'genkin',
+        key: 'resto',
+        kind: 'digest',
+        importance: 'info',
+        subject: 'Resto à 130 % du budget',
+        facts: ['130 %'],
+        at: deps.now!(),
+    });
+    assert.strictEqual(notified.length, 1, 'hold : rien d’émis');
+    assert.ok(holdEngine.heldForMoment().includes('Resto à 130 % du budget'));
+    assert.strictEqual(holdEngine.heldForMoment(), '', 'la file est vidée');
 
     console.log('All engine-judge tests passed');
 }

@@ -12,7 +12,6 @@ import type { PresenceState } from '../presence';
 // hoisted import. This keeps the test from touching the real data/ tree.
 process.env.YUI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-ea-'));
 const { ProactiveEngine } = require('./index') as typeof import('./index');
-const { DigestBuffer } = require('./digest') as typeof import('./digest');
 const { Dedup } = require('./dedup') as typeof import('./dedup');
 
 const WL = [
@@ -49,14 +48,6 @@ function evt(): CandidateEvent {
 async function run(): Promise<void> {
     const histFile = dataPath('automation-history.json');
     const autoFile = dataPath('automations.json');
-    const digestA = path.join(
-        process.env.YUI_DATA_DIR!,
-        'proactive-digest.ta.json',
-    );
-    const digestB = path.join(
-        process.env.YUI_DATA_DIR!,
-        'proactive-digest.tb.json',
-    );
 
     function deps(calls: { tool: string }[]): ProactiveDeps {
         return {
@@ -82,12 +73,9 @@ async function run(): Promise<void> {
         fs.writeFileSync(autoFile, '[]');
         {
             const calls: { tool: string }[] = [];
-            const eng = new ProactiveEngine(
-                cfg(),
-                deps(calls),
-                new DigestBuffer(digestA),
-                new Dedup(),
-            );
+            const eng = new ProactiveEngine(cfg(), deps(calls), {
+                dedup: new Dedup(),
+            });
             await eng.processCandidate(evt());
             assert.strictEqual(calls.length, 1);
             assert.strictEqual(calls[0].tool, 'irrigation_start');
@@ -110,12 +98,9 @@ async function run(): Promise<void> {
         );
         {
             const calls: { tool: string }[] = [];
-            const eng = new ProactiveEngine(
-                cfg(),
-                deps(calls),
-                new DigestBuffer(digestB),
-                new Dedup(),
-            );
+            const eng = new ProactiveEngine(cfg(), deps(calls), {
+                dedup: new Dedup(),
+            });
             await eng.processCandidate(evt());
             assert.strictEqual(calls.length, 0); // action bridée
         }
