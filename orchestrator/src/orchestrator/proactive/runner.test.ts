@@ -144,7 +144,10 @@ async function run(): Promise<void> {
         warnings.some((w) => w.includes('hang') && /timeout|délai/i.test(w)),
     );
 
-    // Trois échecs consécutifs → un seul warning « en échec » (puis silence).
+    // Chaque échec est signalé jusqu'au 3e consécutif, puis silence. `broken`
+    // a déjà échoué une fois pendant start() (échec 1) ; les quatre polls
+    // suivants sont les échecs 2 à 5 → warnings aux échecs 2 et 3, puis
+    // silence (échecs 4 et 5, pas de nouveau warning).
     const before = warnings.filter((w) => w.includes('broken')).length;
     await runner.poll('broken');
     await runner.poll('broken');
@@ -153,8 +156,8 @@ async function run(): Promise<void> {
     const after = warnings.filter((w) => w.includes('broken')).length;
     assert.strictEqual(
         after - before,
-        1,
-        'un seul warning pour 4 échecs de plus',
+        2,
+        'warnings aux échecs 2 et 3, puis silence',
     );
 
     // Snapshots : par connecteur, le pendu est ignoré.

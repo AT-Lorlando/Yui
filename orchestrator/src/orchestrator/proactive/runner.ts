@@ -31,18 +31,10 @@ export interface RunnerDeps {
     log?: { info(m: string): void; warn(m: string): void };
 }
 
-/** Distingue un dépassement de délai d'une erreur ordinaire du connecteur
- *  (cf. poll() : un timeout est toujours signalé, une erreur ordinaire est
- *  soumise au throttle des 3 échecs). */
-class PollTimeoutError extends Error {}
-
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
         const t = setTimeout(
-            () =>
-                reject(
-                    new PollTimeoutError(`${label} : délai dépassé (${ms} ms)`),
-                ),
+            () => reject(new Error(`${label} : délai dépassé (${ms} ms)`)),
             ms,
         );
         p.then(
@@ -170,15 +162,16 @@ export class ConnectorRunner {
             for (const e of events) await this.deps.ingest(e);
         } catch (err) {
             slot.failures++;
-            // Un timeout est toujours signalé (délai anormal, utile à chaque
-            // occurrence). Une erreur ordinaire est soumise au throttle : un
-            // seul warning, exactement au 3e échec consécutif — pas un par
-            // échec (sinon 3 warnings pour la même série avant le silence).
-            if (err instanceof PollTimeoutError) {
-                this.log.warn(`proactive[${id}]: ${err}`);
-            } else if (slot.failures === FAILURES_BEFORE_SILENCE) {
+            // Timeout ou erreur ordinaire : même traitement (spec §5.2).
+            // Chaque échec est signalé jusqu'au 3e consécutif inclus (celui-ci
+            // avec le suffixe « suspendu »), puis silence — sinon un
+            // connecteur qui pend en permanence noierait les logs.
+            if (slot.failures <= FAILURES_BEFORE_SILENCE) {
                 this.log.warn(
-                    `proactive[${id}]: ${err} — en échec, warnings suspendus jusqu’au prochain succès`,
+                    `proactive[${id}]: ${err}` +
+                        (slot.failures === FAILURES_BEFORE_SILENCE
+                            ? ' — en échec, warnings suspendus jusqu’au prochain succès'
+                            : ''),
                 );
             }
         } finally {
