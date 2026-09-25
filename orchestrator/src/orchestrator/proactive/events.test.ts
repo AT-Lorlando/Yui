@@ -57,6 +57,24 @@ async function run(): Promise<void> {
     assert.strictEqual(full.link, 'https://koya.home.arpa/hosts/1');
     assert.deepStrictEqual(full.action, { id: 'restart', tag: 'pm2' });
 
+    // Espaces repliés partout, pas seulement dans `subject` : `source`/`key`
+    // servent d'identité et les facts sont lus à voix haute.
+    const spaced = parseEvent(
+        {
+            source: 'ko\nya',
+            key: 'disk\tnas',
+            kind: 'info',
+            importance: 'info',
+            subject: 'a  b',
+            facts: ['1,8 To\n/ 1,9 To'],
+        },
+        { now: NOW },
+    );
+    assert.strictEqual(spaced.source, 'ko ya');
+    assert.strictEqual(spaced.key, 'disk nas');
+    assert.strictEqual(spaced.subject, 'a b');
+    assert.deepStrictEqual(spaced.facts, ['1,8 To / 1,9 To']);
+
     // Refus.
     const bad = (raw: unknown, re: RegExp) =>
         assert.throws(() => parseEvent(raw, { now: NOW }), re);

@@ -208,13 +208,21 @@ export async function checkPhoneOnNetwork(
 
 export class PresenceManager {
     private state: PresenceState = 'unknown';
-    private _onChange: ((p: PresenceState, n: PresenceState) => void) | null =
-        null;
+    /**
+     * Plusieurs abonnés, pas un seul : le moment « retour » de la proactivité et
+     * le connecteur `presence` s'abonnent tous les deux, et un slot unique
+     * écrasait silencieusement le premier inscrit.
+     */
+    private _onChange: ((p: PresenceState, n: PresenceState) => void)[] = [];
     private _onEvent: ((e: PresenceEventType) => void) | null = null;
     private burst: MacBurst | null = null;
 
-    onChange(cb: (p: PresenceState, n: PresenceState) => void): void {
-        this._onChange = cb;
+    /** Retourne le désabonnement (à appeler pour ne plus rien recevoir). */
+    onChange(cb: (p: PresenceState, n: PresenceState) => void): () => void {
+        this._onChange.push(cb);
+        return () => {
+            this._onChange = this._onChange.filter((f) => f !== cb);
+        };
     }
 
     onEvent(cb: (e: PresenceEventType) => void): void {
@@ -229,9 +237,11 @@ export class PresenceManager {
         const prev = this.state;
         if (prev === next) return;
         this.state = next;
-        if (this._onChange) {
+        // Chaque abonné dans son propre try : un listener qui lève ne doit pas
+        // priver les suivants de la transition.
+        for (const cb of [...this._onChange]) {
             try {
-                this._onChange(prev, next);
+                cb(prev, next);
             } catch (e) {
                 Logger.warn(`presence onChange failed: ${e}`);
             }

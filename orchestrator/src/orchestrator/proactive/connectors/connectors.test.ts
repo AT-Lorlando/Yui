@@ -57,15 +57,16 @@ async function run(): Promise<void> {
     );
     assert.deepStrictEqual(ws, [{ label: 'Météo', value: '20°C à Toulouse' }]);
 
-    // Présence : subscribe relaie la transition ; snapshot = état courant.
-    // `| undefined` plutôt que `| null` : avec `null`, tsc (strict) narrove la
-    // réaffectation faite dans la closure passée à `presenceConnector` en
-    // `never` sur les appels `cb!(...)` plus bas (limite connue du control
-    // flow analysis sur les fonctions réassignées via callback).
-    let cb: ((p: PresenceState, n: PresenceState) => void) | undefined;
+    // Présence : subscribe relaie la transition ; snapshot = état courant. Le
+    // faux `subscribePresence` imite `PresenceManager` : liste d'abonnés et
+    // désabonnement retourné (c'est lui que le connecteur propage).
+    const listeners = new Set<(p: PresenceState, n: PresenceState) => void>();
+    const fire = (p: PresenceState, n: PresenceState) =>
+        listeners.forEach((f) => f(p, n));
     const emitted: Event[] = [];
     const pc = presenceConnector((fn) => {
-        cb = fn;
+        listeners.add(fn);
+        return () => void listeners.delete(fn);
     });
     const unsub = pc.subscribe!(
         ctx({
@@ -73,13 +74,14 @@ async function run(): Promise<void> {
         }),
         (e) => emitted.push(e),
     );
-    assert.ok(cb);
-    cb!('home', 'away');
+    assert.strictEqual(listeners.size, 1);
+    fire('home', 'away');
     await new Promise((r) => setTimeout(r, 10));
     assert.strictEqual(emitted[0]!.key, 'left-unlocked');
     assert.strictEqual(emitted[0]!.importance, 'urgent');
     unsub();
-    cb!('away', 'home');
+    assert.strictEqual(listeners.size, 0, 'désabonné du manager');
+    fire('away', 'home');
     await new Promise((r) => setTimeout(r, 10));
     assert.strictEqual(emitted.length, 1, 'débranché : plus rien');
     assert.deepStrictEqual(await pc.snapshot!(ctx({})), [

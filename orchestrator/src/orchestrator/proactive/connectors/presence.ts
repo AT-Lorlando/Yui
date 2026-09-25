@@ -15,28 +15,24 @@ export function presenceConnector(
             'Événements liés aux départs/arrivées (porte, lumières oubliées).',
         defaultEnabled: true,
         subscribe(ctx, emit) {
-            let active = true;
-            subscribePresence((prev: PresenceState, next: PresenceState) => {
-                if (!active) return;
-                void (async () => {
-                    try {
-                        ctx.log.info(`transition ${prev} → ${next}`);
-                        const events = await evaluatePresenceTransition(
-                            prev,
-                            next,
-                            ctx.callTool,
-                        );
-                        for (const c of events)
-                            emit(fromCandidate(c, ctx.now()));
-                    } catch (err) {
-                        ctx.log.warn(String(err));
-                    }
-                })();
-            });
-            // PresenceManager ne sait pas désabonner : on neutralise le callback.
-            return () => {
-                active = false;
-            };
+            return subscribePresence(
+                (prev: PresenceState, next: PresenceState) => {
+                    void (async () => {
+                        try {
+                            ctx.log.info(`transition ${prev} → ${next}`);
+                            const events = await evaluatePresenceTransition(
+                                prev,
+                                next,
+                                ctx.callTool,
+                            );
+                            for (const c of events)
+                                emit(fromCandidate(c, ctx.now()));
+                        } catch (err) {
+                            ctx.log.warn(String(err));
+                        }
+                    })();
+                },
+            );
         },
         async snapshot(ctx): Promise<Fact[]> {
             return [

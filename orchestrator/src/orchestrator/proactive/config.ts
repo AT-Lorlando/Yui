@@ -53,10 +53,18 @@ export function migrateBrickIds(cfg: ProactiveConfig): ProactiveConfig {
     ) {
         settings.pollMinutes = cfg.concierge.pollMinutes;
     }
+    // Un seul connecteur porte désormais les deux modes : quand les deux
+    // anciennes briques se contredisent, il doit tourner dès que l'une était
+    // active — sinon `mail-important: false` + `mail-concierge: true` coupait
+    // le connecteur et donc le tri qu'on venait d'activer.
+    const legacyMailEnabled =
+        legacyMail?.enabled !== undefined && legacyTriage?.enabled !== undefined
+            ? legacyMail.enabled || legacyTriage.enabled
+            : legacyMail?.enabled;
     b.mail = {
         ...(b.mail ?? {}),
-        ...(legacyMail?.enabled !== undefined && b.mail?.enabled === undefined
-            ? { enabled: legacyMail.enabled }
+        ...(legacyMailEnabled !== undefined && b.mail?.enabled === undefined
+            ? { enabled: legacyMailEnabled }
             : {}),
         settings,
     };

@@ -11,10 +11,10 @@ point, ou se taire.
 
 | Champ | Type | Obligatoire | Rôle |
 | --- | --- | --- | --- |
-| `source` | string ≤ 40 | oui | Nom de l'app (`koya`, `genkin`…). Crée une brique `external:<source>` sur /proactive (toggle + max/heure) |
+| `source` | string ≤ 40 | oui | Nom de l'app (`koya`, `genkin`…). Crée une brique `external:<source>`, activable/désactivable sur /proactive |
 | `key` | string ≤ 120 | oui | Idempotence : même `source`+`key` = même événement (dédup, sauf si `facts` changent) |
 | `kind` | `alert` \| `info` \| `request` \| `digest` | oui | Nature : ça ne va pas / ça s'est passé / une action est attendue / matière à point |
-| `importance` | `info` \| `utile` \| `urgent` \| `critique` | oui | `urgent` ignore heures de silence et cooldown ; `critique` court-circuite tout (réservé aux vraies urgences) |
+| `importance` | `info` \| `utile` \| `urgent` \| `critique` | oui | `urgent` ignore heures de silence et cooldown (dans la limite de 3 × `maxPerHour`) ; `critique` court-circuite tout (réservé aux vraies urgences) |
 | `subject` | string ≤ 200 | oui | Une ligne, lue telle quelle par le TTS |
 | `facts` | string[] ≤ 10 | non | Détails factuels pour le juge — jamais inventés |
 | `at` | epoch ms | non | Horodatage source (défaut : réception) |
@@ -47,7 +47,7 @@ await fetch(`${process.env.YUI_URL}/events`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.YUI_BEARER}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ 
-        source: 'Koya', 
+        source: 'koya', // jamais replié en minuscules côté Yui : une casse ≠ une autre source
         key: 'disk-nas',
         kind: 'alert',
         importance: 'utile',
@@ -64,5 +64,7 @@ await fetch(`${process.env.YUI_URL}/events`, {
   changer les `facts` quand ça évolue (94 % → 98 %) — c'est ce qui repasse la dédup.
 - `ttlMs` sur tout ce qui a une durée de validité.
 - `urgent` avec parcimonie ; `critique` jamais depuis un script automatique.
-- Au-delà de `maxPerHour` (6 par défaut, réglable par source sur /proactive) les événements sont
-  retenus sans LLM et ressortent au prochain point.
+- Au-delà de `maxPerHour` (6 par défaut ; par source dans `data/config/proactive.json` →
+  `bricks["external:<source>"].settings.maxPerHour`, le toggle de la source étant sur /proactive) les
+  événements sont retenus sans LLM et ressortent au prochain point. Un `urgent` ignore ce plafond
+  jusqu'à 3 × `maxPerHour`, au-delà il est retenu comme le reste ; seul `critique` n'est jamais plafonné.

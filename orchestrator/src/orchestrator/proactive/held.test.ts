@@ -68,6 +68,24 @@ async function run(): Promise<void> {
     assert.strictEqual(q3.take(NOW).length, 1);
     assert.strictEqual(q3.size(), 0);
 
+    // Fichier édité/tronqué : les entrées qui ne sont pas des événements sont
+    // écartées au chargement, `peek` ne lève pas.
+    const dirty = path.join(
+        fs.mkdtempSync(path.join(os.tmpdir(), 'yui-held-dirty-')),
+        'held.json',
+    );
+    fs.writeFileSync(
+        dirty,
+        '[null, "x", {"source":"a","key":"k","kind":"info","importance":"info","subject":"s","facts":[],"at":1}]',
+    );
+    const q4 = new HeldQueue(dirty);
+    assert.strictEqual(q4.size(), 1);
+    assert.doesNotThrow(() => q4.peek(1));
+    assert.deepStrictEqual(
+        q4.peek(1).map((e) => e.key),
+        ['k'],
+    );
+
     console.log('All held tests passed');
 }
 

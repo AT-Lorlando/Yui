@@ -1,4 +1,3 @@
-import * as path from 'path';
 import Logger from '../../logger';
 import { dataPath } from '@yui/shared';
 import { passesThreshold } from './gates';
@@ -249,8 +248,18 @@ export class ProactiveEngine {
         return this.situation;
     }
 
+    /**
+     * Un seul tick à la fois : il est déclenché par l'intervalle de 2 min ET
+     * par la transition de présence, or un tick peut durer (snapshots des
+     * connecteurs, juge). Deux passes concurrentes verraient le même `prev` et
+     * détecteraient deux fois le même moment.
+     */
+    private tickBusy = false;
+
     /** Tick du journal de situation : reconstruit, diffe, détecte les moments. */
     async situationTick(): Promise<void> {
+        if (this.tickBusy) return;
+        this.tickBusy = true;
         try {
             const next = await buildSituation(
                 {
@@ -276,6 +285,8 @@ export class ProactiveEngine {
             }
         } catch (err) {
             Logger.warn(`proactive: situation tick — ${err}`);
+        } finally {
+            this.tickBusy = false;
         }
     }
 

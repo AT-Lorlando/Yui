@@ -51,7 +51,7 @@ async function run(): Promise<void> {
         notify: async (t) => void notified.push(t),
         speak: async (t) => void spoken.push(t),
         presenceState: () => 'home' as PresenceState,
-        subscribePresence: () => {},
+        subscribePresence: () => () => {},
         deviceHandler: async () => null,
         runScene: async () => ({ success: true }),
         now: () => new Date('2026-09-16T14:00:00').getTime(),

@@ -103,8 +103,10 @@ function run(): void {
                 concierge: { pollMinutes: 45 },
             }),
         );
+        // Les deux anciennes briques se contredisent → le connecteur tourne
+        // (sinon le tri activé serait mort avec les mails importants coupés).
         assert.deepStrictEqual(migrated.bricks!.mail, {
-            enabled: false,
+            enabled: true,
             settings: { query: 'q', triage: true, pollMinutes: 45 },
         });
         assert.strictEqual(migrated.bricks!['mail-important'], undefined);
@@ -114,6 +116,23 @@ function run(): void {
             migrateBrickIds(migrated).bricks,
             migrated.bricks,
         );
+
+        // Les deux à false → connecteur coupé.
+        const off = migrateBrickIds(
+            mergeConfig({
+                bricks: {
+                    'mail-important': { enabled: false },
+                    'mail-concierge': { enabled: false },
+                },
+            }),
+        );
+        assert.strictEqual(off.bricks!.mail!.enabled, false);
+
+        // Une seule ancienne brique définie → sa valeur est reprise telle quelle.
+        const onlyImportant = migrateBrickIds(
+            mergeConfig({ bricks: { 'mail-important': { enabled: true } } }),
+        );
+        assert.strictEqual(onlyImportant.bricks!.mail!.enabled, true);
     }
 
     console.log('All config tests passed');

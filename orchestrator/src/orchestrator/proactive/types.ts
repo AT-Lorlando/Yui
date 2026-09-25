@@ -109,9 +109,10 @@ export interface ProactiveDeps {
     notify: (text: string) => Promise<void>;
     speak: (text: string) => Promise<void>;
     presenceState: () => PresenceState;
+    /** Retourne le désabonnement : plusieurs abonnés coexistent. */
     subscribePresence: (
         cb: (prev: PresenceState, next: PresenceState) => void,
-    ) => void;
+    ) => () => void;
     deviceHandler: (
         tool: string,
         args?: Record<string, unknown>,

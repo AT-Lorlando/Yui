@@ -96,6 +96,27 @@ async function run(): Promise<void> {
     assert.ok(newSources.includes('koya'), 'source inconnue signalée une fois');
     assert.strictEqual(newSources.filter((s) => s === 'koya').length, 1);
 
+    // 3c. L'urgent n'est pas un passe-droit illimité : plafonné à
+    // 3 × maxPerHour (koya = 2 → 6), le 7e est retenu. Le critique passe encore.
+    const flood = mk();
+    for (let i = 0; i < 6; i++) {
+        assert.strictEqual(
+            await flood.ingest(ev(`u${i}`, { importance: 'urgent' })),
+            'accepted',
+            `urgent ${i} sous le plafond`,
+        );
+    }
+    assert.strictEqual(
+        await flood.ingest(ev('u6', { importance: 'urgent' })),
+        'held',
+        'urgent au-delà de 3 × maxPerHour',
+    );
+    assert.strictEqual(
+        await flood.ingest(ev('u7', { importance: 'critique' })),
+        'accepted',
+        'critique : jamais plafonné',
+    );
+
     // 4. Heures de silence → retenu (sauf urgent) ; critique ignore tout.
     now = new Date('2026-09-25T23:30:00').getTime();
     const quietIng = mk();

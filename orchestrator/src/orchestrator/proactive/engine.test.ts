@@ -45,7 +45,7 @@ function makeDeps(over: Partial<ProactiveDeps> = {}): {
         notify: async (t) => void notified.push(t),
         speak: async (t) => void spoken.push(t),
         presenceState: () => 'home' as PresenceState,
-        subscribePresence: () => {},
+        subscribePresence: () => () => {},
         deviceHandler: async () => null,
         runScene: async () => ({ success: true }),
         now: () => new Date('2026-05-29T14:00:00').getTime(),

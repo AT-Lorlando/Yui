@@ -23,6 +23,7 @@ const STATE_FILES = new Set([
     'amp-state.json',
     'proactive-dedup.json',
     'automation-history.json',
+    'held-events.json',
 ]);
 
 /** Classify a data file by name and (optionally) its content. Pure. */

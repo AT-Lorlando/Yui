@@ -64,7 +64,7 @@ export function eventRoutes(
             logActivity(
                 'event',
                 sources,
-                `${events.length} événement(s) — acceptés ${counts.accepted}, retenus ${counts.held}, doublons ${counts.deduplicated}, périmés ${counts.expired}`,
+                `${events.length} événement(s) — acceptés ${counts.accepted}, retenus ${counts.held}, doublons ${counts.deduplicated}, périmés ${counts.expired}, ignorés ${counts.ignored}`,
             );
             res.status(202).json(counts);
         } catch (err) {

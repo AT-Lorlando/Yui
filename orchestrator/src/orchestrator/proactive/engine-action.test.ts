@@ -56,7 +56,7 @@ async function run(): Promise<void> {
             notify: async () => {},
             speak: async () => {},
             presenceState: () => 'away' as PresenceState,
-            subscribePresence: () => {},
+            subscribePresence: () => () => {},
             deviceHandler: async (tool) => {
                 calls.push({ tool });
                 return null;

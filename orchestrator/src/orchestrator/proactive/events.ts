@@ -45,15 +45,19 @@ const KINDS: EventKind[] = ['alert', 'info', 'request', 'digest'];
 const IMPORTANCES: Importance[] = ['info', 'utile', 'urgent', 'critique'];
 
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+/** Tout ce qui est lu par le TTS ou sert de clé tient sur une ligne : un saut
+ *  de ligne dans `source`/`key` ferait deux identités pour un même événement,
+ *  et une tabulation dans un fact s'entendrait à la lecture. */
+const oneLine = (v: unknown): string => str(v).replace(/\s+/g, ' ');
 
 export function parseEvent(raw: unknown, opts: { now?: number } = {}): Event {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         throw new Error('événement : objet attendu');
     }
     const r = raw as Record<string, unknown>;
-    const source = str(r.source).slice(0, 40);
+    const source = oneLine(r.source).slice(0, 40);
     if (!source) throw new Error('source requise');
-    const key = str(r.key).slice(0, 120);
+    const key = oneLine(r.key).slice(0, 120);
     if (!key) throw new Error('key requise');
     const kind = str(r.kind) as EventKind;
     if (!KINDS.includes(kind))
@@ -62,7 +66,7 @@ export function parseEvent(raw: unknown, opts: { now?: number } = {}): Event {
     if (!IMPORTANCES.includes(importance)) {
         throw new Error(`importance invalide (${IMPORTANCES.join('|')})`);
     }
-    const subject = str(r.subject).replace(/\s+/g, ' ');
+    const subject = oneLine(r.subject);
     if (!subject) throw new Error('subject requis');
     if (subject.length > SUBJECT_MAX)
         throw new Error(`subject trop long (max ${SUBJECT_MAX})`);
@@ -70,7 +74,7 @@ export function parseEvent(raw: unknown, opts: { now?: number } = {}): Event {
     if (!Array.isArray(factsRaw))
         throw new Error('facts : liste de chaînes attendue');
     const facts = factsRaw
-        .map((f) => str(f).slice(0, FACT_MAX_CHARS))
+        .map((f) => oneLine(f).slice(0, FACT_MAX_CHARS))
         .filter(Boolean);
     if (facts.length > FACTS_MAX_LINES)
         throw new Error(`facts : ${FACTS_MAX_LINES} lignes maximum`);

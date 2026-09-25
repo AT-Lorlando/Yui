@@ -36,7 +36,7 @@ const deps: ProactiveDeps = {
     notify: async () => {},
     speak: async () => {},
     presenceState: () => 'home' as PresenceState,
-    subscribePresence: () => {},
+    subscribePresence: () => () => {},
     deviceHandler: async () => null,
     runScene: async () => ({ success: true }),
     now: () => new Date('2026-09-25T10:00:00').getTime(),

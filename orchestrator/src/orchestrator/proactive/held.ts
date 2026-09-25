@@ -28,12 +28,25 @@ export class HeldQueue {
         return dataPath('held-events.json');
     }
 
+    /** Le fichier peut avoir été tronqué ou édité à la main : une entrée qui
+     *  n'a pas la forme d'un événement ferait lever `purge`/`peek` bien plus
+     *  tard, loin de la cause. On ne garde que ce qui est exploitable. */
+    private static looksLikeEvent(e: unknown): e is Event {
+        const o = e as Partial<Event> | null | undefined;
+        return (
+            typeof o?.source === 'string' &&
+            typeof o?.key === 'string' &&
+            typeof o?.at === 'number'
+        );
+    }
+
     private load(): void {
         if (!this.file) return;
         try {
             if (fs.existsSync(this.file)) {
                 const raw = JSON.parse(fs.readFileSync(this.file, 'utf-8'));
-                if (Array.isArray(raw)) this.items = raw;
+                if (Array.isArray(raw))
+                    this.items = raw.filter(HeldQueue.looksLikeEvent);
             }
         } catch {
             /* fichier corrompu — on repart vide */

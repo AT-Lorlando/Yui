@@ -11,6 +11,12 @@ import type { Dedup } from './dedup';
 import type { HeldQueue } from './held';
 import type { RateWindow } from './rate';
 
+/** Plafond des `urgent` : ils ignorent le quota horaire de leur source, mais
+ *  pas indéfiniment — une app authentifiée pourrait sinon noyer le foyer en
+ *  marquant tout `urgent` avec des clés tournantes (la dédup ne mord pas). Seul
+ *  `critique`, réservé aux vraies urgences, reste sans plafond. */
+export const URGENT_RATE_MULTIPLIER = 3;
+
 export type IngestOutcome =
     | 'accepted'
     | 'expired'
@@ -79,8 +85,9 @@ export class Ingest {
             return this.hold(e, now, fp, 'heures de silence');
         }
 
-        if (!urgent) {
-            const max = this.deps.maxPerHour(e.source);
+        if (!critical) {
+            const base = this.deps.maxPerHour(e.source);
+            const max = urgent ? base * URGENT_RATE_MULTIPLIER : base;
             if (this.deps.rate.count(e.source, now) >= max) {
                 return this.hold(e, now, fp, `cooldown de source (${max}/h)`);
             }
