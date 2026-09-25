@@ -1,10 +1,4 @@
-import Logger from '../../../logger';
-import type {
-    CandidateEvent,
-    MailWatcherConfig,
-    ProactiveDeps,
-    Watcher,
-} from '../types';
+import type { CandidateEvent, MailWatcherConfig } from '../types';
 
 const MAIL_COOLDOWN_MS = 6 * 60 * 60_000; // 6 h : on ne re-signale pas trop souvent
 // Borne la taille du résumé Gmail injecté dans le prompt LLM (coût tokens).
@@ -33,33 +27,4 @@ export async function evaluateMail(
             cooldownMs: MAIL_COOLDOWN_MS,
         },
     ];
-}
-
-export function createMailWatcher(
-    cfg: MailWatcherConfig,
-    deps: ProactiveDeps,
-): Watcher {
-    let timer: ReturnType<typeof setInterval> | undefined;
-    const tick = async (emit: (c: CandidateEvent) => void): Promise<void> => {
-        try {
-            const events = await evaluateMail(deps.deviceHandler, cfg);
-            Logger.info(`proactive[mail]: poll → ${events.length} candidat(s)`);
-            for (const e of events) emit(e);
-        } catch (err) {
-            Logger.warn(`proactive[mail]: ${err}`);
-        }
-    };
-    return {
-        id: 'mail',
-        start(emit) {
-            void tick(emit);
-            timer = setInterval(
-                () => void tick(emit),
-                cfg.pollMinutes * 60_000,
-            );
-        },
-        stop() {
-            if (timer) clearInterval(timer);
-        },
-    };
 }

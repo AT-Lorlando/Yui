@@ -18,12 +18,6 @@ export interface CandidateEvent {
     cooldownMs?: number;
 }
 
-export interface Watcher {
-    id: string;
-    start(emit: (c: CandidateEvent) => void): void;
-    stop(): void;
-}
-
 export type WhitelistAction = {
     id: string;
     tag: string;

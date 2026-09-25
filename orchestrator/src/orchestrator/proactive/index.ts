@@ -13,12 +13,15 @@ import { isActionBlocked } from './guard';
 import { loadHistory } from '../history';
 import { loadAutomations } from '../automations';
 import { loadConfig, DEFAULT_PHRASE_PROMPT } from './config';
-import { createWeatherWatcher } from './watchers/weather';
-import { createPresenceWatcher } from './watchers/presence';
-import { createCalendarWatcher } from './watchers/calendar';
-import { createMailWatcher } from './watchers/mail';
-import { createDeliveriesWatcher } from './watchers/deliveries';
-import { isBrickEnabled, bricksView, brickSetting } from './bricks';
+import { ConnectorRunner } from './runner';
+import { buildConnectors } from './connectors';
+import type { ConnectorDef } from './connector';
+import {
+    isBrickEnabled,
+    bricksView,
+    brickSetting,
+    registerConnectorBricks,
+} from './bricks';
 import { ProactiveJournal } from './journal';
 import type { Feedback, JournalEntry } from './journal';
 import { Judge } from './judge';
@@ -35,12 +38,7 @@ import { MailConcierge } from './mail/concierge';
 import type { MailCategory, TriageDoubt } from './mail/concierge';
 import { saveConfig } from './config';
 import type { MomentKind, MomentState } from './moments';
-import type {
-    CandidateEvent,
-    ProactiveConfig,
-    ProactiveDeps,
-    Watcher,
-} from './types';
+import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
 
 const DEDUP_FILE = dataPath('proactive-dedup.json');
 /** Cadence de reconstruction du journal de situation (lectures store, pas cher). */
@@ -54,12 +52,12 @@ export class ProactiveEngine {
     private held: HeldQueue;
     private rate = new RateWindow();
     private ingestGate: Ingest;
-    private watchers: Watcher[] = [];
+    private runner: ConnectorRunner | null = null;
+    private connectors: ConnectorDef[] = [];
     private now: () => number;
     private situationTimer?: ReturnType<typeof setInterval>;
     readonly journal: ProactiveJournal;
     readonly concierge: MailConcierge;
-    private conciergeTimer?: ReturnType<typeof setInterval>;
     private judge: Judge;
     private situation: Situation | null;
     private momentState: MomentState = { firedDepartures: [] };
@@ -140,6 +138,20 @@ export class ProactiveEngine {
             onDoubts: (doubts) => void this.notifyDoubts(doubts),
             now: this.now,
         });
+        this.connectors = buildConnectors({
+            concierge: this.concierge,
+            complete: (sys, user) => this.deps.complete(sys, user),
+            subscribePresence: (cb) => this.deps.subscribePresence(cb),
+            legacy: {
+                weather: this.cfg.weather,
+                calendar: this.cfg.calendar,
+                mail: this.cfg.mail,
+                deliveries: this.cfg.deliveries,
+            },
+        });
+        // État de module : les briques des connecteurs doivent être connues de
+        // `getBricks()`/`isBrickEnabled` dès la construction, pas au `start()`.
+        registerConnectorBricks(this.connectors);
     }
 
     private patchConcierge(
@@ -215,11 +227,14 @@ export class ProactiveEngine {
     /** Tick du journal de situation : reconstruit, diffe, détecte les moments. */
     async situationTick(): Promise<void> {
         try {
-            const next = await buildSituation({
-                callTool: (t, a) => this.deps.deviceHandler(t, a),
-                presenceState: () => this.deps.presenceState(),
-                now: this.now,
-            });
+            const next = await buildSituation(
+                {
+                    callTool: (t, a) => this.deps.deviceHandler(t, a),
+                    presenceState: () => this.deps.presenceState(),
+                    now: this.now,
+                },
+                this.runner ? await this.runner.snapshots() : {},
+            );
             const prev = this.situation;
             this.lastDeltas = diffSituation(prev, next);
             const { moments, state } = detectMoments(
@@ -321,10 +336,6 @@ export class ProactiveEngine {
                 this.dedup.record(dedupKey, nowMs, undefined, fp);
                 break;
         }
-    }
-
-    setWatchers(ws: Watcher[]): void {
-        this.watchers = ws;
     }
 
     /** Porte d'entrée unique (polls, subscribe, POST /events). */
@@ -478,41 +489,55 @@ export class ProactiveEngine {
         }
     }
 
+    /** Réglages effectifs d'un connecteur : défauts déclarés ← section legacy ← écarts de brique. */
+    private connectorSettings(def: ConnectorDef): Record<string, unknown> {
+        const out: Record<string, unknown> = {};
+        for (const s of def.settings ?? []) out[s.key] = s.default;
+        const legacy = (
+            this.cfg as unknown as Record<
+                string,
+                Record<string, unknown> | undefined
+            >
+        )[def.id];
+        if (legacy && typeof legacy === 'object') Object.assign(out, legacy);
+        Object.assign(out, this.cfg.bricks?.[def.id]?.settings ?? {});
+        return out;
+    }
+
+    private buildRunner(): ConnectorRunner {
+        return new ConnectorRunner({
+            // Le runner lit `def.pollMinutes` : la cadence réglée dans la
+            // brique doit donc être reportée sur la définition elle-même.
+            connectors: this.connectors.map((d) => ({
+                ...d,
+                pollMinutes:
+                    Number(this.connectorSettings(d).pollMinutes ?? 0) ||
+                    d.pollMinutes,
+            })),
+            isEnabled: (id) => isBrickEnabled(this.cfg, id),
+            settings: (def) => this.connectorSettings(def),
+            callTool: (t, a) => this.deps.deviceHandler(t, a),
+            presence: () => this.deps.presenceState(),
+            ingest: (e) => this.ingest(e),
+            now: this.now,
+        });
+    }
+
     start(): void {
         if (!this.cfg.enabled) {
             Logger.info('proactive: désactivé (config)');
             return;
         }
-        for (const w of this.watchers) {
-            try {
-                w.start((c) => void this.processCandidate(c));
-            } catch (err) {
-                Logger.warn(
-                    `proactive: watcher "${w.id}" n'a pas démarré — ${err}`,
-                );
-            }
-        }
+        this.runner = this.buildRunner();
+        this.runner.start();
         this.situationTimer = setInterval(
             () => void this.situationTick(),
             SITUATION_POLL_MS,
         );
         void this.situationTick();
-        if (isBrickEnabled(this.cfg, 'mail-concierge')) {
-            const pollMs = (this.cfg.concierge?.pollMinutes ?? 30) * 60_000;
-            this.conciergeTimer = setInterval(
-                () => void this.concierge.scan().catch(() => {}),
-                pollMs,
-            );
-            void this.concierge.scan().catch(() => {});
-            Logger.info(
-                `proactive: concierge courrier actif (poll ${Math.round(
-                    pollMs / 60000,
-                )} min)`,
-            );
-        }
         Logger.info(
-            `proactive: démarré — watchers=[${this.watchers
-                .map((w) => w.id)
+            `proactive: démarré — connecteurs=[${this.runner
+                .activeIds()
                 .join(', ')}] | chattiness=${this.cfg.chattiness} ` +
                 `(laisse passer ${
                     this.cfg.chattiness === 'discret'
@@ -528,15 +553,9 @@ export class ProactiveEngine {
     }
 
     stop(): void {
-        for (const w of this.watchers) {
-            try {
-                w.stop();
-            } catch {
-                /* best-effort */
-            }
-        }
+        this.runner?.stop();
+        this.runner = null;
         if (this.situationTimer) clearInterval(this.situationTimer);
-        if (this.conciergeTimer) clearInterval(this.conciergeTimer);
     }
 
     /** Dernier message proactif réellement communiqué (tous sujets), ou null. */
@@ -544,17 +563,24 @@ export class ProactiveEngine {
         return this.dedup.latest();
     }
 
-    /** Requête Gmail configurée pour le watcher mail (mails « importants »). */
+    /** Requête Gmail des mails « importants » — résolue EXACTEMENT comme le
+     *  poll du connecteur (défaut déclaré ← section legacy ← brique), sinon le
+     *  dashboard chercherait une autre requête que celle réellement pollée. */
     getMailQuery(): string | undefined {
-        return this.cfg.mail?.query;
+        const def = this.connectors.find((c) => c.id === 'mail');
+        const q = def
+            ? this.connectorSettings(def).query
+            : brickSetting(this.cfg, 'mail', 'query', this.cfg.mail?.query);
+        return typeof q === 'string' && q ? q : undefined;
     }
 
-    /** Re-read config from disk, rebuild watchers, and restart. Used by
+    /** Re-read config from disk, rebuild the runner, and restart. Used by
      *  PUT /proactive to apply changes without a full orchestrator restart. */
     reload(): ProactiveConfig {
         this.stop();
         this.cfg = loadConfig();
-        this.setWatchers(buildWatchers(this.cfg, this.deps));
+        // Les connecteurs relisent leurs réglages via `connectorSettings` à la
+        // construction du runner — rien d'autre à reconstruire.
         this.start();
         return this.cfg;
     }
@@ -599,25 +625,9 @@ export class ProactiveEngine {
     }
 }
 
-function buildWatchers(cfg: ProactiveConfig, deps: ProactiveDeps): Watcher[] {
-    const watchers: Watcher[] = [];
-    const on = (brick: string) => isBrickEnabled(cfg, brick);
-    if (cfg.weather && on('weather'))
-        watchers.push(createWeatherWatcher(cfg.weather, deps));
-    if (on('presence')) watchers.push(createPresenceWatcher(deps));
-    if (cfg.calendar && on('calendar'))
-        watchers.push(createCalendarWatcher(cfg.calendar, deps));
-    if (cfg.mail && on('mail-important'))
-        watchers.push(createMailWatcher(cfg.mail, deps));
-    if (cfg.deliveries && on('deliveries'))
-        watchers.push(createDeliveriesWatcher(cfg.deliveries, deps));
-    return watchers;
-}
-
 export function initProactive(deps: ProactiveDeps): ProactiveEngine {
     const cfg = loadConfig();
     const engine = new ProactiveEngine(cfg, deps);
-    engine.setWatchers(buildWatchers(cfg, deps));
     // Moment « retour » : ancré sur la transition de présence, pas sur le tick.
     deps.subscribePresence((prev, next) => {
         if (prev !== 'home' && next === 'home') {

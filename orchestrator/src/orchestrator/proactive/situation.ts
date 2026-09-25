@@ -12,6 +12,7 @@ import Logger from '../../logger';
 import { fetchAgendaEvents } from '../agendaSecretary';
 import type { AgendaEvent } from '../agendaSecretary';
 import { listParcels } from '../deliveries/tracker';
+import type { Fact } from './events';
 
 export interface SituationEvent {
     title: string;
@@ -33,6 +34,8 @@ export interface Situation {
     /** Tri courrier : mails « action requise » en attente (si concierge actif). */
     mailActions: string[];
     musicPlaying: boolean;
+    /** État courant par connecteur (`snapshot()`), une section par source. */
+    sections?: Record<string, Fact[]>;
 }
 
 export interface SituationDeps {
@@ -71,7 +74,10 @@ function readMailActions(): string[] {
     }
 }
 
-export async function buildSituation(deps: SituationDeps): Promise<Situation> {
+export async function buildSituation(
+    deps: SituationDeps,
+    snapshots: Record<string, Fact[]> = {},
+): Promise<Situation> {
     const now = deps.now?.() ?? Date.now();
     const nowDate = new Date(now);
 
@@ -129,6 +135,7 @@ export async function buildSituation(deps: SituationDeps): Promise<Situation> {
             })),
         mailActions: readMailActions(),
         musicPlaying: playback?.playing === true,
+        sections: snapshots,
     };
 }
 
@@ -206,6 +213,14 @@ export function summarizeSituation(s: Situation): string {
     if (s.mailActions.length) {
         lines.push(
             `Mails à traiter : ${s.mailActions.slice(0, 5).join(' ; ')}.`,
+        );
+    }
+    // Une ligne par connecteur ayant un état à montrer — les sources récentes
+    // (et externes) n'ont pas de champ dédié dans `Situation`.
+    for (const [id, facts] of Object.entries(s.sections ?? {})) {
+        if (!facts.length) continue;
+        lines.push(
+            `${id} : ${facts.map((f) => `${f.label} ${f.value}`).join(' ; ')}.`,
         );
     }
     return lines.join('\n');

@@ -1,10 +1,4 @@
-import Logger from '../../../logger';
-import type {
-    CandidateEvent,
-    ProactiveDeps,
-    Watcher,
-    WeatherWatcherConfig,
-} from '../types';
+import type { CandidateEvent, WeatherWatcherConfig } from '../types';
 
 interface CurrentWeather {
     city?: string;
@@ -77,42 +71,4 @@ export async function evaluateWeather(
     }
 
     return events;
-}
-
-export function createWeatherWatcher(
-    cfg: WeatherWatcherConfig,
-    deps: ProactiveDeps,
-): Watcher {
-    let timer: ReturnType<typeof setInterval> | undefined;
-    const tick = async (emit: (c: CandidateEvent) => void): Promise<void> => {
-        try {
-            const events = await evaluateWeather(
-                deps.deviceHandler,
-                cfg,
-                new Date(deps.now ? deps.now() : Date.now()),
-            );
-            Logger.info(
-                `proactive[weather]: poll → ${events.length} candidat(s)` +
-                    (events.length
-                        ? ` (${events.map((e) => e.subject).join(', ')})`
-                        : ''),
-            );
-            for (const e of events) emit(e);
-        } catch (err) {
-            Logger.warn(`proactive[weather]: ${err}`);
-        }
-    };
-    return {
-        id: 'weather',
-        start(emit) {
-            void tick(emit);
-            timer = setInterval(
-                () => void tick(emit),
-                cfg.pollMinutes * 60_000,
-            );
-        },
-        stop() {
-            if (timer) clearInterval(timer);
-        },
-    };
 }

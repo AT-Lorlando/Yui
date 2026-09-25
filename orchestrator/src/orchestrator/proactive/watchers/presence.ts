@@ -1,6 +1,5 @@
-import Logger from '../../../logger';
 import type { PresenceState } from '../../presence';
-import type { CandidateEvent, ProactiveDeps, Watcher } from '../types';
+import type { CandidateEvent } from '../types';
 
 interface Door {
     name?: string;
@@ -46,40 +45,4 @@ export async function evaluatePresenceTransition(
         ];
     }
     return [];
-}
-
-export function createPresenceWatcher(deps: ProactiveDeps): Watcher {
-    return {
-        id: 'presence',
-        start(emit) {
-            deps.subscribePresence((prev, next) => {
-                void (async () => {
-                    try {
-                        Logger.info(
-                            `proactive[presence]: transition ${prev} → ${next}`,
-                        );
-                        const events = await evaluatePresenceTransition(
-                            prev,
-                            next,
-                            deps.deviceHandler,
-                        );
-                        Logger.info(
-                            `proactive[presence]: ${events.length} candidat(s)` +
-                                (events.length
-                                    ? ` (${events
-                                          .map((e) => e.subject)
-                                          .join(', ')})`
-                                    : ''),
-                        );
-                        for (const e of events) emit(e);
-                    } catch (err) {
-                        Logger.warn(`proactive[presence]: ${err}`);
-                    }
-                })();
-            });
-        },
-        stop() {
-            /* abonnement géré par PresenceManager ; rien à arrêter */
-        },
-    };
 }

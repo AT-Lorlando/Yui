@@ -1,10 +1,4 @@
-import Logger from '../../../logger';
-import type {
-    CalendarWatcherConfig,
-    CandidateEvent,
-    ProactiveDeps,
-    Watcher,
-} from '../types';
+import type { CalendarWatcherConfig, CandidateEvent } from '../types';
 
 interface CalEvent {
     title?: string;
@@ -51,42 +45,4 @@ export async function evaluateCalendar(
         }
     }
     return out;
-}
-
-export function createCalendarWatcher(
-    cfg: CalendarWatcherConfig,
-    deps: ProactiveDeps,
-): Watcher {
-    let timer: ReturnType<typeof setInterval> | undefined;
-    const tick = async (emit: (c: CandidateEvent) => void): Promise<void> => {
-        try {
-            const events = await evaluateCalendar(
-                deps.deviceHandler,
-                cfg,
-                new Date(deps.now ? deps.now() : Date.now()),
-            );
-            Logger.info(
-                `proactive[calendar]: poll → ${events.length} candidat(s)` +
-                    (events.length
-                        ? ` (${events.map((e) => e.subject).join(', ')})`
-                        : ''),
-            );
-            for (const e of events) emit(e);
-        } catch (err) {
-            Logger.warn(`proactive[calendar]: ${err}`);
-        }
-    };
-    return {
-        id: 'calendar',
-        start(emit) {
-            void tick(emit);
-            timer = setInterval(
-                () => void tick(emit),
-                cfg.pollMinutes * 60_000,
-            );
-        },
-        stop() {
-            if (timer) clearInterval(timer);
-        },
-    };
 }

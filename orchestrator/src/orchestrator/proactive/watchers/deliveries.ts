@@ -1,10 +1,4 @@
-import Logger from '../../../logger';
-import type {
-    CandidateEvent,
-    DeliveriesWatcherConfig,
-    ProactiveDeps,
-    Watcher,
-} from '../types';
+import type { CandidateEvent, DeliveriesWatcherConfig } from '../types';
 import {
     detectParcels,
     extractEta,
@@ -22,7 +16,7 @@ import {
 import { enrichParcelContents } from '../../deliveries/content';
 
 /**
- * Watcher livraisons — deux étages :
+ * Évaluation des livraisons — deux étages :
  *
  * 1. Mails de suivi (Amazon, Colis Privé, Colissimo, ASOS…) : classés par
  *    sujet/aperçu ; quand un numéro de suivi est extractible du corps, le
@@ -281,41 +275,6 @@ export async function evaluateDeliveries(
     }
 
     return events;
-}
-
-export function createDeliveriesWatcher(
-    cfg: DeliveriesWatcherConfig,
-    deps: ProactiveDeps,
-): Watcher {
-    let timer: ReturnType<typeof setInterval> | undefined;
-    const tick = async (emit: (c: CandidateEvent) => void): Promise<void> => {
-        try {
-            const events = await evaluateDeliveries(
-                deps.deviceHandler,
-                cfg,
-                deps.complete,
-            );
-            Logger.info(
-                `proactive[deliveries]: poll → ${events.length} candidat(s)`,
-            );
-            for (const e of events) emit(e);
-        } catch (err) {
-            Logger.warn(`proactive[deliveries]: ${err}`);
-        }
-    };
-    return {
-        id: 'deliveries',
-        start(emit) {
-            void tick(emit);
-            timer = setInterval(
-                () => void tick(emit),
-                cfg.pollMinutes * 60_000,
-            );
-        },
-        stop() {
-            if (timer) clearInterval(timer);
-        },
-    };
 }
 
 /** Rétro-compat : évaluation sur texte seul (mails sans registre). */
