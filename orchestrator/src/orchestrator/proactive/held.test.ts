@@ -47,8 +47,13 @@ async function run(): Promise<void> {
     // Purge : ttl et âge.
     q2.add(ev('e', { ttlMs: 10 }), NOW + 3);
     assert.deepStrictEqual(
+        q2.peek(NOW + 5).map((e) => e.key),
+        ['c', 'd', 'e'],
+        'e held until ttl',
+    );
+    assert.deepStrictEqual(
         q2.peek(NOW + 100).map((e) => e.key),
-        ['b', 'c', 'd'],
+        ['c', 'd'],
         'ttl dépassé → purgé',
     );
     assert.deepStrictEqual(

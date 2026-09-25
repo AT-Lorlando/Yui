@@ -58,8 +58,6 @@ export class HeldQueue {
 
     add(e: Event, now: number): void {
         this.purge(now);
-        // Les événements avec TTL n'entrent pas en queue — trop éphémères
-        if (e.ttlMs !== undefined) return;
         const k = eventKey(e);
         const idx = this.items.findIndex((x) => eventKey(x) === k);
         if (idx !== -1) {
@@ -67,7 +65,8 @@ export class HeldQueue {
         } else {
             this.items.push(e); // Ajoute nouveau
         }
-        if (this.items.length > this.max) this.items = this.items.slice(1);
+        if (this.items.length > this.max)
+            this.items = this.items.slice(-this.max);
         this.save();
     }
 
