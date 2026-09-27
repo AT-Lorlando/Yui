@@ -474,6 +474,43 @@ export async function fetchAgendaEvents(
     return out;
 }
 
+interface AgendaFetchCache {
+    day: string;
+    at: number;
+    promise: Promise<AgendaEvent[]>;
+}
+
+// Une entrée par fonction `callTool` : deux instances (orchestrateur, tests)
+// ne partagent jamais une lecture. La WeakMap suit la vie de la fonction.
+const fetchCache = new WeakMap<CallTool, AgendaFetchCache>();
+
+/**
+ * `fetchAgendaEvents` partagé entre les lecteurs d'un même tick (connecteur
+ * `calendar`, journal de situation) : la même promesse est rendue tant que
+ * `ttlMs` n'est pas écoulé ET que le jour (borne de départ de la lecture) n'a
+ * pas changé. Une lecture en échec n'est pas gardée — le prochain appel
+ * retente.
+ */
+export function fetchAgendaEventsCached(
+    callTool: CallTool,
+    now: Date,
+    ttlMs = 90_000,
+): Promise<AgendaEvent[]> {
+    const day = ymd(now);
+    const at = now.getTime();
+    const hit = fetchCache.get(callTool);
+    if (hit && hit.day === day && at - hit.at >= 0 && at - hit.at < ttlMs) {
+        return hit.promise;
+    }
+    const promise = fetchAgendaEvents(callTool, now);
+    const entry: AgendaFetchCache = { day, at, promise };
+    fetchCache.set(callTool, entry);
+    promise.catch(() => {
+        if (fetchCache.get(callTool) === entry) fetchCache.delete(callTool);
+    });
+    return promise;
+}
+
 // ── Service caché ──────────────────────────────────────────────────────────────
 
 export interface AgendaSecretaryDeps {

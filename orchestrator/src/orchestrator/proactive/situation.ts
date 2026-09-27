@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { dataPath } from '@yui/shared';
 import Logger from '../../logger';
-import { fetchAgendaEvents } from '../agendaSecretary';
+import { fetchAgendaEventsCached } from '../agendaSecretary';
 import type { AgendaEvent } from '../agendaSecretary';
 import { listParcels } from '../deliveries/tracker';
 import type { Fact } from './events';
@@ -84,8 +84,9 @@ export async function buildSituation(
     const [lights, doors, events, playback] = await Promise.all([
         safe(() => deps.callTool('list_lights') as Promise<any[]>, []),
         safe(() => deps.callTool('list_doors') as Promise<any[]>, []),
+        // Même lecture que le connecteur `calendar` dans le même tick.
         safe(
-            () => fetchAgendaEvents(deps.callTool, nowDate),
+            () => fetchAgendaEventsCached(deps.callTool, nowDate),
             [] as AgendaEvent[],
         ),
         safe(() => deps.callTool('get_playback_state') as Promise<any>, null),
@@ -196,21 +197,25 @@ export function summarizeSituation(s: Situation): string {
         lines.push(`Porte ${s.doorLocked ? 'verrouillée' : 'déverrouillée'}.`);
     }
     if (s.musicPlaying) lines.push('Musique en cours.');
-    if (s.agenda.length) {
+    // Les champs historiques ne sont écrits que si la section du connecteur
+    // correspondant ne porte pas déjà la même information (sinon le juge la
+    // lirait deux fois).
+    const covered = (id: string) => (s.sections?.[id]?.length ?? 0) > 0;
+    if (s.agenda.length && !covered('calendar')) {
         lines.push(
             `Agenda 24h : ${s.agenda
                 .map((e) => `${e.title}${e.start ? ` à ${e.start}` : ''}`)
                 .join(' ; ')}.`,
         );
     }
-    if (s.parcels.length) {
+    if (s.parcels.length && !covered('deliveries')) {
         lines.push(
             `Colis : ${s.parcels
                 .map((p) => `${p.label} (${p.status})`)
                 .join(' ; ')}.`,
         );
     }
-    if (s.mailActions.length) {
+    if (s.mailActions.length && !covered('mail')) {
         lines.push(
             `Mails à traiter : ${s.mailActions.slice(0, 5).join(' ; ')}.`,
         );

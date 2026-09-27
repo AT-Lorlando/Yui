@@ -14,7 +14,7 @@ import { loadAutomations } from '../automations';
 import { loadConfig, DEFAULT_PHRASE_PROMPT } from './config';
 import { ConnectorRunner } from './runner';
 import { buildConnectors } from './connectors';
-import type { ConnectorDef } from './connector';
+import type { ConnectorContext, ConnectorDef } from './connector';
 import {
     isBrickEnabled,
     bricksView,
@@ -70,6 +70,11 @@ export class ProactiveEngine {
     private situation: Situation | null;
     private momentState: MomentState = { firedDepartures: [] };
     private lastDeltas: string[] = [];
+    /** Une seule fermeture : le cache de lecture d'agenda est indexé par
+     *  identité de fonction, le journal de situation et les connecteurs
+     *  doivent donc passer par la même. */
+    private readonly callTool: ConnectorContext['callTool'] = (t, a) =>
+        this.deps.deviceHandler(t, a);
 
     constructor(
         private cfg: ProactiveConfig,
@@ -287,7 +292,7 @@ export class ProactiveEngine {
         try {
             const next = await buildSituation(
                 {
-                    callTool: (t, a) => this.deps.deviceHandler(t, a),
+                    callTool: this.callTool,
                     presenceState: () => this.deps.presenceState(),
                     now: this.now,
                 },
@@ -591,7 +596,7 @@ export class ProactiveEngine {
             })),
             isEnabled: (id) => isBrickEnabled(this.cfg, id),
             settings: (def) => this.connectorSettings(def),
-            callTool: (t, a) => this.deps.deviceHandler(t, a),
+            callTool: this.callTool,
             presence: () => this.deps.presenceState(),
             ingest: (e) => this.ingest(e),
             now: this.now,
