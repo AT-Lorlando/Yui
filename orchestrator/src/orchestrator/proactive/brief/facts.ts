@@ -76,7 +76,7 @@ function parcelFacts(s: Situation): BriefFact[] {
         return {
             subject: `situation:parcel-${p.label}-${p.status}`,
             text,
-            importance: 'info' as Importance,
+            importance: 'utile' as Importance,
             at: s.at,
             nature: 'info' as SaidNature,
             fingerprint: fingerprintOf(text),
@@ -99,7 +99,9 @@ function mailFacts(s: Situation): BriefFact[] {
 }
 
 /** Faits pur, sans I/O. `momentFacts` n'est PAS un fait : il est passé au
- *  prompt à part (contexte du détecteur de moment). */
+ *  prompt à part (contexte du détecteur de moment). `now` n'est pas encore
+ *  utilisé ici — gardé dans la signature pour le composeur qui l'appelle
+ *  (filtrage par date à venir, ex. fraîcheur d'un fait de situation). */
 export function collectFacts(input: BriefInputs, _now: number): BriefFact[] {
     const out: BriefFact[] = input.held.map(heldToFact);
 

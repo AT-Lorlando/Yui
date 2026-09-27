@@ -64,6 +64,17 @@ async function run(): Promise<void> {
             .find((f) => f.subject.startsWith('situation:agenda'))!
             .text.includes('Kinéis'),
     );
+    // Importance uniforme des faits de situation : utile (quel que soit le type).
+    assert.ok(
+        facts
+            .filter((f) => f.subject.startsWith('situation:'))
+            .every((f) => f.importance === 'utile'),
+        'faits de situation : importance utile',
+    );
+    // Scope par défaut (aucun scope précisé) : les trois catégories.
+    assert.ok(subjects.some((s) => s.startsWith('situation:agenda')));
+    assert.ok(subjects.some((s) => s.startsWith('situation:parcel')));
+    assert.ok(subjects.some((s) => s.startsWith('situation:mail')));
     // Scope pending : pas d'agenda.
     const pending = collectFacts(
         {
@@ -77,6 +88,20 @@ async function run(): Promise<void> {
     );
     assert.ok(!pending.some((f) => f.subject.startsWith('situation:agenda')));
     assert.ok(pending.some((f) => f.subject.startsWith('situation:mail')));
+    // Scope today : agenda + colis, pas de mails.
+    const today = collectFacts(
+        {
+            momentKind: 'on-demand',
+            momentFacts: '',
+            held: [],
+            situation,
+            scope: 'today',
+        },
+        T,
+    );
+    assert.ok(today.some((f) => f.subject.startsWith('situation:agenda')));
+    assert.ok(today.some((f) => f.subject.startsWith('situation:parcel')));
+    assert.ok(!today.some((f) => f.subject.startsWith('situation:mail')));
 
     // Sélection : mémoire, tri, plafond.
     const said = { isSaid: (s: string) => s === 'koya:disk' };
