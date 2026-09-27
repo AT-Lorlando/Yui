@@ -74,6 +74,12 @@ export class ProactiveEngine {
     private situation: Situation | null;
     private momentState: MomentState = { firedDepartures: [] };
     private lastDeltas: string[] = [];
+    /** Sérialise les moments : le tick d'intervalle et la transition de
+     *  présence peuvent appeler `handleMoment` en même temps, or le dédup
+     *  2 h et la sélection des faits doivent voir l'un après l'autre — sinon
+     *  les deux passes retiennent les mêmes faits « dit » avant qu'aucune
+     *  n'ait eu le temps de les marquer, et le point sort deux fois. */
+    private momentChain: Promise<void> = Promise.resolve();
     /** Une seule fermeture : le cache de lecture d'agenda est indexé par
      *  identité de fonction, le journal de situation et les connecteurs
      *  doivent donc passer par la même. */
@@ -362,8 +368,21 @@ export class ProactiveEngine {
         }
     }
 
-    /** Moment de vie détecté → le composeur fait le point (ou se tait, sans LLM). */
-    async handleMoment(kind: MomentKind, facts: string): Promise<void> {
+    /** Moment de vie détecté → le composeur fait le point (ou se tait, sans LLM).
+     *  Chaînée sur `momentChain` : deux appels concurrents s'exécutent l'un
+     *  après l'autre, jamais en parallèle. */
+    handleMoment(kind: MomentKind, facts: string): Promise<void> {
+        const run = this.momentChain.then(() =>
+            this.handleMomentInner(kind, facts),
+        );
+        this.momentChain = run.catch(() => {});
+        return run;
+    }
+
+    private async handleMomentInner(
+        kind: MomentKind,
+        facts: string,
+    ): Promise<void> {
         const nowMs = this.now();
         // Un moment par fenêtre de 2 h max, quoi qu'il arrive — enregistré
         // avant de composer : un point qui échoue à l'émission ne doit pas

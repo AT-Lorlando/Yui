@@ -148,7 +148,12 @@ export class BriefComposer {
     constructor(private deps: ComposerDeps) {}
 
     private select(input: BriefInputs, now: number): BriefFact[] {
-        return selectFacts(collectFacts(input, now), this.deps.said, now);
+        return selectFacts(
+            collectFacts(input, now),
+            this.deps.said,
+            now,
+            input.scope,
+        );
     }
 
     preview(input: BriefInputs): BriefFact[] {

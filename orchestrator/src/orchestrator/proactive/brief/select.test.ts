@@ -132,6 +132,45 @@ async function run(): Promise<void> {
     assert.strictEqual(selected[0]!.subject, 'koya:k11', 'urgent en tête');
     assert.ok(selected[1]!.at <= selected[2]!.at, 'puis plus ancien d’abord');
 
+    // Scope « today » : un fait agenda-today déjà dit ressort quand même
+    // (secretary_brief scope:'today' promet l'agenda du jour, pas seulement
+    // ce qui n'a pas encore été dit) ; les autres natures restent filtrées ;
+    // et le scope since-last, lui, garde le filtre pour agenda-today aussi.
+    {
+        const agendaFact = collectFacts(
+            {
+                momentKind: 'on-demand',
+                momentFacts: '',
+                held: [],
+                situation,
+                scope: 'today',
+            },
+            T,
+        ).find((f) => f.nature === 'agenda-today')!;
+        const saidAll = {
+            isSaid: (subject: string, fingerprint: string) =>
+                subject === agendaFact.subject &&
+                fingerprint === agendaFact.fingerprint,
+        };
+        const forToday = selectFacts([agendaFact], saidAll, T, 'today');
+        assert.strictEqual(
+            forToday.length,
+            1,
+            'agenda-today déjà dit reste sélectionné pour le scope today',
+        );
+        const forSinceLast = selectFacts(
+            [agendaFact],
+            saidAll,
+            T,
+            'since-last',
+        );
+        assert.strictEqual(
+            forSinceLast.length,
+            0,
+            'agenda-today déjà dit reste filtré pour un autre scope',
+        );
+    }
+
     // Le moment impose-t-il de parler ?
     assert.strictEqual(
         momentRequiresSpeech('moment-bedtime', situation),

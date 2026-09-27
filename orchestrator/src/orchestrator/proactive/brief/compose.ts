@@ -98,18 +98,16 @@ function capitalize(word: string): string {
 
 /** Lexique des jetons (chiffres, noms propres) tolérés dans un brief composé :
  *  ceux des faits + d'éventuelles chaînes supplémentaires (ex. le texte du
- *  détecteur de moment), plus jours/mois français et quelques mots fixes. */
+ *  détecteur de moment), plus jours/mois français et quelques mots fixes.
+ *  Bâti via `lexiconTokens` (pas `extractTokens`) : un fait est un libellé,
+ *  pas une phrase — son premier mot (« Koya », « Bastien »…) est un jeton
+ *  comme les autres, l'exemption de début de phrase ne s'applique qu'à la
+ *  sortie du LLM vérifiée plus bas. */
 export function allowedTokens(
     facts: BriefFact[],
     extra: string[] = [],
 ): Set<string> {
-    const tokens = new Set<string>();
-    for (const fact of facts) {
-        for (const t of extractTokens(fact.text)) tokens.add(t);
-    }
-    for (const e of extra) {
-        for (const t of extractTokens(e)) tokens.add(t);
-    }
+    const tokens = lexiconTokens([...facts.map((f) => f.text), ...extra]);
     for (const day of FR_DAYS) {
         tokens.add(day);
         tokens.add(capitalize(day));

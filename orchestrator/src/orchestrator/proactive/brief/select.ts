@@ -19,9 +19,18 @@ export function selectFacts(
     candidates: BriefFact[],
     said: Pick<SaidMemory, 'isSaid'>,
     now: number,
+    scope?: BriefInputs['scope'],
 ): BriefFact[] {
     return candidates
-        .filter((f) => !said.isSaid(f.subject, f.fingerprint, now))
+        .filter(
+            (f) =>
+                // Le scope « today » promet l'agenda du jour : un fait
+                // agenda-today déjà dit (ex. par le brief du réveil) doit
+                // quand même ressortir ici — seule cette nature échappe au
+                // filtre « dit », et seulement pour ce scope.
+                (scope === 'today' && f.nature === 'agenda-today') ||
+                !said.isSaid(f.subject, f.fingerprint, now),
+        )
         .sort(
             (a, b) =>
                 IMPORTANCE_RANK[b.importance] - IMPORTANCE_RANK[a.importance] ||

@@ -243,6 +243,62 @@ async function run(): Promise<void> {
     assert.strictEqual(momentEngine.heldCount(), 0, 'dit → retiré');
     assert.strictEqual(momentEngine.getJournal()[0]!.kind, 'brief');
 
+    // ── Sérialisation des moments : le tick d'intervalle et la transition de
+    // présence peuvent appeler handleMoment en concurrence — le second appel
+    // ne doit démarrer sa propre sélection/composition qu'une fois le
+    // premier entièrement réglé (sinon les deux liraient les mêmes retenus
+    // avant que l'un ne les marque dits → point parlé deux fois).
+    {
+        const order: string[] = [];
+        let releaseA: () => void = () => {};
+        const gateA = new Promise<void>((resolve) => {
+            releaseA = resolve;
+        });
+        let calls = 0;
+        const orderEngine = new ProactiveEngine(
+            cfg(),
+            {
+                ...deps,
+                complete: async () => {
+                    calls++;
+                    if (calls === 1) {
+                        order.push('start-A');
+                        await gateA;
+                        order.push('end-A');
+                        return 'Pendant ton absence, le resto est passé à 130 % du budget.';
+                    }
+                    order.push('start-B');
+                    order.push('end-B');
+                    return 'Avant de partir, rien à signaler.';
+                },
+            },
+            {
+                dedup: new Dedup(),
+                journal: new ProactiveJournal(tmpFile('j4.json')),
+                held: new HeldQueue(),
+                said: new SaidMemory(),
+            },
+        );
+        await orderEngine.ingest({
+            source: 'genkin',
+            key: 'order-test',
+            kind: 'digest',
+            importance: 'info',
+            subject: 'Test ordre des moments',
+            facts: ['fait'],
+            at: NOW,
+        });
+        const pA = orderEngine.handleMoment('moment-return', 'retour');
+        const pB = orderEngine.handleMoment('moment-departure', 'départ');
+        releaseA();
+        await Promise.all([pA, pB]);
+        assert.deepStrictEqual(
+            order,
+            ['start-A', 'end-A', 'start-B', 'end-B'],
+            'le second moment ne démarre qu’après la fin complète du premier',
+        );
+    }
+
     console.log('All engine-judge tests passed');
 }
 

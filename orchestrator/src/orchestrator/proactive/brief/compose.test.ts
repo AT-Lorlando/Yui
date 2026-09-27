@@ -111,6 +111,31 @@ async function run(): Promise<void> {
             noPunct.text.endsWith('…'),
     );
 
+    // Premier mot d'un fait (sujet externe) : pas une phrase, doit rester
+    // toléré même si la sortie du LLM le place en tête (checkComposed garde
+    // l'exemption de début de phrase côté sortie, mais le lexique des faits
+    // ne doit pas oublier le mot qui a construit l'exemption).
+    const externalFacts = [
+        ...facts,
+        f('c', 'Koya signale une fuite — cuisine'),
+    ];
+    assert.strictEqual(
+        checkComposed(
+            'Pendant ton absence, Koya a signalé une fuite.',
+            externalFacts,
+        ).ok,
+        true,
+        'premier mot d’un fait externe toléré',
+    );
+    assert.strictEqual(
+        checkComposed('Bonjour. Sache que Bastien a répondu.', [
+            ...facts,
+            f('d', 'Bastien a répondu'),
+        ]).ok,
+        true,
+        'premier mot d’un fait toléré même après un point',
+    );
+
     // lexiconTokens : des libellés, pas des phrases — le 1er mot compte aussi.
     {
         const lex = lexiconTokens(['Bastien dîner', 'Point Acme', '10:00']);
