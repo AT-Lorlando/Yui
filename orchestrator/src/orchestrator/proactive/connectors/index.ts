@@ -5,6 +5,7 @@ import { presenceConnector } from './presence';
 import { calendarConnector } from './calendar';
 import { mailConnector } from './mail';
 import { deliveriesConnector } from './deliveries';
+import { yojiConnector } from './yoji';
 
 export function buildConnectors(services: ConnectorServices): ConnectorDef[] {
     return [
@@ -13,5 +14,6 @@ export function buildConnectors(services: ConnectorServices): ConnectorDef[] {
         calendarConnector,
         mailConnector({ concierge: services.concierge }),
         deliveriesConnector(services.complete),
+        yojiConnector,
     ];
 }

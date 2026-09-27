@@ -29,18 +29,26 @@ export interface Event {
     cooldownMs?: number;
     /** Message pré-écrit → court-circuite le LLM (pipeline legacy). Interne. */
     template?: string;
+    /** Intention « à faire » : devient un post-it Yoji à l'ingestion (une
+     *  fois par `source:key`, quota quotidien). */
+    todo?: { title: string; description?: string };
 }
 
 export interface Fact {
     label: string;
     value: string;
     importance?: Importance;
+    /** Identité stable pour la mémoire « dit » (jamais rendue au LLM). */
+    key?: string;
 }
 
 export const SUBJECT_MAX = 200;
 export const FACTS_MAX_LINES = 10;
 export const FACT_MAX_CHARS = 300;
 export const BATCH_MAX = 50;
+/** Bornes du post-it (celles de `create_postit` côté Yoji). */
+export const TODO_TITLE_MAX = 120;
+export const TODO_DESCRIPTION_MAX = 500;
 const KINDS: EventKind[] = ['alert', 'info', 'request', 'digest'];
 const IMPORTANCES: Importance[] = ['info', 'utile', 'urgent', 'critique'];
 
@@ -110,7 +118,35 @@ export function parseEvent(raw: unknown, opts: { now?: number } = {}): Event {
     if (typeof r.cooldownMs === 'number' && r.cooldownMs >= 0)
         e.cooldownMs = r.cooldownMs;
     if (str(r.template)) e.template = str(r.template);
+    if (r.todo !== undefined) e.todo = parseTodo(r.todo);
     return e;
+}
+
+/** Le titre tient sur une ligne (c'est le libellé du post-it) ; la
+ *  description peut en avoir plusieurs, seuls ses bords sont nettoyés. */
+function parseTodo(raw: unknown): NonNullable<Event['todo']> {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new Error('todo : { title, description? } attendu');
+    }
+    const t = raw as Record<string, unknown>;
+    const title = oneLine(t.title);
+    if (!title || title.length > TODO_TITLE_MAX) {
+        throw new Error(`todo.title : 1 à ${TODO_TITLE_MAX} caractères`);
+    }
+    const todo: NonNullable<Event['todo']> = { title };
+    if (t.description !== undefined) {
+        if (typeof t.description !== 'string') {
+            throw new Error('todo.description : chaîne attendue');
+        }
+        const description = str(t.description);
+        if (description.length > TODO_DESCRIPTION_MAX) {
+            throw new Error(
+                `todo.description : ${TODO_DESCRIPTION_MAX} caractères maximum`,
+            );
+        }
+        if (description) todo.description = description;
+    }
+    return todo;
 }
 
 /** Tableau (ou objet seul) — tout ou rien : une erreur et rien n'est accepté. */

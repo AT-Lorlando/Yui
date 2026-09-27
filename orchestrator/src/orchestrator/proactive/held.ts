@@ -107,6 +107,11 @@ export class HeldQueue {
         return removed;
     }
 
+    /** `key` = `source:key` (cf. `eventKey`). */
+    has(key: string): boolean {
+        return this.items.some((e) => eventKey(e) === key);
+    }
+
     size(): number {
         return this.items.length;
     }

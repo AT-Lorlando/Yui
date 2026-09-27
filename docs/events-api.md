@@ -21,6 +21,7 @@ point, ou se taire.
 | `ttlMs` | number | non | Périmé après `at + ttlMs` (une alerte résolue ne sert plus) |
 | `link` | URL http(s) | non | Lien profond |
 | `action` | `{ id, tag }` | non | Action whitelistée de proactive.json |
+| `todo` | `{ title, description? }` | non | Intention « à faire » : un post-it Yoji est créé (titre 1–120 caractères sur une ligne, description ≤ 500) — une seule fois par `source`+`key`, `postitsPerDay` par jour (5 par défaut), tags `yui` + `source`. Le point qui reprend l'événement dit que le post-it a été mis |
 
 - **Réponse** : `202 { accepted, held, deduplicated, expired, ignored }` — `ignored` = source coupée sur /proactive.
 - **Erreurs** :

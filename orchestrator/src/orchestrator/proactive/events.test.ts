@@ -8,6 +8,8 @@ import {
     factsFingerprint,
     SUBJECT_MAX,
     BATCH_MAX,
+    TODO_TITLE_MAX,
+    TODO_DESCRIPTION_MAX,
 } from './events';
 
 const NOW = new Date('2026-09-25T10:00:00').getTime();
@@ -153,6 +155,70 @@ async function run(): Promise<void> {
             link: 'ftp://x',
         },
         /link/,
+    );
+
+    // Intention todo : titre sur une ligne, description multi-lignes bordée.
+    const base = {
+        source: 's',
+        key: 'k',
+        kind: 'request',
+        importance: 'utile',
+        subject: 's',
+    };
+    assert.strictEqual(
+        parseEvent(base, { now: NOW }).todo,
+        undefined,
+        'absent → pas de todo',
+    );
+    const withTodo = parseEvent(
+        {
+            ...base,
+            todo: {
+                title: '  Répondre :\n Kinéis ',
+                description: ' De X\n— gmail:m1 ',
+            },
+        },
+        { now: NOW },
+    );
+    assert.deepStrictEqual(withTodo.todo, {
+        title: 'Répondre : Kinéis',
+        description: 'De X\n— gmail:m1',
+    });
+    assert.deepStrictEqual(
+        parseEvent(
+            { ...base, todo: { title: 'T', description: '  ' } },
+            {
+                now: NOW,
+            },
+        ).todo,
+        { title: 'T' },
+        'description vide → omise',
+    );
+    assert.strictEqual(
+        parseEvent(
+            { ...base, todo: { title: 'x'.repeat(TODO_TITLE_MAX) } },
+            { now: NOW },
+        ).todo!.title.length,
+        TODO_TITLE_MAX,
+    );
+    bad({ ...base, todo: 'x' }, /todo/);
+    bad({ ...base, todo: ['x'] }, /todo/);
+    bad({ ...base, todo: {} }, /todo\.title/);
+    bad({ ...base, todo: { title: '   ' } }, /todo\.title/);
+    bad(
+        { ...base, todo: { title: 'x'.repeat(TODO_TITLE_MAX + 1) } },
+        /todo\.title/,
+    );
+    bad({ ...base, todo: { title: 'T', description: 3 } }, /todo\.description/);
+    bad(
+        {
+            ...base,
+            todo: {
+                title: 'T',
+                description: 'x'.repeat(TODO_DESCRIPTION_MAX + 1),
+            },
+        },
+        /todo\.description/,
     );
 
     // Péremption.

@@ -1,8 +1,17 @@
 // Collecte pure des faits d'un point : retenus (file `held`) + situation
-// courante + faits externes déjà mis en forme (`extra`, passthrough — les
-// connecteurs les fournissent tels quels, aucune convention de mapping ici).
+// courante + faits externes déjà mis en forme (`extra`, passthrough).
+//
+// Deux conventions relient les connecteurs au brief sans qu'ils dépendent
+// de lui :
+// - un retenu peut porter en `facts[0]` un marqueur `nature:<SaidNature>`
+//   (durée « dit » choisie par la source, ex. un changement d'agenda
+//   lointain se dit une fois pour toutes) — lu ici, jamais montré au LLM ;
+// - certaines sections de situation (`sections`, par id de connecteur)
+//   deviennent des faits de brief par leur label : `yoji` / « Post-it
+//   ancien » → rappel `postit-stale` ; `calendar` / « Demain tôt » →
+//   `agenda-today`. Les autres labels restent de la situation.
 import * as crypto from 'crypto';
-import type { Event, EventKind } from '../events';
+import type { Event, EventKind, Fact } from '../events';
 import { eventKey, factsFingerprint } from '../events';
 import type { Situation } from '../situation';
 import type { Importance } from '../types';
@@ -37,21 +46,60 @@ const KIND_TO_NATURE: Record<EventKind, SaidNature> = {
     info: 'info',
 };
 
+const NATURE_MARKER =
+    /^nature:(alert|request|info|digest|agenda-far|agenda-today|postit-stale)$/;
+
 function fingerprintOf(text: string): string {
     return crypto.createHash('sha1').update(text).digest('hex').slice(0, 16);
 }
 
+/** L'empreinte garde le marqueur : c'est l'événement tel qu'il a été
+ *  ingéré qui compte pour la mémoire « dit ». */
 function heldToFact(e: Event): BriefFact {
     const key = eventKey(e);
+    const marker = NATURE_MARKER.exec(e.facts[0] ?? '');
+    const facts = marker ? e.facts.slice(1) : e.facts;
     return {
         subject: key,
-        text: e.subject + (e.facts.length ? ' — ' + e.facts.join(' ; ') : ''),
+        text: e.subject + (facts.length ? ' — ' + facts.join(' ; ') : ''),
         importance: e.importance,
         at: e.at,
-        nature: KIND_TO_NATURE[e.kind],
+        nature: marker ? (marker[1] as SaidNature) : KIND_TO_NATURE[e.kind],
         fingerprint: factsFingerprint(e),
         heldKey: key,
     };
+}
+
+function sectionFacts(s: Situation, id: string, label: string): Fact[] {
+    return (s.sections?.[id] ?? []).filter((f) => f.label === label);
+}
+
+function stalePostitFacts(s: Situation): BriefFact[] {
+    return sectionFacts(s, 'yoji', 'Post-it ancien').map((f) => {
+        const text = `Post-it qui traîne : ${f.value}`;
+        return {
+            subject: `postit:${f.key ?? f.value}-stale`,
+            text,
+            importance: 'utile' as Importance,
+            at: s.at,
+            nature: 'postit-stale' as SaidNature,
+            fingerprint: fingerprintOf(text),
+        };
+    });
+}
+
+function earlyTomorrowFacts(s: Situation): BriefFact[] {
+    return sectionFacts(s, 'calendar', 'Demain tôt').map((f) => {
+        const text = `Demain tôt : ${f.value}`;
+        return {
+            subject: `situation:agenda-early-${f.value}`,
+            text,
+            importance: 'utile' as Importance,
+            at: s.at,
+            nature: 'agenda-today' as SaidNature,
+            fingerprint: fingerprintOf(text),
+        };
+    });
 }
 
 function agendaFacts(s: Situation): BriefFact[] {
@@ -106,11 +154,18 @@ export function collectFacts(input: BriefInputs, _now: number): BriefFact[] {
     const out: BriefFact[] = input.held.map(heldToFact);
 
     if (input.situation) {
-        const includeAgenda = input.scope !== 'pending';
-        const includeMail = input.scope !== 'today';
+        // « today » = ce qui arrive ; « pending » = ce qui attend Jérémy.
+        const includeToday = input.scope !== 'pending';
+        const includePending = input.scope !== 'today';
         out.push(...parcelFacts(input.situation));
-        if (includeAgenda) out.push(...agendaFacts(input.situation));
-        if (includeMail) out.push(...mailFacts(input.situation));
+        if (includeToday) {
+            out.push(...agendaFacts(input.situation));
+            out.push(...earlyTomorrowFacts(input.situation));
+        }
+        if (includePending) {
+            out.push(...mailFacts(input.situation));
+            out.push(...stalePostitFacts(input.situation));
+        }
     }
 
     if (input.extra) out.push(...input.extra);

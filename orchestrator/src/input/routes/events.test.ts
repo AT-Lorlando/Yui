@@ -90,6 +90,36 @@ async function run(): Promise<void> {
     );
     assert.strictEqual(seen.length, 1, 'tout ou rien : rien d’ingéré');
 
+    // Intention todo : acceptée telle quelle, refusée si mal formée.
+    const withTodo = await post({
+        source: 'koya',
+        key: 'todo-ok',
+        kind: 'request',
+        importance: 'utile',
+        subject: 'Renouveler le certificat',
+        todo: { title: 'Renouveler le certificat', description: 'koya:tls' },
+    });
+    assert.strictEqual(withTodo.status, 202);
+    assert.strictEqual(seen.length, 2);
+    assert.deepStrictEqual((seen[1] as { todo?: unknown }).todo, {
+        title: 'Renouveler le certificat',
+        description: 'koya:tls',
+    });
+    const badTodo = await post({
+        source: 'koya',
+        key: 'todo-ko',
+        kind: 'request',
+        importance: 'utile',
+        subject: 'x',
+        todo: { title: '' },
+    });
+    assert.strictEqual(badTodo.status, 400);
+    const badTodoBody = (await badTodo.json()) as {
+        errors: { message: string }[];
+    };
+    assert.ok(/todo\.title/.test(badTodoBody.errors[0]!.message));
+    assert.strictEqual(seen.length, 2, 'todo invalide : rien d’ingéré');
+
     assert.strictEqual((await post({}, 'Bearer nope')).status, 401);
 
     // 413 : corps > 32 Ko, refusé AVANT toute validation — même si les champs
@@ -104,7 +134,7 @@ async function run(): Promise<void> {
         facts: Array.from({ length: 10 }, () => 'x'.repeat(4096)),
     });
     assert.strictEqual(big.status, 413);
-    assert.strictEqual(seen.length, 1, '413 : rien d’ingéré non plus');
+    assert.strictEqual(seen.length, 2, '413 : rien d’ingéré non plus');
 
     main.close();
 

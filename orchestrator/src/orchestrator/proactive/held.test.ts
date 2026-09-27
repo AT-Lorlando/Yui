@@ -103,6 +103,9 @@ async function run(): Promise<void> {
     assert.strictEqual(q5.remove(['koya:zzz', 'koya:a']), 0, 'inconnu → 0');
     assert.strictEqual(q5.remove([]), 0);
     assert.strictEqual(q5.size(), 2);
+    assert.strictEqual(q5.has('koya:b'), true);
+    assert.strictEqual(q5.has('astronix:c'), true);
+    assert.strictEqual(q5.has('koya:a'), false, 'retiré → absent');
     const q6 = new HeldQueue(rfile);
     assert.deepStrictEqual(
         q6.peek(NOW).map((e) => e.key),

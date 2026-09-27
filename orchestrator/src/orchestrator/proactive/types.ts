@@ -93,6 +93,8 @@ export interface ProactiveConfig {
     automationGuardWindowMin: number;
     /** Budget d'interruptions quotidien du juge (speak=1, notify=0.5). */
     budgetPerDay?: number;
+    /** Post-its Yoji créés par jour à partir des intentions `todo` (défaut 5). */
+    postitsPerDay?: number;
     bricks?: BrickOverrides;
     concierge?: ConciergeConfig;
     whitelist: WhitelistAction[];

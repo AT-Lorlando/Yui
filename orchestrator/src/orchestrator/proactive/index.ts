@@ -6,8 +6,9 @@ import { HeldQueue } from './held';
 import { RateWindow } from './rate';
 import { Ingest } from './ingest';
 import type { IngestOutcome } from './ingest';
-import { factsFingerprint, fromCandidate } from './events';
+import { eventKey, factsFingerprint, fromCandidate } from './events';
 import type { Event } from './events';
+import { PostitRegistry, createPostitFor } from './postits';
 import { isActionBlocked } from './guard';
 import { loadHistory } from '../history';
 import { loadAutomations } from '../automations';
@@ -47,6 +48,8 @@ const DEDUP_FILE = dataPath('proactive-dedup.json');
 /** Cadence de reconstruction du journal de situation (lectures store, pas cher). */
 const SITUATION_POLL_MS = 2 * 60_000;
 const DEFAULT_BUDGET_PER_DAY = 3;
+/** Post-its Yoji que les intentions `todo` peuvent créer par jour. */
+const DEFAULT_POSTITS_PER_DAY = 5;
 /** Plafond par source et par heure — barrière anti-flood sans LLM (spec §5.3.4). */
 const DEFAULT_MAX_PER_HOUR = 6;
 /** Sections historiques de proactive.json fusionnées dans les réglages du
@@ -66,6 +69,7 @@ export class ProactiveEngine {
     readonly concierge: MailConcierge;
     private judge: Judge;
     private said: SaidMemory;
+    private postits: PostitRegistry;
     private composer: BriefComposer;
     private situation: Situation | null;
     private momentState: MomentState = { firedDepartures: [] };
@@ -84,6 +88,7 @@ export class ProactiveEngine {
             journal?: ProactiveJournal;
             held?: HeldQueue;
             said?: SaidMemory;
+            postits?: PostitRegistry;
         } = {},
     ) {
         this.now = deps.now ?? (() => Date.now());
@@ -91,6 +96,8 @@ export class ProactiveEngine {
         this.journal = opts.journal ?? new ProactiveJournal();
         this.held = opts.held ?? new HeldQueue(HeldQueue.defaultFile());
         this.said = opts.said ?? new SaidMemory(SaidMemory.defaultFile());
+        this.postits =
+            opts.postits ?? new PostitRegistry(PostitRegistry.defaultFile());
         this.situation = loadSituation();
         this.ingestGate = new Ingest({
             dedup: this.dedup,
@@ -309,6 +316,9 @@ export class ProactiveEngine {
             this.momentState = state;
             this.situation = next;
             saveSituation(next);
+            // Avant les moments : un sujet refermé ici peut ressortir dans
+            // le point qui suit.
+            await this.closeDonePostits();
             for (const m of moments) {
                 await this.handleMoment(m.kind, m.facts);
             }
@@ -316,6 +326,39 @@ export class ProactiveEngine {
             Logger.warn(`proactive: situation tick — ${err}`);
         } finally {
             this.tickBusy = false;
+        }
+    }
+
+    /** Un post-it créé par Yui qui a disparu de Yoji est fait (ou jeté) :
+     *  son origine sort de la mémoire « dit », ce qui la laisse ressortir si
+     *  la source la réémet. Best-effort : Yoji injoignable ou réponse qui
+     *  n'est pas une liste → rien n'est conclu (sinon une panne refermerait
+     *  tout d'un coup). */
+    private async closeDonePostits(): Promise<void> {
+        const open = this.postits.open();
+        if (!open.length) return;
+        let raw: unknown;
+        try {
+            raw = await this.callTool('list_postits');
+        } catch {
+            return;
+        }
+        if (typeof raw === 'string') {
+            try {
+                raw = JSON.parse(raw);
+            } catch {
+                return;
+            }
+        }
+        if (!Array.isArray(raw)) return;
+        const alive = new Set(raw.map((p) => String(p?.id ?? '')));
+        for (const { origin, postitId } of open) {
+            if (alive.has(postitId)) continue;
+            this.said.close(origin);
+            this.postits.markClosed(origin);
+            Logger.info(
+                `proactive: post-it ${postitId} disparu de Yoji → sujet ${origin} refermé`,
+            );
         }
     }
 
@@ -406,13 +449,41 @@ export class ProactiveEngine {
         }
     }
 
-    /** Porte d'entrée unique (polls, subscribe, POST /events). */
-    ingest(e: Event): Promise<IngestOutcome> {
-        return this.ingestGate.ingest(e);
+    /** Porte d'entrée unique (polls, subscribe, POST /events). Une intention
+     *  `todo` ne compte que si l'événement a passé les filtres : `accepted`
+     *  couvre aussi le retenu par le juge (c'est `consume` qui le met en
+     *  file), `held` le retenu par la porte. Le post-it est créé APRÈS la
+     *  mise en file, donc l'événement retenu est réécrit en place pour
+     *  porter la ligne qui le dit. */
+    async ingest(e: Event): Promise<IngestOutcome> {
+        const outcome = await this.ingestGate.ingest(e);
+        if ((outcome === 'accepted' || outcome === 'held') && e.todo) {
+            const r = await createPostitFor(e, {
+                registry: this.postits,
+                callTool: this.callTool,
+                perDay: this.cfg.postitsPerDay ?? DEFAULT_POSTITS_PER_DAY,
+                now: this.now,
+                log: Logger,
+            });
+            if (r.created && this.held.has(eventKey(e))) {
+                this.held.add(e, this.now());
+            }
+        }
+        return outcome;
     }
 
-    ingestAll(events: Event[]): Promise<Record<IngestOutcome, number>> {
-        return this.ingestGate.ingestAll(events);
+    /** Par `ingest` du moteur, pas de la porte : un lot de /events doit
+     *  passer par le même crochet qu'un événement seul. */
+    async ingestAll(events: Event[]): Promise<Record<IngestOutcome, number>> {
+        const counts: Record<IngestOutcome, number> = {
+            accepted: 0,
+            expired: 0,
+            deduplicated: 0,
+            held: 0,
+            ignored: 0,
+        };
+        for (const e of events) counts[await this.ingest(e)]++;
+        return counts;
     }
 
     /** Adaptateur pour les sources legacy (CandidateEvent). */

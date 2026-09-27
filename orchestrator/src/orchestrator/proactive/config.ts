@@ -115,6 +115,7 @@ export function validateConfig(raw: Partial<ProactiveConfig>): string[] {
     nonNeg(o.defaultCooldownMin, 'defaultCooldownMin');
     nonNeg(o.automationGuardWindowMin, 'automationGuardWindowMin');
     nonNeg(o.budgetPerDay, 'budgetPerDay');
+    nonNeg(o.postitsPerDay, 'postitsPerDay');
     if (
         o.bricks !== undefined &&
         (typeof o.bricks !== 'object' ||

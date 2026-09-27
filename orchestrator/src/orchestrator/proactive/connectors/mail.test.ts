@@ -64,8 +64,16 @@ async function run(): Promise<void> {
     // Tri actif : scan + un événement par action, jamais répété.
     const on = await c.events!(ctx({ triage: true }));
     assert.strictEqual(scans, 1);
+    const action = on.find((e) => e.key === 'mail-action-m1');
+    assert.ok(action && action.kind === 'request');
+    // L'intention todo porte le sujet et l'id Gmail (retrouvable depuis Yoji).
+    assert.deepStrictEqual(action!.todo, {
+        title: 'Répondre : Nouvelle proposition DevOps',
+        description: 'De LinkedIn <jobs@linkedin.com> — gmail:m1',
+    });
     assert.ok(
-        on.some((e) => e.key === 'mail-action-m1' && e.kind === 'request'),
+        !on.some((e) => e.key === 'mail-doubts' && e.todo),
+        'les doutes ne font pas de post-it',
     );
     const again = await c.events!(ctx({ triage: true }));
     assert.ok(!again.some((e) => e.key === 'mail-action-m1'), 'déjà signalé');

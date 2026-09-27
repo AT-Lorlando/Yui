@@ -3,7 +3,12 @@
 // propositions « action » et les doutes deviennent des événements. Le tri
 // n'a plus de timer à part : c'est le poll de ce connecteur.
 import { evaluateMail } from '../watchers/mail';
-import { fromCandidate, SUBJECT_MAX } from '../events';
+import {
+    fromCandidate,
+    SUBJECT_MAX,
+    TODO_TITLE_MAX,
+    TODO_DESCRIPTION_MAX,
+} from '../events';
 import type { Event, Fact } from '../events';
 import type { ConnectorDef } from '../connector';
 import type { MailConcierge } from '../mail/concierge';
@@ -89,6 +94,17 @@ export function mailConnector(services: {
                     ],
                     at: now,
                     ttlMs: ACTION_TTL_MS,
+                    // Un mail à traiter devient un post-it ; l'id Gmail dans
+                    // la description permet de retrouver le mail depuis Yoji.
+                    todo: {
+                        title: `Répondre : ${p.subject}`
+                            .replace(/\s+/g, ' ')
+                            .slice(0, TODO_TITLE_MAX),
+                        description: `De ${p.from} — gmail:${p.mailId}`.slice(
+                            0,
+                            TODO_DESCRIPTION_MAX,
+                        ),
+                    },
                 });
             }
             ctx.state.set('signaled', [...signaled].slice(-MAX_SIGNALED));
