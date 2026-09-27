@@ -8,7 +8,10 @@ import * as path from 'path';
 import { dataPath } from '@yui/shared';
 import Logger from '../../logger';
 
-/** `brief` = point rendu à la demande (texte retourné à l'appelant, ni push ni TTS). */
+/** `brief` = point rendu à la demande (texte retourné à l'appelant, ni push ni
+ *  TTS). `hold` n'est plus produit (le juge ne retient plus : le non-urgent
+ *  est retenu en amont, sans passer au journal) — gardé pour lire les
+ *  journaux existants. */
 export type JournalChannel = 'speak' | 'notify' | 'hold' | 'skip' | 'brief';
 export type Feedback = 'up' | 'down';
 /** Absent sur les entrées d'avant le composeur de point : équivaut à `event`. */
@@ -82,8 +85,12 @@ export class ProactiveJournal {
         return entry;
     }
 
+    get(id: string): JournalEntry | undefined {
+        return this.entries.find((x) => x.id === id);
+    }
+
     setFeedback(id: string, feedback: Feedback): boolean {
-        const e = this.entries.find((x) => x.id === id);
+        const e = this.get(id);
         if (!e) return false;
         e.feedback = feedback;
         this.persist();

@@ -25,6 +25,10 @@ import { ProactiveJournal } from './journal';
 import type { Feedback, JournalEntry } from './journal';
 import { Judge } from './judge';
 import type { JudgeInput, JudgeVerdict } from './judge';
+import { SaidMemory } from './said';
+import { BriefComposer } from './brief/composer';
+import type { BriefResult } from './brief/composer';
+import type { BriefFact, BriefInputs } from './brief/facts';
 import {
     buildSituation,
     diffSituation,
@@ -61,6 +65,8 @@ export class ProactiveEngine {
     readonly journal: ProactiveJournal;
     readonly concierge: MailConcierge;
     private judge: Judge;
+    private said: SaidMemory;
+    private composer: BriefComposer;
     private situation: Situation | null;
     private momentState: MomentState = { firedDepartures: [] };
     private lastDeltas: string[] = [];
@@ -72,12 +78,14 @@ export class ProactiveEngine {
             dedup?: Dedup;
             journal?: ProactiveJournal;
             held?: HeldQueue;
+            said?: SaidMemory;
         } = {},
     ) {
         this.now = deps.now ?? (() => Date.now());
         this.dedup = opts.dedup ?? new Dedup(DEDUP_FILE);
         this.journal = opts.journal ?? new ProactiveJournal();
         this.held = opts.held ?? new HeldQueue(HeldQueue.defaultFile());
+        this.said = opts.said ?? new SaidMemory(SaidMemory.defaultFile());
         this.situation = loadSituation();
         this.ingestGate = new Ingest({
             dedup: this.dedup,
@@ -102,6 +110,16 @@ export class ProactiveEngine {
             complete: (sys, user) => this.deps.complete(sys, user),
             journal: this.journal,
             budgetPerDay: () => this.cfg.budgetPerDay ?? DEFAULT_BUDGET_PER_DAY,
+            now: this.now,
+        });
+        this.composer = new BriefComposer({
+            complete: (sys, user) => this.deps.complete(sys, user),
+            said: this.said,
+            held: this.held,
+            journal: this.journal,
+            presence: () => this.deps.presenceState(),
+            notify: (t) => this.deps.notify(t),
+            speak: (t) => this.deps.speak(t),
             now: this.now,
         });
         this.concierge = new MailConcierge({
@@ -240,8 +258,14 @@ export class ProactiveEngine {
         return this.journal.list(limit);
     }
 
+    /** Un 👎 sur un point (moment/brief) fait taire ses sujets 30 jours dans
+     *  la mémoire « dit » ; un 👍 n'apprend rien de plus que le journal. */
     setFeedback(id: string, feedback: Feedback): boolean {
-        return this.journal.setFeedback(id, feedback);
+        const ok = this.journal.setFeedback(id, feedback);
+        if (!ok || feedback !== 'down') return ok;
+        const subjects = this.journal.get(id)?.subjects;
+        if (subjects?.length) this.said.downvote(subjects, this.now());
+        return ok;
     }
 
     getSituation(): Situation | null {
@@ -290,42 +314,53 @@ export class ProactiveEngine {
         }
     }
 
-    /** Moment de vie détecté → le juge compose (ou se tait). */
-    async handleMoment(
-        kind: MomentKind | string,
-        facts: string,
-    ): Promise<void> {
+    /** Moment de vie détecté → le composeur fait le point (ou se tait, sans LLM). */
+    async handleMoment(kind: MomentKind, facts: string): Promise<void> {
         const nowMs = this.now();
-        // Un moment par fenêtre de 2 h max, quoi qu'il arrive.
+        // Un moment par fenêtre de 2 h max, quoi qu'il arrive — enregistré
+        // avant de composer : un point qui échoue à l'émission ne doit pas
+        // être retenté à chaque transition de présence.
         if (this.dedup.isDuplicate(kind, nowMs, 2 * 3600_000)) return;
+        this.dedup.record(kind, nowMs);
         Logger.info(`proactive: moment "${kind}" — ${facts.slice(0, 120)}`);
-        const heldFacts = this.heldForMoment();
-        const factsWithHeld = heldFacts
-            ? `${facts}\nRetenu depuis la dernière fois :\n${heldFacts}`
-            : facts;
-        const verdict = await this.judge.evaluate(
-            {
-                source: kind,
-                subject: kind,
-                facts: factsWithHeld,
-                importance: 'utile',
-                kind: 'moment',
-                budgetExempt: true,
-            },
-            this.situation,
-            this.lastDeltas,
-        );
-        await this.applyVerdict(
-            { source: kind, subject: kind, facts: factsWithHeld },
-            verdict,
-            nowMs,
-        );
-        // Les retenus ne sont vidés que s'ils ont VRAIMENT été livrés : un
-        // verdict hold/skip (ou un repli du juge) doit les garder pour le
-        // prochain moment, sinon ils disparaissent sans jamais avoir été dits.
-        if (verdict.channel === 'speak' || verdict.channel === 'notify') {
-            this.clearHeld();
+        try {
+            const result = await this.composer.forMoment(
+                this.briefInputs(kind, facts),
+            );
+            if (!result) {
+                Logger.info(`proactive: moment "${kind}" — rien à dire`);
+                return;
+            }
+            // Le texte du point compte comme « dernier message proactif ».
+            this.dedup.record(kind, nowMs, result.text);
+        } catch (err) {
+            Logger.warn(`proactive: moment "${kind}" non émis — ${err}`);
         }
+    }
+
+    private briefInputs(
+        momentKind: BriefInputs['momentKind'],
+        momentFacts: string,
+        scope?: BriefInputs['scope'],
+    ): BriefInputs {
+        return {
+            momentKind,
+            momentFacts,
+            held: this.held.peek(this.now()),
+            situation: this.situation,
+            ...(scope ? { scope } : {}),
+        };
+    }
+
+    /** Point à la demande : texte rendu à l'appelant (ni push ni TTS), marqué
+     *  dit et journalisé. Jamais vide. */
+    brief(scope?: BriefInputs['scope']): Promise<BriefResult> {
+        return this.composer.onDemand(this.briefInputs('on-demand', '', scope));
+    }
+
+    /** Ce qui sortirait maintenant — sans LLM, sans marquage, sans retrait. */
+    briefPreview(scope?: BriefInputs['scope']): BriefFact[] {
+        return this.composer.preview(this.briefInputs('on-demand', '', scope));
     }
 
     /** Applique un verdict du juge : sortie + journal + dédup. */
@@ -334,17 +369,13 @@ export class ProactiveEngine {
             source: string;
             subject: string;
             facts: string;
-            event?: Event;
+            event: Event;
         },
         verdict: JudgeVerdict,
         nowMs: number,
     ): Promise<void> {
-        // Les événements du bus sont dédupliqués par `source:key` ; les moments
-        // gardent leur clé nue.
-        const dedupKey = input.event
-            ? `${input.event.source}:${input.event.key}`
-            : input.subject;
-        const fp = input.event ? factsFingerprint(input.event) : undefined;
+        const dedupKey = `${input.event.source}:${input.event.key}`;
+        const fp = factsFingerprint(input.event);
         const message = verdict.message || input.facts;
         this.journal.record({
             at: nowMs,
@@ -363,10 +394,6 @@ export class ProactiveEngine {
                 Logger.info(`proactive: → notification seule « ${message} »`);
                 await this.deps.notify(message);
                 this.dedup.record(dedupKey, nowMs, message, fp);
-                break;
-            case 'hold':
-                if (input.event) this.held.add(input.event, nowMs);
-                this.dedup.record(dedupKey, nowMs, undefined, fp);
                 break;
             case 'skip':
                 this.dedup.record(dedupKey, nowMs, undefined, fp);
@@ -399,25 +426,11 @@ export class ProactiveEngine {
         return this.held.size();
     }
 
-    /** Les retenus, mis en forme pour le prochain moment. Sans effet de bord. */
-    heldForMoment(): string {
-        return this.held
-            .peek(this.now())
-            .map(
-                (e) =>
-                    `- [${e.source}] ${e.subject}${
-                        e.facts.length ? ` (${e.facts.join(' ; ')})` : ''
-                    }`,
-            )
-            .join('\n');
-    }
-
-    /** Vide la file des retenus — à n'appeler qu'après une livraison effective. */
-    clearHeld(): void {
-        this.held.take(this.now());
-    }
-
-    /** Après les filtres d'ingest : juge à budget, ou pipeline legacy si la brique est off. */
+    /** Après les filtres d'ingest. Brique `judge` active : l'urgent passe
+     *  devant le juge, le reste est retenu pour le prochain point SANS LLM.
+     *  Brique off : pipeline historique (seuil de bavardage + reformulation).
+     *  Un critique ne dépend jamais d'un verdict LLM : il prend le chemin
+     *  historique, qui parle toujours. */
     private async consume(e: Event): Promise<void> {
         const nowMs = this.now();
         const facts = e.facts.length ? e.facts.join(' ') : e.subject;
@@ -428,6 +441,17 @@ export class ProactiveEngine {
         const dedupKey = `${e.source}:${e.key}`;
         const fp = factsFingerprint(e);
         if (!critical && isBrickEnabled(this.cfg, 'judge')) {
+            if (e.importance !== 'urgent') {
+                // Un retenu ne déclenche rien : son action éventuelle attend
+                // que quelqu'un le juge urgent (même contrat que le pipeline
+                // historique sous le seuil).
+                Logger.info(
+                    `proactive: ⏸ retenu "${e.key}" (importance ${e.importance} → matière du prochain point)`,
+                );
+                this.held.add(e, nowMs);
+                this.dedup.record(dedupKey, nowMs, undefined, fp);
+                return;
+            }
             if (e.action) await this.tryAction(e.action, nowMs);
             const verdict = await this.judge.evaluate(
                 {

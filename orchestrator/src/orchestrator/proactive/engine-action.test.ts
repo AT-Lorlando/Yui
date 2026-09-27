@@ -36,13 +36,16 @@ function cfg(over: Partial<ProactiveConfig> = {}): ProactiveConfig {
     };
 }
 
-function evt(): CandidateEvent {
+// Avec le juge actif, seul un urgent est traité sur-le-champ (action tentée
+// puis verdict) ; un utile est retenu pour le prochain point, sans action.
+function evt(over: Partial<CandidateEvent> = {}): CandidateEvent {
     return {
         watcherId: 'weather',
         subject: 'heat',
-        importance: 'utile',
+        importance: 'urgent',
         facts: 'forte chaleur',
         proposedAction: { id: 'extra-watering', tag: 'irrigation' },
+        ...over,
     };
 }
 
@@ -106,9 +109,21 @@ async function run(): Promise<void> {
             assert.strictEqual(calls.length, 0); // action bridée
         }
 
-        // c. pipeline historique (juge off) : un événement sous le seuil est
-        //    retenu SANS exécuter son action.
+        // c. juge actif : un utile est retenu SANS exécuter son action.
         fs.writeFileSync(autoFile, '[]');
+        {
+            const calls: { tool: string }[] = [];
+            const eng = new ProactiveEngine(cfg(), deps(calls), {
+                dedup: new Dedup(),
+                held: new HeldQueue(),
+            });
+            await eng.processCandidate(evt({ importance: 'utile' }));
+            assert.strictEqual(calls.length, 0, 'retenu → action non exécutée');
+            assert.strictEqual(eng.heldCount(), 1);
+        }
+
+        // d. pipeline historique (juge off) : un événement sous le seuil est
+        //    retenu SANS exécuter son action.
         {
             const calls: { tool: string }[] = [];
             const eng = new ProactiveEngine(
@@ -119,7 +134,7 @@ async function run(): Promise<void> {
                 deps(calls),
                 { dedup: new Dedup(), held: new HeldQueue() },
             );
-            await eng.processCandidate(evt()); // importance "utile" < urgent
+            await eng.processCandidate(evt({ importance: 'utile' })); // < urgent
             assert.strictEqual(calls.length, 0, 'retenu → action non exécutée');
             assert.strictEqual(eng.heldCount(), 1);
         }

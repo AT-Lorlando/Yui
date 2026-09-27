@@ -37,14 +37,18 @@ async function run(): Promise<void> {
     );
     assert.strictEqual(parseVerdict('{"channel":"yolo","message":"m"}'), null);
     assert.strictEqual(parseVerdict('pas de json'), null);
-    assert.strictEqual(
-        parseVerdict('{"channel":"digest","message":"m","reason":"r"}')
-            ?.channel,
-        'hold',
-        'ancien nom accepté et traduit',
-    );
+    // Compat : les anciens canaux « hold »/« digest » (retenue par le juge,
+    // digest quotidien) n'existent plus — un tel verdict vaut silence.
+    for (const legacy of ['hold', 'digest']) {
+        assert.strictEqual(
+            parseVerdict(`{"channel":"${legacy}","message":"m","reason":"r"}`)
+                ?.channel,
+            'skip',
+            `ancien canal « ${legacy} » traduit en skip`,
+        );
+    }
 
-    // ── Budget : épuisé + non urgent → hold SANS appel LLM ─────────────
+    // ── Budget : épuisé + non urgent → skip SANS appel LLM ─────────────
     const journal = new ProactiveJournal(tmp());
     const now = Date.now();
     journal.record({
@@ -62,9 +66,11 @@ async function run(): Promise<void> {
         message: 'y',
     });
     let llmCalls = 0;
+    let systemPrompt = '';
     const judge = new Judge({
-        complete: async () => {
+        complete: async (sys) => {
             llmCalls++;
+            systemPrompt = sys;
             return '{"channel":"speak","message":"ok","reason":"r"}';
         },
         journal,
@@ -82,10 +88,10 @@ async function run(): Promise<void> {
         null,
         [],
     );
-    assert.strictEqual(v1.channel, 'hold');
+    assert.strictEqual(v1.channel, 'skip');
     assert.strictEqual(llmCalls, 0, 'budget épuisé → pas d’appel LLM');
 
-    // Urgent passe malgré le budget ; moment exempté aussi.
+    // Urgent passe malgré le budget.
     const v2 = await judge.evaluate(
         {
             source: 'w',
@@ -98,22 +104,15 @@ async function run(): Promise<void> {
         [],
     );
     assert.strictEqual(v2.channel, 'speak');
-    const v3 = await judge.evaluate(
-        {
-            source: 'moment-wake',
-            subject: 'moment-wake',
-            facts: 'réveil',
-            importance: 'utile',
-            kind: 'moment',
-            budgetExempt: true,
-        },
-        null,
-        [],
-    );
-    assert.strictEqual(v3.channel, 'speak');
-    assert.strictEqual(llmCalls, 2);
+    assert.strictEqual(llmCalls, 1);
 
-    // ── LLM en panne → repli par importance ───────────────────────────────
+    // Le juge ne connaît plus ni les moments ni le canal « hold ».
+    assert.ok(systemPrompt.length > 0);
+    assert.ok(!systemPrompt.includes('MOMENT'), 'prompt sans règle MOMENT');
+    assert.ok(!systemPrompt.includes('"hold"'), 'prompt sans canal hold');
+    assert.ok(systemPrompt.includes('"skip"'));
+
+    // ── LLM en panne → repli par importance : l'urgent parle, le reste se tait
     const broken = new Judge({
         complete: async () => {
             throw new Error('down');
@@ -121,38 +120,23 @@ async function run(): Promise<void> {
         journal: new ProactiveJournal(tmp()),
         budgetPerDay: () => 3,
     });
-    assert.strictEqual(
+    const brokenVerdict = async (importance: 'urgent' | 'utile' | 'info') =>
         (
             await broken.evaluate(
                 {
                     source: 'w',
                     subject: 's',
                     facts: 'f',
-                    importance: 'utile',
+                    importance,
                     kind: 'event',
                 },
                 null,
                 [],
             )
-        ).channel,
-        'notify',
-    );
-    assert.strictEqual(
-        (
-            await broken.evaluate(
-                {
-                    source: 'w',
-                    subject: 's',
-                    facts: 'f',
-                    importance: 'info',
-                    kind: 'event',
-                },
-                null,
-                [],
-            )
-        ).channel,
-        'hold',
-    );
+        ).channel;
+    assert.strictEqual(await brokenVerdict('urgent'), 'speak');
+    assert.strictEqual(await brokenVerdict('utile'), 'skip');
+    assert.strictEqual(await brokenVerdict('info'), 'skip');
 
     // ── Le prompt embarque situation, deltas, budget et feedback ──────────
     const sit = situationAt(8, {

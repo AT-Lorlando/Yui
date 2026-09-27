@@ -16,7 +16,7 @@ export type MomentKind =
 
 export interface Moment {
     kind: MomentKind;
-    /** Contexte factuel spécifique au déclenchement (le juge compose dessus). */
+    /** Contexte factuel spécifique au déclenchement (passé au composeur du point). */
     facts: string;
 }
 
@@ -128,8 +128,8 @@ export function detectMoments(
 
 /**
  * Moment retour — déclenché par la transition de présence (pas par le tick).
- * Retourne les facts du moment, ou null si rien ne mérite d'être dit
- * (le juge tranchera de toute façon, mais on lui donne la matière).
+ * Retourne le contexte du moment — le composeur décide seul de parler ou non
+ * d'après les faits retenus et la situation ; ce texte n'est que du contexte.
  */
 export function returnMomentFacts(situation: Situation | null): string {
     const bits: string[] = [];
