@@ -1,5 +1,5 @@
 // Couche texte pure du brief : prompt LLM, garde-fou anti-invention et repli
-// gabarité sans LLM. Aucune I/O ici — le composeur (Task 4) branche le LLM et
+// gabarité sans LLM. Aucune I/O ici — le composeur branche le LLM et
 // l'émission ; ce module ne fait que produire/valider du texte.
 import type { BriefFact } from './facts';
 
@@ -53,11 +53,23 @@ const MOMENT_PREFIX: Record<string, string> = {
     'on-demand': 'Le point :',
 };
 
+// Phrase neutre quand aucun fait n'a de matière — pas de « : » suivi de rien.
+const MOMENT_EMPTY: Record<string, string> = {
+    'moment-wake': 'Bonjour.',
+    'moment-return': 'Rien de particulier pendant ton absence.',
+    'moment-bedtime': 'Rien à signaler avant de dormir.',
+    'moment-departure': 'Rien à signaler avant de partir.',
+    'on-demand': 'Rien de nouveau.',
+};
+
 // Nombres (le `:` compte pour qu'une heure comme « 10:20 » reste un seul
 // jeton) et mots capitalisés hors début de phrase (un début de phrase capitalisé
 // n'a pas besoin d'être un fait — c'est de la grammaire, pas une invention).
+// Pas d'exemption pour les guillemets : un nom propre cité entre guillemets
+// (« Bastien ») doit rester soumis au contrôle, sinon la garde serait
+// contournable en citant n'importe quoi.
 const NUMBER_RE = /\d+(?:[.,:]\d+)?/g;
-const CAPITALIZED_RE = /(?<![.!?]\s|^|["'«“‘])\b[A-ZÉÈÀÂÎÔÛÇ][\wéèàâîôûç'-]+/g;
+const CAPITALIZED_RE = /(?<![.!?]\s|^)\b[A-ZÉÈÀÂÎÔÛÇ][\wéèàâîôûç'-]+/g;
 
 function extractTokens(text: string): string[] {
     const numbers = text.match(NUMBER_RE) ?? [];
@@ -128,7 +140,8 @@ export function buildBriefUser(input: {
 }
 
 /** Tronque au dernier `.`/`!`/`?` avant `BRIEF_MAX_CHARS` (ponctuation gardée) ;
- *  sans ponctuation dans les bornes, coupe sec et marque la coupe par « … ». */
+ *  sans ponctuation dans les bornes, coupe sec un caractère plus tôt et
+ *  ajoute « … » pour rester dans la limite (399 + 1 caractère de coupe). */
 function truncateToLimit(text: string): string {
     if (text.length <= BRIEF_MAX_CHARS) return text;
     const slice = text.slice(0, BRIEF_MAX_CHARS);
@@ -139,7 +152,9 @@ function truncateToLimit(text: string): string {
             break;
         }
     }
-    return cut >= 0 ? slice.slice(0, cut + 1) : `${slice}…`;
+    return cut >= 0
+        ? slice.slice(0, cut + 1)
+        : `${text.slice(0, BRIEF_MAX_CHARS - 1)}…`;
 }
 
 /** Vérifie une sortie LLM contre les faits : longueur, chiffres et noms propres inconnus. Pur. */
@@ -163,12 +178,10 @@ export function checkComposed(
 
 /** Repli sans LLM : une phrase par fait, formulation fixe par nature. Pur. */
 export function templateBrief(momentKind: string, facts: BriefFact[]): string {
+    if (facts.length === 0) {
+        return MOMENT_EMPTY[momentKind] ?? 'Rien de nouveau.';
+    }
     const prefix = MOMENT_PREFIX[momentKind] ?? 'Le point :';
-    const out =
-        facts.length === 0
-            ? prefix.endsWith('.')
-                ? prefix
-                : `${prefix}.`
-            : `${prefix} ${facts.map((f) => f.text).join(' ; ')}.`;
+    const out = `${prefix} ${facts.map((f) => f.text).join(' ; ')}.`;
     return truncateToLimit(out);
 }

@@ -75,6 +75,41 @@ async function run(): Promise<void> {
         ),
     );
     assert.ok(tpl.length <= BRIEF_MAX_CHARS && tpl.endsWith('.'));
+
+    // Aucun fait : phrase neutre par moment, jamais un préfixe orphelin (« ... :. »).
+    assert.strictEqual(templateBrief('moment-wake', []), 'Bonjour.');
+    assert.strictEqual(
+        templateBrief('moment-return', []),
+        'Rien de particulier pendant ton absence.',
+    );
+    assert.strictEqual(
+        templateBrief('moment-bedtime', []),
+        'Rien à signaler avant de dormir.',
+    );
+    assert.strictEqual(
+        templateBrief('moment-departure', []),
+        'Rien à signaler avant de partir.',
+    );
+    assert.strictEqual(templateBrief('on-demand', []), 'Rien de nouveau.');
+
+    // Guillemets : pas d'exemption — un nom propre cité reste vérifié.
+    assert.strictEqual(
+        checkComposed('Ton entretien « Kinéis » est à 10:20.', facts).ok,
+        true,
+    );
+    assert.strictEqual(
+        checkComposed('Ton rendez-vous « Bastien » est à 10:20.', facts).ok,
+        false,
+    );
+
+    // Sans ponctuation dans les 400 premiers caractères : coupe sèche + « … », toujours ≤ 400.
+    const noPunct = checkComposed('a'.repeat(500), facts);
+    assert.ok(
+        noPunct.ok &&
+            noPunct.text.length <= BRIEF_MAX_CHARS &&
+            noPunct.text.endsWith('…'),
+    );
+
     console.log('All compose tests passed');
 }
 run().catch((e) => {
