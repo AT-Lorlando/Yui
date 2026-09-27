@@ -88,7 +88,7 @@ const VACATION_RE = /\bvacances|\bconges?\b|\bsejour|\bvoyage/;
 // Frontière de mot fermante sur « kine » : « Kinéis » (une entreprise) n'est
 // pas un rendez-vous chez le kiné.
 const PERSO_RE =
-    /\bpsy|\bmedecin|\bdentiste|\bkine\b|\bcoiffeur|\bosteo|\bsport|\bsalle\b|\bveterinaire/;
+    /\bpsy|\bmedecin|\bdentiste|\bkine\b|\bcoiffeur|\bosteo|\bsport|\bveterinaire/;
 const AFTERWORK_RE = /afterwork|\bapero|\bsoiree/;
 const CALL_RE = /\bcall\b|\bvisio|\bteams\b|\bmeet\b|\bzoom\b/;
 const MEETING_RE =
@@ -164,8 +164,11 @@ export function buildSecretaryPrompt(
     const system =
         'Tu es la secrétaire personnelle de Jérémy. On te donne ses événements ' +
         "d'agenda des deux prochains mois, chacun avec un id. Les faits (titre, date, " +
-        "heure, lieu) viennent de l'agenda : tu ne les renvoies pas, tu ANNOTES chaque " +
-        'événement par son id :\n' +
+        "heure, lieu) viennent de l'agenda : tu ne les renvoies pas, tu ANNOTES par id " +
+        "les événements qui méritent d'être montrés (ceux des prochains jours, les temps " +
+        "forts à venir). Un événement lointain que tu omets n'est pas affiché ; ceux des " +
+        "7 prochains jours, les vacances et les fériés sont affichés quoi qu'il arrive.\n" +
+        'Pour chaque événement annoté :\n' +
         '- category : UNIQUEMENT pour les événements marqués « catégorie : à choisir », ' +
         `parmi : ${TAXONOMY_LINE} ("autre" si rien ne colle). Pour ceux marqués « fixée », ` +
         'la catégorie est déjà décidée : ne renvoie pas de category (elle serait ignorée).\n' +
@@ -340,9 +343,22 @@ function buildItem(
     };
 }
 
+// Le LLM sélectionne par omission ce qu'il ne montre pas : un événement absent
+// de sa réponse n'est repêché que s'il est proche (il commence dans les
+// ABSENT_KEEP_DAYS) ou attendu (vacances, férié) — le reste est tu.
+const ABSENT_KEEP_DAYS = 7;
+
+function keepAbsent(src: AgendaEvent, now: Date): boolean {
+    const { category } = categorizeEvent(src, now);
+    if (category === 'vacation' || category === 'holiday') return true;
+    const startMs = new Date(src.date + 'T00:00:00Z').getTime();
+    return startMs - now.getTime() <= ABSENT_KEEP_DAYS * 86_400_000;
+}
+
 export function parseJudgment(
     llmText: string,
     sourceEvents: AgendaEvent[],
+    now: Date,
 ): AgendaData | null {
     const raw = extractJson(llmText);
     if (!raw || typeof raw !== 'object') return null;
@@ -354,10 +370,9 @@ export function parseJudgment(
     for (const it of o.items as unknown[]) {
         if (isObj(it) && typeof it.id === 'string') replies.set(it.id, it);
     }
-    const now = new Date();
-    const items = sourceEvents.map((src) =>
-        buildItem(src, replies.get(src.id), now),
-    );
+    const items = sourceEvents
+        .filter((src) => replies.has(src.id) || keepAbsent(src, now))
+        .map((src) => buildItem(src, replies.get(src.id), now));
 
     return {
         briefing:
@@ -537,6 +552,7 @@ export class AgendaSecretary {
                     LLM_TIMEOUT_MS,
                 ),
                 events,
+                now,
             );
         } catch {
             return null; // LLM KO ou trop lent → repli brut, pas de cache

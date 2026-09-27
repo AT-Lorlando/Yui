@@ -152,6 +152,11 @@ async function run(): Promise<void> {
             { category: 'call', sure: true },
             'multi-jour horaire → pas vacances (seul un bloc journée entière l’est)',
         );
+        assert.deepStrictEqual(
+            cat(ev({ title: 'Réunion salle B' })),
+            { category: 'meeting-pro', sure: false },
+            '« salle » n’est pas un mot-clé perso',
+        );
     }
 
     // ── checkText : mêmes règles que le garde du composeur ──────────────────────
@@ -208,6 +213,10 @@ async function run(): Promise<void> {
         );
         assert.ok(/desc/i.test(system), 'system: consigne usage description');
         assert.ok(
+            /omets/i.test(system) && /7 prochains jours/.test(system),
+            'system: omettre = ne pas afficher, sauf proches / vacances / fériés',
+        );
+        assert.ok(
             /countdown/i.test(system),
             'system: consigne countdown (dans X jours)',
         );
@@ -258,7 +267,7 @@ async function run(): Promise<void> {
                 ],
             }) +
             '\n```\nVoilà.';
-        const data = parseJudgment(llm, EVENTS);
+        const data = parseJudgment(llm, EVENTS, NOW);
         assert.ok(data, 'parse OK');
         assert.strictEqual(data!.briefing, 'Call à 10h.');
         const e1 = data!.items.find((it) => it.id === 'e1')!;
@@ -302,7 +311,7 @@ async function run(): Promise<void> {
                 },
             ],
         });
-        const data = parseJudgment(llm, EVENTS)!;
+        const data = parseJudgment(llm, EVENTS, NOW)!;
         assert.ok(data);
         assert.deepStrictEqual(
             data.items.map((it) => it.id),
@@ -358,7 +367,7 @@ async function run(): Promise<void> {
                 },
             ],
         });
-        const data = parseJudgment(llm, EVENTS)!;
+        const data = parseJudgment(llm, EVENTS, NOW)!;
         const e2 = data.items.find((it) => it.id === 'e2')!;
         assert.strictEqual(
             e2.note,
@@ -419,7 +428,7 @@ async function run(): Promise<void> {
                 },
             ],
         });
-        const data = parseJudgment(llm, src)!;
+        const data = parseJudgment(llm, src, NOW)!;
         assert.strictEqual(data.items[0].category, 'perso', 'incertain → LLM');
         assert.strictEqual(data.items[0].countdown, true, 'anniv → countdown');
         assert.strictEqual(
@@ -451,7 +460,7 @@ async function run(): Promise<void> {
                 },
             ],
         });
-        const data = parseJudgment(llm, src);
+        const data = parseJudgment(llm, src, NOW);
         assert.ok(data);
         assert.strictEqual(
             data!.items[0].category,
@@ -475,11 +484,48 @@ async function run(): Promise<void> {
         );
     }
 
+    // ── parseJudgment : un absent de la réponse n'est gardé que s'il est proche
+    //    (≤ 7 j) ou attendu (vacances / férié) — sinon le LLM a choisi de le taire ─
+    {
+        const src: AgendaEvent[] = [
+            ev({ id: 'far', title: 'Réunion projet', date: '2026-07-15' }), // J+20
+            ev({ id: 'near', title: 'Réunion projet', date: '2026-06-28' }), // J+3
+            EVENTS[1], // vacances à J+15, absente aussi
+        ];
+        const data = parseJudgment(
+            JSON.stringify({ briefing: '', items: [] }),
+            src,
+            NOW,
+        )!;
+        assert.deepStrictEqual(
+            data.items.map((it) => it.id),
+            ['near', 'e2'],
+            'absent lointain jeté ; absent proche et vacances gardés',
+        );
+        // présent dans la réponse → toujours émis, même lointain
+        const kept = parseJudgment(
+            JSON.stringify({
+                briefing: '',
+                items: [{ id: 'far', importance: 30, detail: 'minimal' }],
+            }),
+            src,
+            NOW,
+        )!;
+        assert.deepStrictEqual(
+            kept.items.map((it) => it.id),
+            ['far', 'near', 'e2'],
+            'présent dans la réponse → émis',
+        );
+    }
+
     // ── parseJudgment : JSON invalide / vide → null ─────────────────────────────
     {
-        assert.strictEqual(parseJudgment('pas de json ici', EVENTS), null);
-        assert.strictEqual(parseJudgment('', EVENTS), null);
-        assert.strictEqual(parseJudgment('{ briefing: cassé', EVENTS), null);
+        assert.strictEqual(parseJudgment('pas de json ici', EVENTS, NOW), null);
+        assert.strictEqual(parseJudgment('', EVENTS, NOW), null);
+        assert.strictEqual(
+            parseJudgment('{ briefing: cassé', EVENTS, NOW),
+            null,
+        );
     }
 
     // ── eventsHash : stable et sensible au changement ───────────────────────────
