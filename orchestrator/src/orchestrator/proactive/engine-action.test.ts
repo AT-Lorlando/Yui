@@ -36,8 +36,9 @@ function cfg(over: Partial<ProactiveConfig> = {}): ProactiveConfig {
     };
 }
 
-// Avec le juge actif, seul un urgent est traité sur-le-champ (action tentée
-// puis verdict) ; un utile est retenu pour le prochain point, sans action.
+// Avec le juge actif, l'action whitelistée est tentée quelle que soit
+// l'importance ; seul un urgent va ensuite devant le juge, un utile est retenu
+// pour le prochain point.
 function evt(over: Partial<CandidateEvent> = {}): CandidateEvent {
     return {
         watcherId: 'weather',
@@ -109,7 +110,8 @@ async function run(): Promise<void> {
             assert.strictEqual(calls.length, 0); // action bridée
         }
 
-        // c. juge actif : un utile est retenu SANS exécuter son action.
+        // c. juge actif : un utile est retenu, mais son action whitelistée est
+        //    quand même exécutée — agir et parler sont indépendants.
         fs.writeFileSync(autoFile, '[]');
         {
             const calls: { tool: string }[] = [];
@@ -118,7 +120,25 @@ async function run(): Promise<void> {
                 held: new HeldQueue(),
             });
             await eng.processCandidate(evt({ importance: 'utile' }));
-            assert.strictEqual(calls.length, 0, 'retenu → action non exécutée');
+            assert.strictEqual(calls.length, 1, 'retenu → action exécutée');
+            assert.strictEqual(calls[0].tool, 'irrigation_start');
+            assert.strictEqual(eng.heldCount(), 1);
+        }
+
+        // c'. juge actif : action NON whitelistée → rien d'exécuté, retenu.
+        {
+            const calls: { tool: string }[] = [];
+            const eng = new ProactiveEngine(cfg(), deps(calls), {
+                dedup: new Dedup(),
+                held: new HeldQueue(),
+            });
+            await eng.processCandidate(
+                evt({
+                    importance: 'utile',
+                    proposedAction: { id: 'rogue', tag: 'x' },
+                }),
+            );
+            assert.strictEqual(calls.length, 0, 'non whitelistée → rien');
             assert.strictEqual(eng.heldCount(), 1);
         }
 

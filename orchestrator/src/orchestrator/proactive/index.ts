@@ -441,10 +441,11 @@ export class ProactiveEngine {
         const dedupKey = `${e.source}:${e.key}`;
         const fp = factsFingerprint(e);
         if (!critical && isBrickEnabled(this.cfg, 'judge')) {
+            // Agir et parler sont indépendants : l'action whitelistée (avec sa
+            // garde anti-conflit) est tentée que l'événement soit dit ou
+            // retenu — seul le pipeline historique lie l'action au seuil.
+            if (e.action) await this.tryAction(e.action, nowMs);
             if (e.importance !== 'urgent') {
-                // Un retenu ne déclenche rien : son action éventuelle attend
-                // que quelqu'un le juge urgent (même contrat que le pipeline
-                // historique sous le seuil).
                 Logger.info(
                     `proactive: ⏸ retenu "${e.key}" (importance ${e.importance} → matière du prochain point)`,
                 );
@@ -452,7 +453,6 @@ export class ProactiveEngine {
                 this.dedup.record(dedupKey, nowMs, undefined, fp);
                 return;
             }
-            if (e.action) await this.tryAction(e.action, nowMs);
             const verdict = await this.judge.evaluate(
                 {
                     source: e.source,
