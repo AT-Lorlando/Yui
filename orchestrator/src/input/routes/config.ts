@@ -28,6 +28,10 @@ import {
 import type { IntegrationsHandler, ProactiveHandler } from '../InputSource';
 import type { RequireAuth } from './helpers';
 
+function isBriefScope(v: unknown): v is 'since-last' | 'today' | 'pending' {
+    return v === 'since-last' || v === 'today' || v === 'pending';
+}
+
 export function configRoutes(
     requireAuth: RequireAuth,
     integrationsHandler?: IntegrationsHandler,
@@ -99,6 +103,55 @@ export function configRoutes(
     );
     r.get('/proactive/situation', requireAuth, (_req: any, res: any) => {
         res.json(proactiveHandler?.situation?.() ?? null);
+    });
+
+    // ── Point à la demande (tool LLM secretary_brief + app) ──────────
+    // Un scope hors de cette liste ne doit jamais atteindre le moteur — il
+    // suppose lui-même le défaut sur une valeur absente, pas sur n'importe quoi.
+    r.post('/proactive/brief', requireAuth, async (req: any, res: any) => {
+        const scope = req.body?.scope;
+        if (scope !== undefined && !isBriefScope(scope)) {
+            res.status(400).json({ error: 'scope invalide' });
+            return;
+        }
+        if (!proactiveHandler?.brief) {
+            res.status(503).json({ error: 'proactivité indisponible' });
+            return;
+        }
+        try {
+            const result = (await proactiveHandler.brief(scope)) as {
+                text: string;
+                fallback?: boolean;
+            };
+            res.json(
+                result.fallback !== undefined
+                    ? { text: result.text, fallback: result.fallback }
+                    : { text: result.text },
+            );
+        } catch (err) {
+            res.status(500).json({
+                error: err instanceof Error ? err.message : String(err),
+            });
+        }
+    });
+
+    r.get('/proactive/brief/preview', requireAuth, (req: any, res: any) => {
+        const scope = req.query?.scope;
+        if (scope !== undefined && !isBriefScope(scope)) {
+            res.status(400).json({ error: 'scope invalide' });
+            return;
+        }
+        if (!proactiveHandler?.briefPreview) {
+            res.status(503).json({ error: 'proactivité indisponible' });
+            return;
+        }
+        try {
+            res.json({ facts: proactiveHandler.briefPreview(scope) });
+        } catch (err) {
+            res.status(500).json({
+                error: err instanceof Error ? err.message : String(err),
+            });
+        }
     });
 
     // ── Concierge courrier (tri Gmail) ───────────────────────────────

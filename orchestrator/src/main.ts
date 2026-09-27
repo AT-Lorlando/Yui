@@ -45,6 +45,7 @@ import {
 } from './orchestrator/storyArchive';
 import type { ConversationsHandler } from './input/InputSource';
 import { createDashboardProvider } from './orchestrator/dashboard';
+import { setSecretaryBriefProvider } from './orchestrator/virtualTools';
 
 // Parole hors conversation (automations, proactivité) : voir notify.ts.
 const speakViaPipeline = (text: string): Promise<void> =>
@@ -161,6 +162,14 @@ async function main() {
         runScene: makeSceneRunner,
     });
 
+    // Le tool secretary_brief (LLM) sert le même texte que le point à la
+    // demande de l'app — un seul moteur, deux consommateurs.
+    setSecretaryBriefProvider((scope) =>
+        proactive
+            .brief(scope as 'since-last' | 'today' | 'pending' | undefined)
+            .then((r) => r.text),
+    );
+
     // Hue remotes — listen to bridge SSE for button + dial events
     const hueRemotes = await initHueRemotes({
         callTool: (name, args) => orchestrator.callTool(name, args),
@@ -251,6 +260,14 @@ async function main() {
                 triageCorrect: (mailId: string, category: string) =>
                     proactive.concierge.correct(mailId, category),
                 ingest: (events) => proactive.ingestAll(events),
+                brief: (scope?: string) =>
+                    proactive.brief(
+                        scope as 'since-last' | 'today' | 'pending' | undefined,
+                    ),
+                briefPreview: (scope?: string) =>
+                    proactive.briefPreview(
+                        scope as 'since-last' | 'today' | 'pending' | undefined,
+                    ),
             },
             () => dashboardProvider(),
         );

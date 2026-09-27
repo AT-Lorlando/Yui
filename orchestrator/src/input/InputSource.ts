@@ -135,6 +135,10 @@ export interface ProactiveHandler {
     ) => Promise<
         Record<import('../orchestrator/proactive/ingest').IngestOutcome, number>
     >;
+    /** Point à la demande : texte rendu (marqué dit, journalisé) — `POST /proactive/brief`. */
+    brief?: (scope?: string) => Promise<unknown>;
+    /** Ce qui sortirait maintenant, sans effet de bord — `GET /proactive/brief/preview`. */
+    briefPreview?: (scope?: string) => unknown;
 }
 
 export type DashboardHandler = () => Promise<

@@ -1,9 +1,9 @@
 import assert from 'assert';
-import { getVirtualTools } from './virtualTools';
+import { getVirtualTools, handleVirtualTool } from './virtualTools';
 
 // notify_user : le LLM peut pousser une notification FCM (le _notify des
 // scènes reste un tool virtuel caché, réservé aux scènes/bindings).
-function run(): void {
+async function run(): Promise<void> {
     const tools = getVirtualTools();
     const t = tools.find((x) => x.function.name === 'notify_user');
     assert.ok(t, 'notify_user doit être exposé au LLM');
@@ -15,7 +15,24 @@ function run(): void {
         !tools.some((x) => x.function.name === '_notify'),
         '_notify (scènes) ne doit pas apparaître côté LLM',
     );
+
+    // secretary_brief : exposé au LLM, et sans provider câblé (moteur pas
+    // encore initialisé au démarrage) répond un message plutôt que de planter.
+    assert.ok(
+        tools.some((x) => x.function.name === 'secretary_brief'),
+        'secretary_brief doit être exposé au LLM',
+    );
+    const result = await handleVirtualTool({
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'secretary_brief', arguments: '{}' },
+    } as any);
+    assert.strictEqual(result?.content, "La secrétaire n'est pas disponible.");
+
     console.log('All notifyTool tests passed');
 }
 
-run();
+run().catch((e) => {
+    console.error(e.message ?? e);
+    process.exit(1);
+});

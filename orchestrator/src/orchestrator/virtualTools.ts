@@ -28,6 +28,29 @@ export type SceneRunner = (
     id: string,
 ) => Promise<{ success: boolean; error?: string }>;
 
+// Scopes reconnus par le moteur de point (proactive/brief) — une valeur
+// hors de cette liste n'est jamais transmise telle quelle : le tool retombe
+// silencieusement sur le défaut (depuis le dernier point) plutôt que d'échouer.
+const BRIEF_SCOPES = ['since-last', 'today', 'pending'] as const;
+type BriefScope = (typeof BRIEF_SCOPES)[number];
+
+function parseBriefScope(value: unknown): BriefScope | undefined {
+    return typeof value === 'string' &&
+        (BRIEF_SCOPES as readonly string[]).includes(value)
+        ? (value as BriefScope)
+        : undefined;
+}
+
+// Câblé par main.ts une fois le moteur proactif initialisé — reste `null`
+// tant que la proactivité n'est pas encore montée (démarrage, tests).
+let secretaryBriefProvider: ((scope?: string) => Promise<string>) | null = null;
+
+export function setSecretaryBriefProvider(
+    fn: (scope?: string) => Promise<string>,
+): void {
+    secretaryBriefProvider = fn;
+}
+
 export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
     return [
         {
@@ -279,6 +302,29 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
                         },
                     },
                     required: ['id'],
+                },
+            },
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'secretary_brief',
+                description:
+                    "Fait le point avec la secrétaire : ce qui est en attente, l'agenda du jour, les post-its. " +
+                    'À appeler quand Jérémy demande « fais le point », « quoi de neuf », ' +
+                    "« qu'est-ce que j'ai à faire ». scope : today (agenda du jour), " +
+                    'pending (ce qui attend une action), défaut = depuis le dernier point. ' +
+                    'Réponds avec ce texte tel quel.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        scope: {
+                            type: 'string',
+                            enum: ['today', 'pending'],
+                            description:
+                                'today = agenda du jour, pending = ce qui attend une action. Omis = depuis le dernier point.',
+                        },
+                    },
                 },
             },
         },
@@ -541,6 +587,20 @@ export async function handleVirtualTool(
                 content: result.success
                     ? `Scène "${scene.name}" déclenchée.`
                     : `Erreur lors du déclenchement de "${scene.name}": ${result.error}`,
+            };
+        }
+
+        case 'secretary_brief': {
+            if (!secretaryBriefProvider) {
+                return {
+                    id: toolCall.id,
+                    content: "La secrétaire n'est pas disponible.",
+                };
+            }
+            const scope = parseBriefScope(args.scope);
+            return {
+                id: toolCall.id,
+                content: await secretaryBriefProvider(scope),
             };
         }
 
