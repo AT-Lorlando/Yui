@@ -22,6 +22,47 @@ export interface CreateTaskInput {
     parent?: string;
     description?: string;
     priority?: TaskPriority;
+    tags?: string[];
+}
+
+export interface Postit {
+    id: string;
+    title: string;
+    state: TaskState;
+    tags: string[];
+    createdAt: string;
+    ageDays: number;
+}
+
+export interface CreatePostitInput {
+    title: string;
+    description?: string;
+    tags?: string[];
+}
+
+/** Jours pleins écoulés depuis createdAt ; 0 si absent/invalide (jamais négatif). */
+function ageDaysFrom(createdAt: unknown, now: Date): number {
+    if (typeof createdAt !== 'string') return 0;
+    const created = new Date(createdAt);
+    if (Number.isNaN(created.getTime())) return 0;
+    return Math.max(
+        0,
+        Math.floor((now.getTime() - created.getTime()) / 86400000),
+    );
+}
+
+/** Déduplique et nettoie les tags avant envoi : un doublon fait 422 côté Yoji. */
+function dedupeTags(tags?: string[]): string[] {
+    if (!tags) return [];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const raw of tags) {
+        const t = raw.trim();
+        if (!t || seen.has(t)) continue;
+        seen.add(t);
+        result.push(t);
+    }
+    return result;
 }
 
 export interface UpdateTaskInput {
@@ -144,5 +185,36 @@ export class YojiClient {
             'DELETE',
             `/todos/projects/${this.encodePath(path)}`,
         );
+    }
+
+    // ── Post-its ────────────────────────────────────────────────────────────────
+    // Un post-it est une tâche sans projet ni parent (isPostIt côté frontend Yoji).
+    async listPostits(now: Date = new Date()): Promise<Postit[]> {
+        const tasks = await this.request<any[]>('GET', '/todos');
+        return tasks
+            .filter(
+                (t) =>
+                    !t.project &&
+                    !t.parentId &&
+                    (t.state === 'todo' || t.state === 'backlog'),
+            )
+            .map((t) => ({
+                id: t.id,
+                title: t.title,
+                state: t.state,
+                tags: Array.isArray(t.tags) ? t.tags : [],
+                createdAt: t.createdAt,
+                ageDays: ageDaysFrom(t.createdAt, now),
+            }));
+    }
+
+    createPostit(input: CreatePostitInput): Promise<any> {
+        return this.request('POST', '/todos', {
+            title: input.title,
+            description: input.description,
+            state: 'todo',
+            project: null,
+            tags: dedupeTags(input.tags),
+        });
     }
 }

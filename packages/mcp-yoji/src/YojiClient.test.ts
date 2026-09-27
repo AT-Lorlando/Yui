@@ -189,6 +189,114 @@ async function run(): Promise<void> {
         assert.strictEqual(calls[0].init.method, 'DELETE');
     }
 
+    // listPostits: garde !project && !parentId && state in (todo, backlog),
+    // ignore createdAt manquant/invalide (ageDays = 0)
+    {
+        const now = new Date('2026-09-27T12:00:00Z');
+        const { fetchFn } = fakeFetch({
+            body: [
+                {
+                    id: '1',
+                    title: 'Post-it todo',
+                    state: 'todo',
+                    project: null,
+                    parentId: null,
+                    tags: ['a'],
+                    createdAt: '2026-09-20T12:00:00Z',
+                },
+                {
+                    id: '2',
+                    title: 'Post-it done',
+                    state: 'done',
+                    project: null,
+                    parentId: null,
+                    tags: [],
+                    createdAt: '2026-09-20T12:00:00Z',
+                },
+                {
+                    id: '3',
+                    title: 'Tâche de projet',
+                    state: 'todo',
+                    project: 'todos/Work',
+                    parentId: null,
+                    tags: [],
+                    createdAt: '2026-09-20T12:00:00Z',
+                },
+                {
+                    id: '4',
+                    title: 'Sous-tâche',
+                    state: 'todo',
+                    project: null,
+                    parentId: '1',
+                    tags: [],
+                    createdAt: '2026-09-20T12:00:00Z',
+                },
+                {
+                    id: '5',
+                    title: 'Post-it backlog',
+                    state: 'backlog',
+                    project: null,
+                    parentId: null,
+                    tags: [],
+                    createdAt: 'date-invalide',
+                },
+                {
+                    id: '6',
+                    title: 'Post-it sans date',
+                    state: 'todo',
+                    project: null,
+                    parentId: null,
+                    tags: [],
+                },
+            ],
+        });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        const out = await c.listPostits(now);
+        assert.deepStrictEqual(
+            out.map((p) => p.id),
+            ['1', '5', '6'],
+        );
+        assert.strictEqual(out[0].ageDays, 7);
+        assert.strictEqual(out[1].ageDays, 0);
+        assert.strictEqual(out[2].ageDays, 0);
+    }
+
+    // createPostit: POST /todos { title, description, state: 'todo', project: null, tags }
+    // tags dédupliqués et vidés des entrées vides (sinon HTTP 422 côté Yoji)
+    {
+        const { calls, fetchFn } = fakeFetch({
+            body: { id: '9', title: 'Acheter du pain' },
+        });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        await c.createPostit({
+            title: 'Acheter du pain',
+            description: 'avant 18h',
+            tags: ['courses', ' courses ', '', 'urgent'],
+        });
+        assert.strictEqual(calls[0].url, 'http://x/api/v1/todos');
+        assert.strictEqual(calls[0].init.method, 'POST');
+        assert.deepStrictEqual(JSON.parse(calls[0].init.body), {
+            title: 'Acheter du pain',
+            description: 'avant 18h',
+            state: 'todo',
+            project: null,
+            tags: ['courses', 'urgent'],
+        });
+    }
+
+    // createPostit: sans tags → tableau vide envoyé (pas d'omission côté schéma Yoji)
+    {
+        const { calls, fetchFn } = fakeFetch({ body: { id: '10' } });
+        const c = new YojiClient({ baseUrl: 'http://x/api/v1', fetchFn });
+        await c.createPostit({ title: 'Rappel' });
+        assert.deepStrictEqual(JSON.parse(calls[0].init.body), {
+            title: 'Rappel',
+            state: 'todo',
+            project: null,
+            tags: [],
+        });
+    }
+
     console.log('All YojiClient core tests passed');
 }
 

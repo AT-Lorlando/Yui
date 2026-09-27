@@ -241,4 +241,37 @@ export const YOJI_TOOLS = [
             required: ['path'],
         },
     },
+    {
+        name: 'list_postits',
+        description:
+            'Post-its Yoji : la liste des petites choses à penser (courses, papier à envoyer, rappel) — pas des tâches de projet.',
+        inputSchema: { type: 'object' as const, properties: {}, required: [] },
+    },
+    {
+        name: 'create_postit',
+        description:
+            'Crée un post-it Yoji — pour tout rappel personnel de Jérémy (« rappelle-moi de… », « pense à… »). JAMAIS pour une tâche de projet.',
+        inputSchema: {
+            type: 'object' as const,
+            properties: {
+                title: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 120,
+                    description: 'Titre du post-it',
+                },
+                description: {
+                    type: 'string',
+                    description: 'Détail optionnel',
+                },
+                tags: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    maxItems: 5,
+                    description: 'Étiquettes (5 maximum)',
+                },
+            },
+            required: ['title'],
+        },
+    },
 ];

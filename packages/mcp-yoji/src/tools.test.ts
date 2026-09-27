@@ -8,6 +8,7 @@ function run(): void {
     assert.deepStrictEqual(names.sort(), [
         'create_folder',
         'create_note',
+        'create_postit',
         'create_task',
         'create_todo_project',
         'delete_note',
@@ -16,6 +17,7 @@ function run(): void {
         'get_note',
         'list_folders',
         'list_notes',
+        'list_postits',
         'list_tasks',
         'list_todo_projects',
         'move_note',
@@ -45,6 +47,24 @@ function run(): void {
     assert.deepStrictEqual(
         (createTask.inputSchema as any).properties.priority.enum,
         ['none', 'low', 'medium', 'high', 'urgent'],
+    );
+
+    // create_postit: title borné 1-120, tags borné à 5
+    const createPostit = YOJI_TOOLS.find((t) => t.name === 'create_postit')!;
+    assert.deepStrictEqual((createPostit.inputSchema as any).required, [
+        'title',
+    ]);
+    assert.strictEqual(
+        (createPostit.inputSchema as any).properties.title.minLength,
+        1,
+    );
+    assert.strictEqual(
+        (createPostit.inputSchema as any).properties.title.maxLength,
+        120,
+    );
+    assert.strictEqual(
+        (createPostit.inputSchema as any).properties.tags.maxItems,
+        5,
     );
 
     console.log('All tools tests passed');

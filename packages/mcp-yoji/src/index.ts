@@ -118,6 +118,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'delete_todo_project':
                 await yoji.deleteProject(String(a.path));
                 return msg(`Project deleted: ${a.path}`);
+            case 'list_postits':
+                return json(await yoji.listPostits());
+            case 'create_postit': {
+                // Le juge de proactivité consomme le JSON en aval : valider ici
+                // évite un 422 Yoji (titre/tags rejetés côté backend).
+                const title = String(a.title ?? '').trim();
+                if (title.length < 1 || title.length > 120) {
+                    return msg('Titre invalide : 1 à 120 caractères requis.');
+                }
+                const tags = Array.isArray(a.tags) ? a.tags : undefined;
+                if (tags && tags.length > 5) {
+                    return msg("Trop d'étiquettes : 5 maximum.");
+                }
+                const postit = await yoji.createPostit({
+                    title,
+                    description: a.description,
+                    tags,
+                });
+                return json(postit);
+            }
             default:
                 throw new McpError(
                     ErrorCode.MethodNotFound,
