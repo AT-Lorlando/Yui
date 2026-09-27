@@ -8,6 +8,13 @@ import { dataPath } from '@yui/shared';
 import { eventKey } from './events';
 import type { Event } from './events';
 
+/** La ligne poussée dans `facts` quand un post-it est créé — et ce que la
+ *  collecte du brief retire de l'empreinte « dit » (une réémission de la
+ *  source ne la porte pas, le registre refusant un second post-it). */
+export const POSTIT_LINE_RE = /^Je t'ai mis un post-it : « .+ »$/;
+export const postitLine = (title: string): string =>
+    `Je t'ai mis un post-it : « ${title} »`;
+
 export interface PostitEntry {
     /** `source:key` de l'événement porteur. */
     origin: string;
@@ -154,7 +161,7 @@ export async function createPostitFor(
         const id = postitIdOf(raw);
         if (!id) throw new Error('réponse de create_postit sans id');
         deps.registry.record(origin, id, now);
-        e.facts.push(`Je t'ai mis un post-it : « ${title} »`);
+        e.facts.push(postitLine(title));
         deps.log.info(
             `proactive: post-it « ${title} » créé (${id}) pour ${origin}`,
         );

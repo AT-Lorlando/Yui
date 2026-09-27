@@ -4,6 +4,7 @@ import type { BriefInputs } from './facts';
 import type { Event } from '../events';
 import { factsFingerprint } from '../events';
 import type { Situation } from '../situation';
+import { postitLine } from '../postits';
 
 const T = new Date('2026-09-27T21:00:00').getTime();
 const ev = (key: string, over: Partial<Event> = {}): Event => ({
@@ -81,6 +82,39 @@ async function run(): Promise<void> {
     );
     assert.strictEqual(secondFact!.nature, 'request');
     assert.strictEqual(secondFact!.text, 'Sujet z — a ; nature:info');
+
+    // La ligne du post-it est dite mais n'entre pas dans l'empreinte : la
+    // réémission (sans la ligne) de la même origine est reconnue comme dite.
+    const bare = ev('todo', { facts: ['nature:request', 'détail'] });
+    const withLine = ev('todo', {
+        facts: ['nature:request', 'détail', postitLine('Faire todo')],
+    });
+    const [bareFact] = collectFacts(
+        inputs({ held: [bare], situation: null }),
+        T,
+    );
+    const [lineFact] = collectFacts(
+        inputs({ held: [withLine], situation: null }),
+        T,
+    );
+    assert.strictEqual(lineFact!.fingerprint, bareFact!.fingerprint);
+    assert.strictEqual(
+        lineFact!.text,
+        "Sujet todo — détail ; Je t'ai mis un post-it : « Faire todo »",
+    );
+    assert.strictEqual(bareFact!.text, 'Sujet todo — détail');
+    assert.strictEqual(lineFact!.nature, 'request', 'le marqueur reste lu');
+    assert.notStrictEqual(
+        bareFact!.fingerprint,
+        collectFacts(
+            inputs({
+                held: [ev('todo', { facts: ['détail'] })],
+                situation: null,
+            }),
+            T,
+        )[0]!.fingerprint,
+        'le marqueur nature: compte toujours dans l’empreinte',
+    );
 
     // ── Sections de situation → faits de brief ───────────────────────────
     const all = collectFacts(inputs(), T);

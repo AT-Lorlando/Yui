@@ -17,6 +17,7 @@ import type { Situation } from '../situation';
 import type { Importance } from '../types';
 import type { MomentKind } from '../moments';
 import type { SaidNature } from '../said';
+import { POSTIT_LINE_RE } from '../postits';
 
 export interface BriefFact {
     subject: string; // clé mémoire : `source:key` pour un événement, sinon préfixée (`situation:`, `postit:`)
@@ -53,8 +54,10 @@ function fingerprintOf(text: string): string {
     return crypto.createHash('sha1').update(text).digest('hex').slice(0, 16);
 }
 
-/** L'empreinte garde le marqueur : c'est l'événement tel qu'il a été
- *  ingéré qui compte pour la mémoire « dit ». */
+/** L'empreinte garde le marqueur `nature:` (la source l'émet à chaque fois)
+ *  mais ignore la ligne du post-it : le moteur l'ajoute UNE fois, à la
+ *  création, et une réémission de la même origine arrive sans elle — elle
+ *  doit quand même être reconnue comme déjà dite. Le texte, lui, la garde. */
 function heldToFact(e: Event): BriefFact {
     const key = eventKey(e);
     const marker = NATURE_MARKER.exec(e.facts[0] ?? '');
@@ -65,7 +68,10 @@ function heldToFact(e: Event): BriefFact {
         importance: e.importance,
         at: e.at,
         nature: marker ? (marker[1] as SaidNature) : KIND_TO_NATURE[e.kind],
-        fingerprint: factsFingerprint(e),
+        fingerprint: factsFingerprint({
+            ...e,
+            facts: e.facts.filter((f) => !POSTIT_LINE_RE.test(f)),
+        }),
         heldKey: key,
     };
 }
