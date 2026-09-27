@@ -1,5 +1,9 @@
 import { createHash } from 'crypto';
-import { checkComposed } from './proactive/brief/compose';
+import {
+    allowedTokens,
+    checkAgainstLexicon,
+    lexiconTokens,
+} from './proactive/brief/compose';
 
 export interface AgendaEvent {
     id: string;
@@ -83,7 +87,7 @@ function fold(s: string): string {
 }
 
 const HOLIDAY_RE =
-    /ferie|assomption|toussaint|\bnoel\b|1er mai|8 mai|14 juillet|11 novembre|\bpaques\b|ascension|pentecote/;
+    /ferie|assomption|toussaint|\bnoel\b|\b1er mai\b|\b8 mai\b|\b14 juillet\b|\b11 novembre\b|\bpaques\b|ascension|pentecote/;
 const VACATION_RE = /\bvacances|\bconges?\b|\bsejour|\bvoyage/;
 // Frontière de mot fermante sur « kine » : « Kinéis » (une entreprise) n'est
 // pas un rendez-vous chez le kiné.
@@ -118,6 +122,8 @@ const PERSONAL_MAIL_DOMAINS = new Set([
     'protonmail.com',
 ]);
 
+// Ne s'applique que si l'outil calendrier expose des adresses : aujourd'hui
+// `get_schedule` ne remonte que des noms, la règle est donc dormante.
 function hasProAttendee(attendees: string[]): boolean {
     return attendees.some((a) => {
         const m = /@([^\s>]+)/.exec(a);
@@ -291,13 +297,16 @@ function allowedTokensFor(events: AgendaEvent[]): string[] {
 }
 
 /** Garde anti-invention d'un texte LLM (même règle que le brief composé) :
- *  un chiffre ou un nom propre absent de `allowed` → texte refusé (null). */
+ *  un chiffre ou un nom propre absent de `allowed` → texte refusé (null).
+ *  `allowed` contient des libellés, lus en entier (premier mot compris). */
 export function checkText(
     text: string | null,
     allowed: string[],
 ): string | null {
     if (!text) return null;
-    const res = checkComposed(text, [], allowed);
+    const lexicon = allowedTokens([]); // jours, mois, mots fixes
+    for (const t of lexiconTokens(allowed)) lexicon.add(t);
+    const res = checkAgainstLexicon(text, lexicon);
     return res.ok && res.text.length > 0 ? res.text : null;
 }
 
@@ -370,14 +379,15 @@ export function parseJudgment(
     for (const it of o.items as unknown[]) {
         if (isObj(it) && typeof it.id === 'string') replies.set(it.id, it);
     }
-    const items = sourceEvents
-        .filter((src) => replies.has(src.id) || keepAbsent(src, now))
-        .map((src) => buildItem(src, replies.get(src.id), now));
+    const kept = sourceEvents.filter(
+        (src) => replies.has(src.id) || keepAbsent(src, now),
+    );
+    const items = kept.map((src) => buildItem(src, replies.get(src.id), now));
 
     return {
+        // Le briefing ne peut citer que ce qui est affiché.
         briefing:
-            checkText(strOrNull(o.briefing), allowedTokensFor(sourceEvents)) ??
-            '',
+            checkText(strOrNull(o.briefing), allowedTokensFor(kept)) ?? '',
         items,
         judgedAt: now.toISOString(),
     };

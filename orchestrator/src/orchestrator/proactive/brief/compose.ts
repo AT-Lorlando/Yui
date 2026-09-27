@@ -70,11 +70,26 @@ const MOMENT_EMPTY: Record<string, string> = {
 // contournable en citant n'importe quoi.
 const NUMBER_RE = /\d+(?:[.,:]\d+)?/g;
 const CAPITALIZED_RE = /(?<![.!?]\s|^)\b[A-ZÉÈÀÂÎÔÛÇ][\wéèàâîôûç'-]+/g;
+// Même forme, sans l'exemption de début de phrase : un libellé (titre
+// d'événement, lieu, participant) n'est pas une phrase, son premier mot est
+// un fait comme les autres (« Bastien dîner »).
+const LABEL_CAPITALIZED_RE = /\b[A-ZÉÈÀÂÎÔÛÇ][\wéèàâîôûç'-]+/g;
 
 function extractTokens(text: string): string[] {
     const numbers = text.match(NUMBER_RE) ?? [];
     const caps = text.match(CAPITALIZED_RE) ?? [];
     return [...numbers, ...caps];
+}
+
+/** Jetons (chiffres, mots capitalisés) de libellés — pas de phrases — pour
+ *  bâtir un lexique d'ancrage. Pur. */
+export function lexiconTokens(labels: string[]): Set<string> {
+    const tokens = new Set<string>();
+    for (const label of labels) {
+        for (const t of label.match(NUMBER_RE) ?? []) tokens.add(t);
+        for (const t of label.match(LABEL_CAPITALIZED_RE) ?? []) tokens.add(t);
+    }
+    return tokens;
 }
 
 function capitalize(word: string): string {
@@ -157,14 +172,13 @@ function truncateToLimit(text: string): string {
         : `${text.slice(0, BRIEF_MAX_CHARS - 1)}…`;
 }
 
-/** Vérifie une sortie LLM contre les faits : longueur, chiffres et noms propres inconnus. Pur. */
-export function checkComposed(
+/** Vérifie une sortie LLM contre un lexique déjà bâti : longueur, chiffres et
+ *  noms propres inconnus. Pur. */
+export function checkAgainstLexicon(
     text: string,
-    facts: BriefFact[],
-    extraAllowed: string[] = [],
+    lexicon: Set<string>,
 ): { ok: true; text: string } | { ok: false; reason: string } {
     const truncated = truncateToLimit(text.trim());
-    const lexicon = allowedTokens(facts, extraAllowed);
     for (const token of extractTokens(truncated)) {
         if (!lexicon.has(token)) {
             return {
@@ -174,6 +188,15 @@ export function checkComposed(
         }
     }
     return { ok: true, text: truncated };
+}
+
+/** Vérifie une sortie LLM contre les faits : longueur, chiffres et noms propres inconnus. Pur. */
+export function checkComposed(
+    text: string,
+    facts: BriefFact[],
+    extraAllowed: string[] = [],
+): { ok: true; text: string } | { ok: false; reason: string } {
+    return checkAgainstLexicon(text, allowedTokens(facts, extraAllowed));
 }
 
 /** Repli sans LLM : une phrase par fait, formulation fixe par nature. Pur. */

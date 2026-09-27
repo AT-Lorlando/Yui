@@ -2,6 +2,7 @@ import assert from 'assert';
 import {
     buildBriefUser,
     checkComposed,
+    lexiconTokens,
     templateBrief,
     BRIEF_MAX_CHARS,
     BRIEF_SYSTEM_PROMPT,
@@ -109,6 +110,15 @@ async function run(): Promise<void> {
             noPunct.text.length <= BRIEF_MAX_CHARS &&
             noPunct.text.endsWith('…'),
     );
+
+    // lexiconTokens : des libellés, pas des phrases — le 1er mot compte aussi.
+    {
+        const lex = lexiconTokens(['Bastien dîner', 'Point Acme', '10:00']);
+        assert.ok(lex.has('Bastien'), 'premier mot capitalisé retenu');
+        assert.ok(lex.has('Point') && lex.has('Acme'));
+        assert.ok(lex.has('10:00'), 'nombre retenu');
+        assert.ok(!lex.has('dîner'), 'mot commun ignoré');
+    }
 
     console.log('All compose tests passed');
 }

@@ -157,6 +157,25 @@ async function run(): Promise<void> {
             { category: 'meeting-pro', sure: false },
             '« salle » n’est pas un mot-clé perso',
         );
+        // les fériés datés sont des mots entiers : « 18 mai » n'est pas « 8 mai »
+        assert.deepStrictEqual(
+            cat(ev({ title: 'Dentiste 18 mai', start: '09:00' })),
+            { category: 'perso', sure: true },
+            '18 mai ne matche pas le férié du 8 mai',
+        );
+        assert.deepStrictEqual(
+            cat(
+                ev({
+                    title: 'Pont du 8 mai',
+                    date: '2026-05-08',
+                    allDay: true,
+                    start: null,
+                    durationMin: null,
+                }),
+            ),
+            { category: 'holiday', sure: true },
+            '8 mai → holiday sûr',
+        );
     }
 
     // ── checkText : mêmes règles que le garde du composeur ──────────────────────
@@ -180,6 +199,16 @@ async function run(): Promise<void> {
         assert.strictEqual(
             checkText('Chez Bastien vendredi.', ['Chez Bastien à Lyon']),
             'Chez Bastien vendredi.',
+        );
+        // le lexique lit des libellés : le premier mot d'un titre compte
+        assert.strictEqual(
+            checkText('Appeler Bastien.', ['Bastien dîner']),
+            'Appeler Bastien.',
+            'premier mot du titre dans le lexique',
+        );
+        assert.strictEqual(
+            checkText('Préparer le point Acme.', ['Point Acme']),
+            'Préparer le point Acme.',
         );
     }
 
@@ -515,6 +544,43 @@ async function run(): Promise<void> {
             kept.items.map((it) => it.id),
             ['far', 'near', 'e2'],
             'présent dans la réponse → émis',
+        );
+    }
+
+    // ── parseJudgment : lexique de la note = tout le titre ; briefing = événements émis ─
+    {
+        const src: AgendaEvent[] = [
+            ev({ id: 'd', title: 'Bastien dîner', date: '2026-06-26' }),
+            ev({ id: 'far', title: 'Réunion Marseille', date: '2026-08-20' }), // absent, lointain
+        ];
+        const data = parseJudgment(
+            JSON.stringify({
+                briefing: 'Dîner avec Marseille en vue.',
+                items: [
+                    {
+                        id: 'd',
+                        importance: 60,
+                        note: 'Appeler Bastien.',
+                        detail: 'normal',
+                    },
+                ],
+            }),
+            src,
+            NOW,
+        )!;
+        assert.deepStrictEqual(
+            data.items.map((it) => it.id),
+            ['d'],
+        );
+        assert.strictEqual(
+            data.items[0].note,
+            'Appeler Bastien.',
+            'nom en tête de titre → note conservée',
+        );
+        assert.strictEqual(
+            data.briefing,
+            '',
+            'briefing citant un événement non émis → vidé',
         );
     }
 
