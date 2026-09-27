@@ -320,7 +320,7 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
                     properties: {
                         scope: {
                             type: 'string',
-                            enum: ['today', 'pending'],
+                            enum: ['since-last', 'today', 'pending'],
                             description:
                                 'today = agenda du jour, pending = ce qui attend une action. Omis = depuis le dernier point.',
                         },
@@ -598,10 +598,23 @@ export async function handleVirtualTool(
                 };
             }
             const scope = parseBriefScope(args.scope);
-            return {
-                id: toolCall.id,
-                content: await secretaryBriefProvider(scope),
-            };
+            // Un point qui échoue ne doit jamais faire échouer tout le tour LLM
+            // (Promise.all des tool calls dans runToolCalls) — on rend un contenu
+            // d'erreur lisible, comme les autres cases.
+            try {
+                return {
+                    id: toolCall.id,
+                    content: await secretaryBriefProvider(scope),
+                };
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                Logger.warn(`secretary_brief en échec: ${message}`);
+                return {
+                    id: toolCall.id,
+                    content: `La secrétaire n'a pas pu faire le point : ${message}`,
+                };
+            }
         }
 
         default:
