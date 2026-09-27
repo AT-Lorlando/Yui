@@ -2,6 +2,7 @@
 // l'émission. Un moment sans matière ni obligation reste SILENCIEUX (aucun
 // appel LLM) ; ce qui est dit est marqué dit, retiré de la file des retenus
 // et journalisé — jamais l'inverse : rien n'est marqué si rien n'est sorti.
+import * as crypto from 'crypto';
 import Logger from '../../../logger';
 import type { PresenceState } from '../../presence';
 import type { HeldQueue } from '../held';
@@ -10,7 +11,7 @@ import type { SaidMemory } from '../said';
 import type { Situation } from '../situation';
 import type { BriefFact, BriefInputs } from './facts';
 import { collectFacts } from './facts';
-import { selectFacts, momentRequiresSpeech } from './select';
+import { selectFacts, momentRequiresSpeech, BRIEF_MAX_FACTS } from './select';
 import {
     BRIEF_SYSTEM_PROMPT,
     buildBriefUser,
@@ -66,24 +67,40 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
     });
 }
 
-/** Le fait qui justifie de parler au coucher — ajouté HORS sélection : une
- *  anomalie de sécurité se redit chaque nuit où elle est là, et le gabarit
- *  doit la porter lui aussi (sinon le repli dirait « rien à signaler »). */
-function imposedFacts(
-    momentKind: BriefInputs['momentKind'],
-    situation: Situation | null,
-    now: number,
-): BriefFact[] {
+function fingerprintOf(text: string): string {
+    return crypto.createHash('sha1').update(text).digest('hex').slice(0, 16);
+}
+
+/** Les faits qui justifient de parler malgré une sélection vide — ajoutés
+ *  HORS sélection, jamais filtrés par la mémoire « dit », et portés par le
+ *  gabarit (sinon le repli dirait « rien à signaler » au moment même où il
+ *  faut parler) : la porte ouverte au coucher, et le départ lui-même (le
+ *  rendez-vous a pu être dit au réveil, le départ doit quand même être
+ *  annoncé). */
+function imposedFacts(input: BriefInputs, now: number): BriefFact[] {
+    const { momentKind, momentFacts, situation } = input;
     if (momentKind === 'moment-bedtime' && situation?.doorLocked === false) {
-        const text = 'La porte n’est pas verrouillée';
         return [
             {
                 subject: 'situation:door-unlocked',
-                text,
+                text: 'La porte n’est pas verrouillée',
                 importance: 'urgent',
                 at: now,
                 nature: 'alert',
                 fingerprint: 'door-unlocked',
+            },
+        ];
+    }
+    if (momentKind === 'moment-departure' && momentFacts.trim()) {
+        const fp = fingerprintOf(momentFacts);
+        return [
+            {
+                subject: `situation:departure-${fp}`,
+                text: momentFacts.trim(),
+                importance: 'urgent',
+                at: now,
+                nature: 'info',
+                fingerprint: fp,
             },
         ];
     }
@@ -227,10 +244,14 @@ export class BriefComposer {
     }
 
     /** Une sortie sur deux qui échoue ne perd pas le point ; les deux en
-     *  échec → rien n'est marqué dit, le moment suivant reprendra la matière. */
+     *  échec → rien n'est marqué dit (le moment suivant reprendra la matière)
+     *  mais le journal garde une trace `skip` qui explique le silence. */
     private async emit(
+        input: BriefInputs,
         channel: 'speak' | 'notify',
         text: string,
+        facts: BriefFact[],
+        now: number,
     ): Promise<void> {
         const outs: Array<Promise<void>> = [this.deps.notify(text)];
         if (channel === 'speak') outs.push(this.deps.speak(text));
@@ -242,16 +263,32 @@ export class BriefComposer {
             Logger.warn(`proactive: brief non émis — ${f.reason}`);
         }
         if (failures.length === settled.length) {
-            throw failures[0]!.reason;
+            const err = failures[0]!.reason;
+            this.deps.journal.record({
+                at: now,
+                kind: 'moment',
+                source: input.momentKind,
+                subject: input.momentKind,
+                channel: 'skip',
+                message: text,
+                reason: `émission impossible : ${
+                    err instanceof Error ? err.message : String(err)
+                }`,
+                facts: facts.map((f) => f.text),
+                subjects: facts.map((f) => f.subject),
+            });
+            throw err;
         }
     }
 
     async forMoment(input: BriefInputs): Promise<BriefResult | null> {
         const now = this.deps.now();
+        // Les faits imposés passent devant (ils sont urgents) ; le plafond
+        // s'applique au total, en rognant la queue de la sélection.
         const facts = [
+            ...imposedFacts(input, now),
             ...this.select(input, now),
-            ...imposedFacts(input.momentKind, input.situation, now),
-        ];
+        ].slice(0, BRIEF_MAX_FACTS);
         if (
             facts.length === 0 &&
             !momentRequiresSpeech(input.momentKind, input.situation)
@@ -260,7 +297,7 @@ export class BriefComposer {
         }
         const composed = await this.compose(input, facts, now);
         const channel = this.channelFor(input);
-        await this.emit(channel, composed.text);
+        await this.emit(input, channel, composed.text, facts, now);
         return this.settle(
             input,
             facts,

@@ -47,6 +47,7 @@ interface Harness {
     said: InstanceType<typeof SaidMemory>;
     held: InstanceType<typeof HeldQueue>;
     journal: InstanceType<typeof ProactiveJournal>;
+    journalFile: string;
     calls: { complete: string[][]; notify: string[]; speak: string[] };
     presence: PresenceState;
     now: number;
@@ -58,6 +59,8 @@ function harness(
         llm?: (system: string, user: string) => Promise<string>;
         presence?: PresenceState;
         llmTimeoutMs?: number;
+        notify?: (t: string) => Promise<void>;
+        speak?: (t: string) => Promise<void>;
     } = {},
 ): Harness {
     const calls = {
@@ -65,10 +68,12 @@ function harness(
         notify: [] as string[],
         speak: [] as string[],
     };
+    const journalFile = path.join(tmp, `journal-${n++}.json`);
     const h: Harness = {
         said: new SaidMemory(),
         held: new HeldQueue(),
-        journal: new ProactiveJournal(path.join(tmp, `journal-${n++}.json`)),
+        journal: new ProactiveJournal(journalFile),
+        journalFile,
         calls,
         presence: opts.presence ?? 'home',
         now: T,
@@ -87,9 +92,11 @@ function harness(
         presence: () => h.presence,
         notify: async (t) => {
             calls.notify.push(t);
+            if (opts.notify) await opts.notify(t);
         },
         speak: async (t) => {
             calls.speak.push(t);
+            if (opts.speak) await opts.speak(t);
         },
         now: () => h.now,
         ...(opts.llmTimeoutMs !== undefined
@@ -171,7 +178,7 @@ async function run(): Promise<void> {
         assert.deepStrictEqual(j[0]!.facts, r.facts);
         assert.deepStrictEqual(j[0]!.subjects, r.subjects);
         // Les champs enrichis sont persistés (relecture du fichier).
-        const j2 = new ProactiveJournal(path.join(tmp, 'journal-1.json'));
+        const j2 = new ProactiveJournal(h.journalFile);
         assert.strictEqual(j2.list()[0]!.kind, 'moment');
         assert.deepStrictEqual(j2.list()[0]!.facts, r.facts);
         // Un point de moment ne consomme pas le budget des urgents.
@@ -302,6 +309,116 @@ async function run(): Promise<void> {
         assert.strictEqual(quiet.channel, 'notify');
         assert.strictEqual(h3.calls.speak.length, 0);
         assert.deepStrictEqual(h3.calls.notify, [quiet.text]);
+    }
+
+    // (e') Départ : le rendez-vous déjà dit au réveil ne doit pas rendre le
+    //      départ muet — le moment lui-même est un fait, même en repli LLM.
+    {
+        const h = harness({
+            llm: async () => {
+                throw new Error('llm down');
+            },
+        });
+        const sit = situation({
+            agenda: [
+                {
+                    title: 'Entretien Kinéis',
+                    date: '2026-09-27',
+                    start: '20:00',
+                    location: 'Toulouse',
+                },
+            ],
+        });
+        const dep = (): BriefInputs =>
+            inputs(h, {
+                momentKind: 'moment-departure',
+                momentFacts:
+                    'Départ dans 25 min pour « Entretien Kinéis » à Toulouse',
+                situation: sit,
+            });
+        // L'agenda du jour a été dit au réveil.
+        h.said.markSaid(
+            h.composer.preview(dep()).map((f) => ({
+                subject: f.subject,
+                fingerprint: f.fingerprint,
+                nature: f.nature,
+            })),
+            'speak',
+            T - 3600_000,
+        );
+        assert.strictEqual(h.composer.preview(dep()).length, 0);
+        const r = await h.composer.forMoment(dep());
+        assert.ok(r, 'un départ s’annonce toujours');
+        assert.strictEqual(r.facts.length, 1);
+        assert.ok(r.text.includes('Kinéis'), r.text);
+        assert.ok(r.facts[0]!.includes('Kinéis'));
+        assert.ok(r.subjects[0]!.startsWith('situation:departure-'));
+        assert.strictEqual(r.fallback, true);
+        assert.strictEqual(r.channel, 'speak');
+        assert.deepStrictEqual(h.calls.speak, [r.text]);
+    }
+
+    // (e'') Faits imposés en tête, plafond global respecté.
+    {
+        const h = harness();
+        for (let i = 0; i < 10; i++) h.held.add(ev(`k${i}`), T - 60_000 + i);
+        const r = await h.composer.forMoment(
+            inputs(h, {
+                momentKind: 'moment-bedtime',
+                momentFacts:
+                    'lumières éteintes ; la porte n’est pas verrouillée',
+                situation: situation({ doorLocked: false }),
+            }),
+        );
+        assert.ok(r);
+        assert.strictEqual(r.facts.length, 8, 'plafond global');
+        assert.strictEqual(r.subjects[0], 'situation:door-unlocked');
+        assert.ok(
+            h.calls.complete[0]![1].includes(
+                '1. La porte n’est pas verrouillée',
+            ),
+            'fait imposé numéroté en premier',
+        );
+        assert.strictEqual(h.held.size(), 3, '7 retenus dits → retirés');
+    }
+
+    // (h) Émission impossible (notify ET speak en échec) → rien marqué, mais
+    //     une trace `skip` au journal explique le silence.
+    {
+        const h = harness({
+            notify: async () => {
+                throw new Error('fcm down');
+            },
+            speak: async () => {
+                throw new Error('cast down');
+            },
+        });
+        h.held.add(ev('disk'), T - 60_000);
+        await assert.rejects(() => h.composer.forMoment(inputs(h)), /fcm down/);
+        assert.strictEqual(h.said.size(), 0, 'rien marqué dit');
+        assert.strictEqual(h.held.size(), 1, 'retenu conservé');
+        const j = h.journal.list();
+        assert.strictEqual(j.length, 1);
+        assert.strictEqual(j[0]!.kind, 'moment');
+        assert.strictEqual(j[0]!.channel, 'skip');
+        assert.strictEqual(j[0]!.message, 'Ton disque est plein, à 92 %.');
+        assert.ok(/émission impossible : fcm down/.test(j[0]!.reason ?? ''));
+        assert.deepStrictEqual(j[0]!.facts, [
+            'Disque disk plein — 92 % utilisés',
+        ]);
+        assert.deepStrictEqual(j[0]!.subjects, ['koya:disk']);
+        assert.strictEqual(h.journal.spentToday(T), 0);
+        // Une seule sortie en échec suffit à considérer le point émis.
+        const h2 = harness({
+            speak: async () => {
+                throw new Error('cast down');
+            },
+        });
+        h2.held.add(ev('disk'), T - 60_000);
+        const r = await h2.composer.forMoment(inputs(h2));
+        assert.ok(r);
+        assert.strictEqual(h2.held.size(), 0);
+        assert.strictEqual(h2.journal.list()[0]!.channel, 'speak');
     }
 
     // (f) À la demande sans matière → jamais null, « Rien de nouveau » + compteurs,
