@@ -190,7 +190,7 @@ pm2 logs             # logs en temps réel
 `POST /notify` (Bearer `BEARER_TOKEN`) pousse une notification — et la lit à voix haute si
 `speak: true` — sans passer par le LLM. Détails et exemples : [`docs/notify-api.md`](docs/notify-api.md).
 
-`POST /events` (même Bearer) pousse des événements dans le bus de proactivité — filtrés, puis arbitrés par le juge : [`docs/events-api.md`](docs/events-api.md).
+`POST /events` (même Bearer) pousse des événements dans le bus de proactivité — filtrés, puis arbitrés par le juge : [`docs/events-api.md`](docs/events-api.md). Un événement avec `todo` crée en plus un post-it Yoji.
 
 ## Développement
 

@@ -41,6 +41,18 @@ curl -X POST http://10.0.0.101:10001/events \
        "ttlMs":86400000,"link":"https://koya.home.arpa/hosts/2"}'
 ```
 
+Avec une intention `todo` (crée un post-it Yoji) :
+
+```bash
+curl -X POST http://10.0.0.101:10001/events \
+  -H "Authorization: Bearer $YUI_BEARER" -H "Content-Type: application/json" \
+  -d '{"source":"koya","key":"invoice-42","kind":"request","importance":"utile",
+       "subject":"Facture 42 à envoyer","facts":["Échéance le 3 octobre"],
+       "todo":{"title":"Envoyer la facture 42","description":"Client Dupont — échéance 3 octobre"}}'
+```
+
+Le post-it apparaît sur https://yoji.home.arpa/postits, tagué `yui` + `koya`.
+
 Depuis un backend Node :
 
 ```ts
