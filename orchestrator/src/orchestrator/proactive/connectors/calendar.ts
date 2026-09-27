@@ -5,7 +5,11 @@
 // lecture du calendrier par tick, partagée avec le journal de situation.
 import { createHash } from 'crypto';
 import { evaluateCalendar } from '../watchers/calendar';
-import { fetchAgendaEventsCached } from '../../agendaSecretary';
+import {
+    fetchAgendaEventsCached,
+    FETCH_MAX_RESULTS,
+    HORIZON_DAYS,
+} from '../../agendaSecretary';
 import type { AgendaEvent } from '../../agendaSecretary';
 import { fromCandidate, SUBJECT_MAX } from '../events';
 import type { Event, Fact } from '../events';
@@ -30,6 +34,9 @@ const DAY_MS = 24 * HOUR_MS;
 /** Un changement à moins de 24 h relève des rappels, pas de la secrétaire. */
 const FAR_MS = DAY_MS;
 const RECURRING_MIN = 2;
+/** Marge (jours) au bord lointain de la fenêtre de lecture : un id qui y
+ *  apparaît vient d'entrer dans la fenêtre, il n'a pas été ajouté. */
+const HORIZON_EDGE_DAYS = 2;
 /** Débuts de journée gardés pour la médiane (jours ouvrés). */
 const START_HISTORY_MAX = 30;
 /** « Demain tôt » = avant 9 h, ou avant l'heure habituelle si elle est plus tardive. */
@@ -158,7 +165,9 @@ function changeEvent(
         // changement lointain se dit une fois pour toutes.
         facts: ['nature:agenda-far'],
         at: now,
-        // Périmé une fois l'événement passé (ou, s'il est déjà proche, dans 1 h).
+        // Périmé une fois l'événement passé (ou, s'il est déjà proche, dans
+        // 1 h). Le début est fini : l'appelant a passé `isFar()`, qui rejette
+        // une date illisible (NaN ne satisfait aucune comparaison).
         ttlMs: Math.max(startMs(entry) - now, HOUR_MS),
     };
 }
@@ -172,19 +181,40 @@ function changeEvent(
  *   l'instantané est conservé, sinon tout l'agenda passerait pour annulé.
  * - Seuls les événements à plus de 24 h comptent, pour les trois natures.
  * - « Nouveau » exclut les titres déjà vus ≥ 2 fois (réunions récurrentes).
+ * - La lecture est une fenêtre glissante (aujourd'hui → +HORIZON_DAYS,
+ *   FETCH_MAX_RESULTS au plus) : un id inconnu au bord lointain de la
+ *   fenêtre est un événement ancien qui vient d'y entrer, pas un ajout — il
+ *   est mémorisé en silence. Si la lecture précédente était au plafond
+ *   (`prevAtCap`), sa coupure est arbitraire : un id inconnu n'est « nouveau »
+ *   que s'il commence avant le dernier jour connu, et aucune disparition
+ *   n'est conclue (l'id peut simplement être retombé derrière le plafond).
  */
 export function diffAgenda(
     prev: AgendaSnapshot,
     next: AgendaEvent[],
     now: number,
-): { events: Event[]; snapshot: AgendaSnapshot } {
+    prevAtCap = false,
+): { events: Event[]; snapshot: AgendaSnapshot; atCap: boolean } {
     const snapshot = toSnapshot(next);
+    const atCap = next.length >= FETCH_MAX_RESULTS;
     const prevIds = Object.keys(prev);
-    if (prevIds.length === 0) return { events: [], snapshot };
-    if (next.length === 0) return { events: [], snapshot: prev };
+    if (prevIds.length === 0) return { events: [], snapshot, atCap };
+    if (next.length === 0) {
+        return { events: [], snapshot: prev, atCap: prevAtCap };
+    }
 
     const isFar = (e: { date: string; start: string | null }) =>
         startMs(e) - now >= FAR_MS;
+    // Borne au-delà de laquelle un id inconnu n'est pas un ajout.
+    let newBefore = now + (HORIZON_DAYS - HORIZON_EDGE_DAYS) * DAY_MS;
+    if (prevAtCap) {
+        const lastKnown = Math.max(
+            ...Object.values(prev).map((e) => startMs({ ...e, start: null })),
+        );
+        if (Number.isFinite(lastKnown)) {
+            newBefore = Math.min(newBefore, lastKnown);
+        }
+    }
     const prevTitleCount = new Map<string, number>();
     for (const e of Object.values(prev)) {
         const k = titleKey(e.title);
@@ -200,6 +230,7 @@ export function diffAgenda(
         const entry = snapshot[ev.id]!;
         const old = prev[ev.id];
         if (!old) {
+            if (startMs(ev) >= newBefore) continue;
             const seen = prevTitleCount.get(titleKey(ev.title)) ?? 0;
             if (seen >= RECURRING_MIN) continue;
             events.push(changeEvent(ev.id, 'new', entry, now));
@@ -207,13 +238,15 @@ export function diffAgenda(
             events.push(changeEvent(ev.id, 'moved', entry, now));
         }
     }
-    for (const id of prevIds) {
-        if (snapshot[id]) continue;
-        const old = prev[id]!;
-        if (!isFar(old)) continue;
-        events.push(changeEvent(id, 'cancelled', old, now));
+    if (!prevAtCap) {
+        for (const id of prevIds) {
+            if (snapshot[id]) continue;
+            const old = prev[id]!;
+            if (!isFar(old)) continue;
+            events.push(changeEvent(id, 'cancelled', old, now));
+        }
     }
-    return { events, snapshot };
+    return { events, snapshot, atCap };
 }
 
 function minutesOf(hhmm: string): number | null {
@@ -349,12 +382,14 @@ export const calendarConnector: ConnectorDef = {
                 ctx.callTool,
                 new Date(now),
             );
-            const { events, snapshot } = diffAgenda(
+            const { events, snapshot, atCap } = diffAgenda(
                 ctx.state.get<AgendaSnapshot>('agendaSnapshot', {}),
                 agenda,
                 now,
+                ctx.state.get<boolean>('agendaAtCap', false),
             );
             ctx.state.set('agendaSnapshot', snapshot);
+            ctx.state.set('agendaAtCap', atCap);
             out.push(...events);
         } catch (err) {
             ctx.log.warn(`agenda : changements non évalués — ${err}`);

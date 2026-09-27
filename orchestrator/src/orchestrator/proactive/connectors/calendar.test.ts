@@ -196,6 +196,54 @@ function testDiffAgenda(): void {
         NOW,
     );
     assert.deepStrictEqual(soonCancelled.events, []);
+
+    // Bord lointain de la fenêtre glissante : un id inconnu à J+59 vient
+    // d'entrer dans la lecture, ce n'est pas un ajout — mémorisé sans bruit.
+    const kine = ev({ id: 'e0', title: 'Kiné' });
+    const edge = ev({ id: 'far', title: 'Mariage', date: '2026-11-23' });
+    const atEdge = diffAgenda(known, [kine, edge], NOW);
+    assert.deepStrictEqual(atEdge.events, [], 'bord de fenêtre : silence');
+    assert.ok(atEdge.snapshot.far, 'mais mémorisé');
+    assert.strictEqual(atEdge.atCap, false);
+    const mid = ev({ id: 'mid', title: 'Mariage', date: '2026-10-25' });
+    assert.match(
+        diffAgenda(known, [kine, mid], NOW).events[0]!.key,
+        /^agenda-mid-new-/,
+        'J+30 : ajout réel',
+    );
+
+    // Lecture précédente au plafond : sa coupure est arbitraire.
+    const bulk = Array.from({ length: 100 }, (_, i) =>
+        ev({
+            id: `b${i}`,
+            title: `Réunion ${i}`,
+            date: `2026-10-${String(10 + (i % 15)).padStart(2, '0')}`,
+        }),
+    );
+    const capped = diffAgenda({}, bulk, NOW);
+    assert.strictEqual(capped.atCap, true);
+    // Un id disparu n'est pas une annulation (il peut être derrière le plafond).
+    const missing = diffAgenda(capped.snapshot, bulk.slice(1), NOW, true);
+    assert.deepStrictEqual(missing.events, [], "au plafond : pas d'annulé");
+    assert.strictEqual(missing.atCap, false);
+    // Un id inconnu n'est « nouveau » qu'avant le dernier jour connu (24/10).
+    const afterLast = ev({ id: 'n1', title: 'Concert', date: '2026-10-24' });
+    const beforeLast = ev({ id: 'n2', title: 'Concert', date: '2026-10-15' });
+    const unknowns = diffAgenda(
+        capped.snapshot,
+        [...bulk, afterLast, beforeLast],
+        NOW,
+        true,
+    );
+    assert.deepStrictEqual(
+        unknowns.events.map((e) => e.key.replace(/-[0-9a-f]{8}$/, '')),
+        ['agenda-n2-new'],
+    );
+    // Sans le plafond, la même disparition est bien une annulation.
+    assert.strictEqual(
+        diffAgenda(capped.snapshot, bulk.slice(1), NOW, false).events.length,
+        1,
+    );
 }
 
 function testEarlyTomorrow(): void {

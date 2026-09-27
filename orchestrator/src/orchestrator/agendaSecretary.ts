@@ -415,7 +415,10 @@ type CallTool = (
     args?: Record<string, unknown>,
 ) => Promise<unknown>;
 
-const HORIZON_DAYS = 60;
+/** Fenêtre de lecture : aujourd'hui → +HORIZON_DAYS, au plus FETCH_MAX_RESULTS
+ *  événements — les lecteurs qui comparent deux lectures en tiennent compte. */
+export const HORIZON_DAYS = 60;
+export const FETCH_MAX_RESULTS = 100;
 
 function ymd(d: Date): string {
     return d.toISOString().slice(0, 10);
@@ -437,7 +440,7 @@ export async function fetchAgendaEvents(
     const res = await callTool('get_schedule', {
         startDate,
         endDate,
-        maxResults: 100,
+        maxResults: FETCH_MAX_RESULTS,
     });
     if (!isObj(res) || !Array.isArray(res.days)) return [];
 
