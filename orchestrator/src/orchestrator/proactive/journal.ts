@@ -8,8 +8,11 @@ import * as path from 'path';
 import { dataPath } from '@yui/shared';
 import Logger from '../../logger';
 
-export type JournalChannel = 'speak' | 'notify' | 'hold' | 'skip';
+/** `brief` = point rendu à la demande (texte retourné à l'appelant, ni push ni TTS). */
+export type JournalChannel = 'speak' | 'notify' | 'hold' | 'skip' | 'brief';
 export type Feedback = 'up' | 'down';
+/** Absent sur les entrées d'avant le composeur de point : équivaut à `event`. */
+export type JournalKind = 'event' | 'moment' | 'brief';
 
 export interface JournalEntry {
     id: string;
@@ -23,6 +26,11 @@ export interface JournalEntry {
     /** Justification du juge — visible dans l'app, utile pour comprendre. */
     reason?: string;
     feedback?: Feedback;
+    kind?: JournalKind;
+    /** Faits inclus dans un point (moment/brief) — texte tel que composé. */
+    facts?: string[];
+    /** Sujets de la mémoire « dit » couverts par ce point — c'est sur eux que porte un 👎. */
+    subjects?: string[];
 }
 
 const MAX_ENTRIES = 300;
@@ -86,11 +94,14 @@ export class ProactiveJournal {
         return this.entries.slice(-limit).reverse();
     }
 
-    /** Interruptions déjà émises aujourd'hui (speak = 1, notify = 0.5). */
+    /** Interruptions déjà émises aujourd'hui (speak = 1, notify = 0.5). Le
+     *  budget ne concerne que les urgents : les points de moment et les points
+     *  à la demande n'y comptent pas. */
     spentToday(now: number): number {
         const day = new Date(now).toDateString();
         let spent = 0;
         for (const e of this.entries) {
+            if (e.kind === 'moment' || e.kind === 'brief') continue;
             if (new Date(e.at).toDateString() !== day) continue;
             if (e.channel === 'speak') spent += 1;
             else if (e.channel === 'notify') spent += 0.5;

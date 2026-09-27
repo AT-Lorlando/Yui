@@ -95,6 +95,18 @@ export class HeldQueue {
         return out;
     }
 
+    /** Retrait ciblé par `source:key` (ce qui a été dit) — le reste attend le
+     *  prochain point. Retourne le nombre d'entrées retirées. */
+    remove(keys: string[]): number {
+        if (!keys.length) return 0;
+        const gone = new Set(keys);
+        const before = this.items.length;
+        this.items = this.items.filter((e) => !gone.has(eventKey(e)));
+        const removed = before - this.items.length;
+        if (removed > 0) this.save();
+        return removed;
+    }
+
     size(): number {
         return this.items.length;
     }

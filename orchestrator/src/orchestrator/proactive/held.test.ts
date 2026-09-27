@@ -86,6 +86,30 @@ async function run(): Promise<void> {
         ['k'],
     );
 
+    // remove : retrait ciblé par `source:key`, compte retourné, persisté.
+    const rfile = path.join(
+        fs.mkdtempSync(path.join(os.tmpdir(), 'yui-held-rm-')),
+        'held.json',
+    );
+    const q5 = new HeldQueue(rfile);
+    q5.add(ev('a'), NOW);
+    q5.add(ev('b'), NOW);
+    q5.add(ev('c', { source: 'astronix' }), NOW);
+    assert.strictEqual(q5.remove(['koya:a']), 1);
+    assert.deepStrictEqual(
+        q5.peek(NOW).map((e) => `${e.source}:${e.key}`),
+        ['koya:b', 'astronix:c'],
+    );
+    assert.strictEqual(q5.remove(['koya:zzz', 'koya:a']), 0, 'inconnu → 0');
+    assert.strictEqual(q5.remove([]), 0);
+    assert.strictEqual(q5.size(), 2);
+    const q6 = new HeldQueue(rfile);
+    assert.deepStrictEqual(
+        q6.peek(NOW).map((e) => e.key),
+        ['b', 'c'],
+        'retrait persisté',
+    );
+
     console.log('All held tests passed');
 }
 
