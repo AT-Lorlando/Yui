@@ -1,6 +1,8 @@
 import assert from 'assert';
 import {
     buildSecretaryPrompt,
+    categorizeEvent,
+    checkText,
     parseJudgment,
     eventsHash,
     fetchAgendaEvents,
@@ -36,7 +38,146 @@ const EVENTS: AgendaEvent[] = [
 ];
 const NOW = new Date('2026-06-25T08:00:00Z');
 
+function ev(partial: Partial<AgendaEvent> & { title: string }): AgendaEvent {
+    return {
+        id: partial.title,
+        date: '2026-07-01',
+        endDate: null,
+        durationMin: 60,
+        start: '10:00',
+        allDay: false,
+        location: null,
+        description: null,
+        attendees: [],
+        ...partial,
+    };
+}
+
 async function run(): Promise<void> {
+    // ── categorizeEvent : règles déterministes ──────────────────────────────────
+    {
+        const cat = (e: AgendaEvent) => categorizeEvent(e, NOW);
+
+        assert.deepStrictEqual(
+            cat(ev({ title: 'Entretien Kinéis' })),
+            { category: 'meeting-pro', sure: false },
+            'Kinéis ne matche pas kiné (frontière de mot) → meeting-pro incertain',
+        );
+        assert.deepStrictEqual(
+            cat(ev({ title: 'Kiné', start: '18:00' })),
+            { category: 'perso', sure: true },
+            'kiné seul → perso sûr',
+        );
+        assert.deepStrictEqual(
+            cat(ev({ title: 'Psy', start: '18:00' })),
+            { category: 'perso', sure: true },
+            'Psy → perso sûr',
+        );
+        assert.deepStrictEqual(
+            cat(
+                ev({
+                    title: 'Vacances Bretagne',
+                    date: '2026-08-01',
+                    endDate: '2026-08-08',
+                    allDay: true,
+                    start: null,
+                    durationMin: null,
+                }),
+            ),
+            { category: 'vacation', sure: true },
+            'Vacances 8 j → vacation sûr',
+        );
+        assert.deepStrictEqual(
+            cat(
+                ev({
+                    title: 'Assomption',
+                    date: '2026-08-15',
+                    allDay: true,
+                    start: null,
+                    durationMin: null,
+                }),
+            ),
+            { category: 'holiday', sure: true },
+            'Assomption → holiday sûr',
+        );
+        assert.deepStrictEqual(
+            cat(EVENTS[0]),
+            { category: 'call', sure: true },
+            'Call Acme → call sûr',
+        );
+        // samedi 2026-07-04 → dimanche 2026-07-05, journée entière
+        assert.deepStrictEqual(
+            cat(
+                ev({
+                    title: 'Off',
+                    date: '2026-07-04',
+                    endDate: '2026-07-05',
+                    allDay: true,
+                    start: null,
+                    durationMin: null,
+                }),
+            ),
+            { category: 'weekend', sure: true },
+            'sam-dim journée entière → weekend sûr',
+        );
+        assert.deepStrictEqual(
+            cat(ev({ title: 'Apéro chez Max', start: '19:00' })),
+            { category: 'afterwork', sure: true },
+            'apéro → afterwork sûr',
+        );
+        assert.deepStrictEqual(
+            cat(ev({ title: 'Truc', attendees: ['acme@corp.com'] })),
+            { category: 'meeting-pro', sure: false },
+            'participant à domaine pro → meeting-pro incertain',
+        );
+        assert.deepStrictEqual(
+            cat(ev({ title: 'Truc', attendees: ['bob@gmail.com'] })),
+            { category: 'autre', sure: false },
+            'rien ne colle → autre incertain',
+        );
+        assert.deepStrictEqual(
+            cat(ev({ title: 'Point', description: 'via Zoom' })),
+            { category: 'call', sure: true },
+            'la description compte (zoom → call)',
+        );
+        // un événement horaire étalé sur 3 jours n'est pas un bloc de vacances
+        assert.deepStrictEqual(
+            cat(
+                ev({
+                    title: 'Call',
+                    date: '2026-06-25',
+                    endDate: '2026-06-27',
+                }),
+            ),
+            { category: 'call', sure: true },
+            'multi-jour horaire → pas vacances (seul un bloc journée entière l’est)',
+        );
+    }
+
+    // ── checkText : mêmes règles que le garde du composeur ──────────────────────
+    {
+        assert.strictEqual(checkText(null, ['Call Acme']), null);
+        assert.strictEqual(checkText('', ['Call Acme']), null);
+        assert.strictEqual(
+            checkText('Relire le doc.', ['Call Acme']),
+            'Relire le doc.',
+        );
+        assert.strictEqual(
+            checkText('Voir avec Bastien.', ['Call Acme']),
+            null,
+            'nom propre absent des faits → refusé',
+        );
+        assert.strictEqual(
+            checkText('Salle 12.', ['Call Acme']),
+            null,
+            'nombre absent des faits → refusé',
+        );
+        assert.strictEqual(
+            checkText('Chez Bastien vendredi.', ['Chez Bastien à Lyon']),
+            'Chez Bastien vendredi.',
+        );
+    }
+
     // ── buildSecretaryPrompt ────────────────────────────────────────────────────
     {
         const { system, user } = buildSecretaryPrompt(EVENTS, NOW);
@@ -70,9 +211,33 @@ async function run(): Promise<void> {
             /countdown/i.test(system),
             'system: consigne countdown (dans X jours)',
         );
+        // annotation seulement : le schéma ne redemande ni titre, ni date, ni lieu
         assert.ok(
-            /psy|m[ée]decin/i.test(system) && /perso/i.test(system),
-            'system: rendez-vous perso → category perso',
+            system.includes('"id": string') &&
+                system.includes('"importance": number'),
+            'system: schéma par id',
+        );
+        assert.ok(
+            !/"title"|"date"|"start"|"location"|"allDay"/.test(system),
+            'system: le LLM ne renvoie pas les champs factuels',
+        );
+        assert.ok(
+            !/rappel/i.test(system),
+            'system: plus de « rappel vacances »',
+        );
+        // catégories déjà fixées par les règles : dites au LLM, par id
+        assert.ok(
+            /\[e1\][^\n]*call[^\n]*fix/i.test(user) &&
+                /\[e2\][^\n]*vacation[^\n]*fix/i.test(user),
+            'user: catégorie fixée annoncée sur la ligne de l’événement',
+        );
+        const unsure = buildSecretaryPrompt(
+            [ev({ id: 'e3', title: 'Entretien Kinéis' })],
+            NOW,
+        ).user;
+        assert.ok(
+            /\[e3\][^\n]*choisir/i.test(unsure),
+            'user: catégorie incertaine → à choisir',
         );
     }
 
@@ -85,45 +250,155 @@ async function run(): Promise<void> {
                 items: [
                     {
                         id: 'e1',
-                        title: 'Call Acme',
-                        date: '2026-06-25',
-                        start: '10:00',
-                        allDay: false,
-                        location: 'Visio',
                         category: 'call',
-                        categoryLabel: null,
                         importance: 80,
                         note: 'Relire le doc.',
                         detail: 'full',
                     },
                 ],
-                judgedAt: '2026-06-25T08:00:00.000Z',
             }) +
             '\n```\nVoilà.';
-        const data = parseJudgment(llm);
+        const data = parseJudgment(llm, EVENTS);
         assert.ok(data, 'parse OK');
         assert.strictEqual(data!.briefing, 'Call à 10h.');
-        assert.strictEqual(data!.items.length, 1);
-        assert.strictEqual(data!.items[0].category, 'call');
-        assert.strictEqual(data!.items[0].importance, 80);
+        const e1 = data!.items.find((it) => it.id === 'e1')!;
+        assert.strictEqual(e1.category, 'call');
+        assert.strictEqual(e1.importance, 80);
+        assert.strictEqual(e1.note, 'Relire le doc.');
+        assert.strictEqual(e1.detail, 'full');
         assert.strictEqual(
-            data!.items[0].countdown,
+            e1.countdown,
             false,
             'call sans flag countdown → false',
+        );
+        assert.ok(
+            typeof data!.judgedAt === 'string' && data!.judgedAt.length > 0,
+            'judgedAt posé côté serveur',
+        );
+    }
+
+    // ── parseJudgment : ancrage strict sur les événements source ────────────────
+    {
+        const llm = JSON.stringify({
+            briefing: 'Call Acme à 10:00, puis vacances à Lyon.',
+            items: [
+                {
+                    id: 'e9',
+                    category: 'perso',
+                    importance: 90,
+                    note: 'Inventé.',
+                    detail: 'full',
+                },
+                {
+                    id: 'e1',
+                    title: 'Rendez-vous kiné',
+                    date: '2026-06-26',
+                    start: '15:00',
+                    location: 'Cabinet',
+                    category: 'perso',
+                    importance: 70,
+                    note: 'Voir avec Bastien.',
+                    detail: 'full',
+                },
+            ],
+        });
+        const data = parseJudgment(llm, EVENTS)!;
+        assert.ok(data);
+        assert.deepStrictEqual(
+            data.items.map((it) => it.id),
+            ['e1', 'e2'],
+            'id inconnu jeté ; ordre = événements source',
+        );
+        const e1 = data.items[0];
+        assert.strictEqual(e1.title, 'Call Acme', 'titre source conservé');
+        assert.strictEqual(e1.date, '2026-06-25', 'date source conservée');
+        assert.strictEqual(e1.start, '10:00', 'heure source conservée');
+        assert.strictEqual(e1.location, 'Visio', 'lieu source conservé');
+        assert.strictEqual(e1.durationMin, 60, 'durée source conservée');
+        assert.strictEqual(
+            e1.category,
+            'call',
+            'catégorie sûre imposée malgré le LLM',
+        );
+        assert.strictEqual(e1.importance, 70, 'importance du LLM gardée');
+        assert.strictEqual(
+            e1.note,
+            null,
+            'note citant un nom absent de l’événement → supprimée',
+        );
+        const e2 = data.items[1];
+        assert.strictEqual(e2.category, 'vacation', 'absent → catégorie règle');
+        assert.strictEqual(e2.importance, 50, 'absent → importance 50');
+        assert.strictEqual(e2.note, null, 'absent → note null');
+        assert.strictEqual(e2.detail, 'normal', 'absent → detail normal');
+        assert.strictEqual(e2.countdown, true, 'absent + vacances → countdown');
+        assert.strictEqual(
+            e2.endDate,
+            '2026-07-24',
+            'endDate depuis la source',
+        );
+        assert.strictEqual(
+            data.briefing,
+            'Call Acme à 10:00, puis vacances à Lyon.',
+            'briefing ancré sur les faits des événements → conservé',
+        );
+    }
+
+    // ── parseJudgment : note ancrée conservée, briefing inventé supprimé ────────
+    {
+        const llm = JSON.stringify({
+            briefing: 'Tu pars à Marseille bientôt.',
+            items: [
+                {
+                    id: 'e2',
+                    category: 'weekend',
+                    importance: 90,
+                    note: 'Chez Bastien à Lyon, prévoir le train.',
+                    detail: 'full',
+                },
+            ],
+        });
+        const data = parseJudgment(llm, EVENTS)!;
+        const e2 = data.items.find((it) => it.id === 'e2')!;
+        assert.strictEqual(
+            e2.note,
+            'Chez Bastien à Lyon, prévoir le train.',
+            'note citant la description → conservée',
+        );
+        assert.strictEqual(e2.category, 'vacation', 'weekend refusé (sûr)');
+        assert.strictEqual(e2.detail, 'full');
+        assert.strictEqual(
+            data.briefing,
+            '',
+            'briefing citant un lieu inconnu → vidé',
         );
     }
 
     // ── parseJudgment : countdown explicite + repli vacances/férié ──────────────
     {
+        const src: AgendaEvent[] = [
+            ev({
+                id: 'a',
+                title: 'Anniv Bastien',
+                allDay: true,
+                start: null,
+                durationMin: null,
+            }),
+            ev({
+                id: 'b',
+                title: 'Vacances',
+                date: '2026-07-10',
+                allDay: true,
+                start: null,
+                durationMin: null,
+            }),
+            ev({ id: 'c', title: 'Psy', date: '2026-07-02', start: '18:00' }),
+        ];
         const llm = JSON.stringify({
             briefing: 'x',
             items: [
                 {
                     id: 'a',
-                    title: 'Anniv Bastien',
-                    date: '2026-07-01',
-                    start: null,
-                    allDay: true,
                     category: 'perso',
                     importance: 60,
                     detail: 'minimal',
@@ -131,9 +406,6 @@ async function run(): Promise<void> {
                 },
                 {
                     id: 'b',
-                    title: 'Vacances',
-                    date: '2026-07-10',
-                    allDay: true,
                     category: 'vacation',
                     importance: 90,
                     detail: 'normal',
@@ -141,18 +413,14 @@ async function run(): Promise<void> {
                 },
                 {
                     id: 'c',
-                    title: 'Psy',
-                    date: '2026-07-02',
-                    start: '18:00',
-                    allDay: false,
                     category: 'perso',
                     importance: 40,
                     detail: 'normal',
                 },
             ],
-            judgedAt: '2026-06-25T08:00:00.000Z',
         });
-        const data = parseJudgment(llm)!;
+        const data = parseJudgment(llm, src)!;
+        assert.strictEqual(data.items[0].category, 'perso', 'incertain → LLM');
         assert.strictEqual(data.items[0].countdown, true, 'anniv → countdown');
         assert.strictEqual(
             data.items[1].countdown,
@@ -168,26 +436,22 @@ async function run(): Promise<void> {
 
     // ── parseJudgment : normalisation (catégorie inconnue → autre, importance clampée) ─
     {
+        const src = [
+            ev({ id: 'e9', title: 'Truc', allDay: true, start: null }),
+        ];
         const llm = JSON.stringify({
             briefing: 'x',
             items: [
                 {
                     id: 'e9',
-                    title: 'Truc',
-                    date: '2026-06-25',
-                    start: null,
-                    allDay: true,
-                    location: null,
                     category: 'licorne',
-                    categoryLabel: null,
                     importance: 999,
                     note: null,
                     detail: 'wat',
                 },
             ],
-            judgedAt: '2026-06-25T08:00:00.000Z',
         });
-        const data = parseJudgment(llm);
+        const data = parseJudgment(llm, src);
         assert.ok(data);
         assert.strictEqual(
             data!.items[0].category,
@@ -213,9 +477,9 @@ async function run(): Promise<void> {
 
     // ── parseJudgment : JSON invalide / vide → null ─────────────────────────────
     {
-        assert.strictEqual(parseJudgment('pas de json ici'), null);
-        assert.strictEqual(parseJudgment(''), null);
-        assert.strictEqual(parseJudgment('{ briefing: cassé'), null);
+        assert.strictEqual(parseJudgment('pas de json ici', EVENTS), null);
+        assert.strictEqual(parseJudgment('', EVENTS), null);
+        assert.strictEqual(parseJudgment('{ briefing: cassé', EVENTS), null);
     }
 
     // ── eventsHash : stable et sensible au changement ───────────────────────────
@@ -331,19 +595,12 @@ async function run(): Promise<void> {
             items: [
                 {
                     id: 'e1',
-                    title: 'Call',
-                    date: '2026-06-25',
-                    start: '10:00',
-                    allDay: false,
-                    location: null,
                     category: 'call',
-                    categoryLabel: null,
                     importance: 70,
                     note: null,
                     detail: 'full',
                 },
             ],
-            judgedAt: '2026-06-25T08:00:00.000Z',
         });
 
         // cas nominal + cache

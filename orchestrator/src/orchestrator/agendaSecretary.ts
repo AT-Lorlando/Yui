@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { checkComposed } from './proactive/brief/compose';
 
 export interface AgendaEvent {
     id: string;
@@ -69,42 +70,120 @@ export interface AgendaData {
 
 const TAXONOMY_LINE = CATEGORIES.join(' | ');
 
+// ── Catégorisation déterministe ────────────────────────────────────────────────
+// Les règles tournent sur le titre + la description repliés (minuscules, sans
+// accents) : le LLM ne peut pas contredire un résultat « sûr », il ne tranche
+// que les cas incertains (réunion pro / call, ou rien ne colle).
+
+function fold(s: string): string {
+    return s
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+}
+
+const HOLIDAY_RE =
+    /ferie|assomption|toussaint|\bnoel\b|1er mai|8 mai|14 juillet|11 novembre|\bpaques\b|ascension|pentecote/;
+const VACATION_RE = /\bvacances|\bconges?\b|\bsejour|\bvoyage/;
+// Frontière de mot fermante sur « kine » : « Kinéis » (une entreprise) n'est
+// pas un rendez-vous chez le kiné.
+const PERSO_RE =
+    /\bpsy|\bmedecin|\bdentiste|\bkine\b|\bcoiffeur|\bosteo|\bsport|\bsalle\b|\bveterinaire/;
+const AFTERWORK_RE = /afterwork|\bapero|\bsoiree/;
+const CALL_RE = /\bcall\b|\bvisio|\bteams\b|\bmeet\b|\bzoom\b/;
+const MEETING_RE =
+    /\bentretien|\breunion|\bmeeting|\bpoint\b|\bcomite|\bdemo\b|\breview\b/;
+
+// Un participant dont l'adresse n'est pas chez un fournisseur grand public
+// signe une réunion professionnelle.
+const PERSONAL_MAIL_DOMAINS = new Set([
+    'gmail.com',
+    'googlemail.com',
+    'hotmail.com',
+    'hotmail.fr',
+    'outlook.com',
+    'outlook.fr',
+    'live.com',
+    'live.fr',
+    'yahoo.com',
+    'yahoo.fr',
+    'icloud.com',
+    'me.com',
+    'free.fr',
+    'orange.fr',
+    'wanadoo.fr',
+    'sfr.fr',
+    'laposte.net',
+    'proton.me',
+    'protonmail.com',
+]);
+
+function hasProAttendee(attendees: string[]): boolean {
+    return attendees.some((a) => {
+        const m = /@([^\s>]+)/.exec(a);
+        return m ? !PERSONAL_MAIL_DOMAINS.has(m[1].toLowerCase()) : false;
+    });
+}
+
+/** Jour de la semaine UTC (0 = dimanche, 6 = samedi) d'une date YYYY-MM-DD. */
+function weekday(ymd: string): number {
+    return new Date(ymd + 'T00:00:00Z').getUTCDay();
+}
+
+export function categorizeEvent(
+    e: AgendaEvent,
+    _now: Date,
+): { category: AgendaCategory; sure: boolean } {
+    const text = fold(`${e.title} ${e.description ?? ''}`);
+    const days = e.endDate ? spanDays(e.date, e.endDate) : 1;
+    const sure = (category: AgendaCategory) => ({ category, sure: true });
+
+    // Un férié est un jour ; un bloc journée entière de plusieurs jours
+    // (« Vacances de Noël ») est du temps libre, quel que soit le mot. Un
+    // événement horaire étalé sur plusieurs jours n'en est pas un.
+    const block = e.allDay && days >= 3;
+    if (!block && HOLIDAY_RE.test(text)) return sure('holiday');
+    if (block || VACATION_RE.test(text)) return sure('vacation');
+    const wd = weekday(e.date);
+    if (e.allDay && (wd === 6 || (wd === 0 && days === 1))) {
+        return sure('weekend');
+    }
+    if (PERSO_RE.test(text)) return sure('perso');
+    if (AFTERWORK_RE.test(text)) return sure('afterwork');
+    if (CALL_RE.test(text)) return sure('call');
+    if (MEETING_RE.test(text) || hasProAttendee(e.attendees)) {
+        return { category: 'meeting-pro', sure: false };
+    }
+    return { category: 'autre', sure: false };
+}
+
 export function buildSecretaryPrompt(
     events: AgendaEvent[],
     now: Date,
 ): { system: string; user: string } {
     const system =
         'Tu es la secrétaire personnelle de Jérémy. On te donne ses événements ' +
-        "d'agenda des deux prochains mois. Sélectionne ce qui mérite d'être affiché " +
-        "aujourd'hui (en détail) et les temps forts à venir (vacances, gros meetings) ; " +
-        'ignore le bruit. Pour chaque événement retenu, choisis :\n' +
-        `- category parmi : ${TAXONOMY_LINE} (si rien ne colle : "autre" + categoryLabel court).\n` +
-        '- importance : entier 0-100 (un call client > un afterwork > un week-end off).\n' +
-        '- note : courte phrase utile de secrétaire (ou null).\n' +
+        "d'agenda des deux prochains mois, chacun avec un id. Les faits (titre, date, " +
+        "heure, lieu) viennent de l'agenda : tu ne les renvoies pas, tu ANNOTES chaque " +
+        'événement par son id :\n' +
+        '- category : UNIQUEMENT pour les événements marqués « catégorie : à choisir », ' +
+        `parmi : ${TAXONOMY_LINE} ("autre" si rien ne colle). Pour ceux marqués « fixée », ` +
+        'la catégorie est déjà décidée : ne renvoie pas de category (elle serait ignorée).\n' +
+        '- importance : entier 0-100 (un call client > un afterwork > un week-end off). ' +
+        'Les réunions professionnelles hors de la semaine analysée — la semaine en cours, ' +
+        'étendue à la semaine prochaine UNIQUEMENT si on est vendredi, samedi ou dimanche — ' +
+        'sont du bruit : importance 20 au plus et detail "minimal".\n' +
+        "- note : courte phrase utile de secrétaire, ou null. N'y mets aucun nom, chiffre " +
+        'ou lieu absent de l\'événement lui-même (sa description "desc:" compte) — une note ' +
+        'qui invente est supprimée.\n' +
         '- detail : "full" (heure+lieu+participants+note), "normal" (heure+lieu), "minimal" (titre+jour).\n' +
-        "- countdown : true SEULEMENT pour un événement qu'on attend et qu'on décompte " +
-        '(vacances, anniversaire, fête, mariage, jour férié, concert, voyage…) ; false pour ' +
-        'un rendez-vous de routine (psy, médecin, dentiste, coiffeur, réunion, call).\n' +
-        'Les jours fériés (ex. fête nationale, Assomption, Noël, 1er mai) → category "holiday".\n' +
-        'Les rendez-vous personnels (médecin, psy, dentiste, coiffeur, sport, rendez-vous ' +
-        'perso divers) → category "perso" (JAMAIS "autre" ni "meeting-pro"). Ne mets "autre" ' +
-        "que pour un événement qui n'entre vraiment dans aucune autre catégorie.\n" +
-        'Un événement journée entière indiqué sur PLUSIEURS jours (plage "→ … (N jours)") : ' +
-        'sa DURÉE prime — un séjour de plusieurs jours est des vacances, pas un week-end ' +
-        '(un week-end = samedi-dimanche, ~2 jours).\n' +
-        'Sers-toi de la description ("desc:") d\'un événement pour mieux le juger ' +
-        '(lieu, contexte) et enrichir ta note.\n' +
-        'Pour les réunions professionnelles (ex. "Professional meeting", meetings pro) : ' +
-        'ne retiens QUE celles de la semaine analysée — la semaine en cours, étendue à la ' +
-        'semaine prochaine UNIQUEMENT si on est vendredi, samedi ou dimanche. Ignore toute ' +
-        'réunion pro plus lointaine dans le temps.\n' +
-        'Rédige aussi un "briefing" de 1-2 phrases, ton de secrétaire, en français.\n' +
+        "- countdown : true pour un événement qu'on attend (anniversaire, fête, mariage, " +
+        'concert…) ; false pour la routine (rendez-vous, réunion, call).\n' +
+        'Rédige aussi un "briefing" de 1-2 phrases, ton de secrétaire, en français, ' +
+        'avec les mêmes règles que la note : rien qui ne soit dans les événements.\n' +
         'Réponds STRICTEMENT en JSON, sans texte autour, selon ce schéma :\n' +
-        '{"briefing": string, "items": [{"id": string, "title": string, "date": "YYYY-MM-DD", ' +
-        '"start": string|null, "allDay": boolean, "location": string|null, "category": string, ' +
-        '"categoryLabel": string|null, "importance": number, "note": string|null, "detail": string, ' +
-        '"countdown": boolean}], ' +
-        '"judgedAt": string}';
+        '{"briefing": string, "items": [{"id": string, "category"?: string, ' +
+        '"importance": number, "note": string|null, "detail": string, "countdown": boolean}]}';
 
     const lines = events.map((e) => {
         const span =
@@ -112,13 +191,20 @@ export function buildSecretaryPrompt(
                 ? ` → ${e.endDate} (${spanDays(e.date, e.endDate)} jours)`
                 : '';
         const when = e.allDay ? `${span} (journée)` : ` ${e.start ?? ''}`;
+        const rule = categorizeEvent(e, now);
+        const category = rule.sure
+            ? `${rule.category} (fixée)`
+            : `à choisir (suggestion : ${rule.category})`;
         return (
             `- [${e.id}] ${e.title} | ${e.date}${when}` +
             `${e.location ? ` | lieu: ${e.location}` : ''}` +
             `${
                 e.attendees.length ? ` | avec: ${e.attendees.join(', ')}` : ''
             }` +
-            `${e.description ? ` | desc: ${e.description.slice(0, 120)}` : ''}`
+            `${
+                e.description ? ` | desc: ${e.description.slice(0, 120)}` : ''
+            }` +
+            ` | catégorie : ${category}`
         );
     });
     const user =
@@ -165,45 +251,120 @@ function extractJson(text: string): unknown {
     }
 }
 
-export function parseJudgment(llmText: string): AgendaData | null {
+/** Nombres qu'une phrase peut légitimement tirer d'une date YYYY-MM-DD :
+ *  année, mois et jour, avec et sans zéro initial (« le 5 juillet »). */
+function dateNumbers(ymd: string): string[] {
+    const [y, m, d] = ymd.split('-');
+    return [y, m, d, String(Number(m)), String(Number(d))].filter(Boolean);
+}
+
+/** Chaînes dont les jetons (chiffres, noms propres) sont tolérés dans une
+ *  note ou un briefing : les faits des événements eux-mêmes, plus les nombres
+ *  qu'on en dérive (heure « 10h », durée « 1h30 », « 15 jours », nombre
+ *  d'événements). Tout le reste est une invention. */
+function allowedTokensFor(events: AgendaEvent[]): string[] {
+    const out: string[] = [];
+    for (const e of events) {
+        out.push(e.title, ...e.attendees, ...dateNumbers(e.date));
+        if (e.location) out.push(e.location);
+        if (e.description) out.push(e.description);
+        if (e.endDate) {
+            out.push(
+                ...dateNumbers(e.endDate),
+                String(spanDays(e.date, e.endDate)),
+            );
+        }
+        if (e.start) out.push(e.start, ...e.start.split(':'));
+        if (e.durationMin != null) {
+            out.push(
+                String(e.durationMin),
+                String(Math.floor(e.durationMin / 60)),
+                String(e.durationMin % 60),
+            );
+        }
+    }
+    out.push(String(events.length));
+    return out;
+}
+
+/** Garde anti-invention d'un texte LLM (même règle que le brief composé) :
+ *  un chiffre ou un nom propre absent de `allowed` → texte refusé (null). */
+export function checkText(
+    text: string | null,
+    allowed: string[],
+): string | null {
+    if (!text) return null;
+    const res = checkComposed(text, [], allowed);
+    return res.ok && res.text.length > 0 ? res.text : null;
+}
+
+/** Un item est reconstruit depuis son événement source ; la réponse du LLM
+ *  n'apporte que des annotations. Sans réponse : annotations neutres. */
+function buildItem(
+    src: AgendaEvent,
+    reply: Record<string, unknown> | undefined,
+    now: Date,
+): AgendaItem {
+    const rule = categorizeEvent(src, now);
+    let category = rule.category;
+    let categoryLabel: string | null = null;
+    const rawCategory = reply ? strOrNull(reply.category) : null;
+    if (rawCategory && !rule.sure) {
+        category = normCategory(rawCategory);
+        // Une catégorie libre (hors taxonomie) devient « autre » et sert de libellé.
+        if (category === 'autre' && rawCategory !== 'autre') {
+            categoryLabel = rawCategory;
+        }
+    }
+    return {
+        id: src.id,
+        title: src.title,
+        date: src.date,
+        endDate: src.endDate,
+        durationMin: src.durationMin,
+        start: src.start,
+        allDay: src.allDay,
+        location: src.location,
+        category,
+        categoryLabel,
+        importance: reply ? clampImportance(reply.importance) : 50,
+        note: reply
+            ? checkText(strOrNull(reply.note), allowedTokensFor([src]))
+            : null,
+        detail: reply ? normDetail(reply.detail) : 'normal',
+        // Vacances / fériés se décomptent toujours ; le reste sur avis du LLM.
+        countdown:
+            reply?.countdown === true ||
+            category === 'vacation' ||
+            category === 'holiday',
+    };
+}
+
+export function parseJudgment(
+    llmText: string,
+    sourceEvents: AgendaEvent[],
+): AgendaData | null {
     const raw = extractJson(llmText);
     if (!raw || typeof raw !== 'object') return null;
     const o = raw as Record<string, unknown>;
     if (!Array.isArray(o.items)) return null;
 
-    const items: AgendaItem[] = (o.items as unknown[]).map((it) => {
-        const e = (it ?? {}) as Record<string, unknown>;
-        const category = normCategory(e.category);
-        return {
-            id: str(e.id),
-            title: str(e.title) || '(Sans titre)',
-            date: str(e.date),
-            endDate: typeof e.endDate === 'string' ? e.endDate : null,
-            durationMin:
-                typeof e.durationMin === 'number' ? e.durationMin : null,
-            start: typeof e.start === 'string' ? e.start : null,
-            allDay: e.allDay === true,
-            location: strOrNull(e.location),
-            category,
-            categoryLabel:
-                category === 'autre'
-                    ? strOrNull(e.categoryLabel) ?? strOrNull(e.category)
-                    : null,
-            importance: clampImportance(e.importance),
-            note: strOrNull(e.note),
-            detail: normDetail(e.detail),
-            // Le LLM décide, avec repli : vacances / fériés se décomptent par défaut.
-            countdown:
-                e.countdown === true ||
-                category === 'vacation' ||
-                category === 'holiday',
-        };
-    });
+    // Réponses indexées par id : un id inconnu de la source est ignoré.
+    const replies = new Map<string, Record<string, unknown>>();
+    for (const it of o.items as unknown[]) {
+        if (isObj(it) && typeof it.id === 'string') replies.set(it.id, it);
+    }
+    const now = new Date();
+    const items = sourceEvents.map((src) =>
+        buildItem(src, replies.get(src.id), now),
+    );
 
     return {
-        briefing: str(o.briefing),
+        briefing:
+            checkText(strOrNull(o.briefing), allowedTokensFor(sourceEvents)) ??
+            '',
         items,
-        judgedAt: str(o.judgedAt) || new Date().toISOString(),
+        judgedAt: now.toISOString(),
     };
 }
 
@@ -375,21 +536,12 @@ export class AgendaSecretary {
                     this.deps.complete(system, user),
                     LLM_TIMEOUT_MS,
                 ),
+                events,
             );
         } catch {
             return null; // LLM KO ou trop lent → repli brut, pas de cache
         }
         if (!data) return null; // JSON invalide → null, pas de mise en cache
-
-        // Le LLM ne renvoie pas endDate : on le réinjecte depuis les events source
-        // (par id) pour que le front puisse afficher la durée des séjours/vacances.
-        const byId = new Map(events.map((e) => [e.id, e]));
-        for (const item of data.items) {
-            const src = byId.get(item.id);
-            if (item.endDate == null) item.endDate = src?.endDate ?? null;
-            if (item.durationMin == null)
-                item.durationMin = src?.durationMin ?? null;
-        }
 
         this.cache = { hash, data, at: now.getTime() };
         return data;
