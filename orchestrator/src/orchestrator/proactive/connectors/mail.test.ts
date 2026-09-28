@@ -10,28 +10,49 @@ const { MailConcierge } =
     require('../mail/concierge') as typeof import('../mail/concierge');
 const { ConnectorState } =
     require('../connectorState') as typeof import('../connectorState');
+const { RuleStore } =
+    require('../mail/rules') as typeof import('../mail/rules');
+const { MailJournal } =
+    require('../mail/journal') as typeof import('../mail/journal');
 import type { ConnectorContext } from '../connector';
 
 const NOW = new Date('2026-09-25T10:00:00').getTime();
 // Format réel de search_emails, tel que parseSearchOutput() le découpe
-// (`ID:`, `De:`, `Objet:`, `Apercu:` — sans accent).
+// (`ID:`, `De:`, `Objet:`, `Apercu:` — sans accent) — lu par le watcher
+// des mails importants.
 const SEARCH =
     'ID: m1\nDe: LinkedIn <jobs@linkedin.com>\nObjet: Nouvelle proposition DevOps\nDate: 2026-09-25\nApercu: Un recruteur…\n';
+// Forme réelle de list_messages_meta (déjà parsée) — lue par le concierge.
+const META = [
+    {
+        id: 'm1',
+        threadId: 't1',
+        from: 'LinkedIn <jobs@linkedin.com>',
+        subject: 'Nouvelle proposition DevOps',
+        snippet: 'Un recruteur…',
+        headers: {},
+        labelIds: ['INBOX'],
+    },
+];
 
 async function run(): Promise<void> {
     let scans = 0;
     const concierge = new MailConcierge(
         {
             deviceHandler: async (t) =>
-                t === 'search_emails'
-                    ? SEARCH
+                t === 'list_messages_meta'
+                    ? META
                     : t === 'get_email'
                     ? 'corps'
                     : null,
             // parseClassifyReply() indexe les mails par `i` (1-based).
             complete: async () => '[{"i":1,"category":"action"}]',
-            getRules: () => [],
-            addRule: () => {},
+            rules: new RuleStore(
+                path.join(process.env.YUI_DATA_DIR!, 'rules.json'),
+            ),
+            journal: new MailJournal(
+                path.join(process.env.YUI_DATA_DIR!, 'journal.json'),
+            ),
             getAutoCategories: () => [],
             readBodies: false,
             now: () => NOW,
@@ -46,7 +67,12 @@ async function run(): Promise<void> {
 
     const state = new ConnectorState();
     const ctx = (settings: Record<string, unknown>): ConnectorContext => ({
-        callTool: async (t) => (t === 'search_emails' ? SEARCH : null),
+        callTool: async (t) =>
+            t === 'search_emails'
+                ? SEARCH
+                : t === 'list_messages_meta'
+                ? META
+                : null,
         settings,
         state,
         presence: () => 'home',

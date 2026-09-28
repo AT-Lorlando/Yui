@@ -10,9 +10,15 @@ import {
     buildClassifySystem,
     buildClassifyUser,
     parseClassifyReply,
+    parseMetaList,
+    loadTriage,
+    saveTriage,
     allCategories,
     BASE_CATEGORIES,
 } from './concierge';
+import type { ConciergeDeps } from './concierge';
+import { RuleStore, newRule } from './rules';
+import { MailJournal } from './journal';
 import type { ConciergeRule, CustomCategory } from '../types';
 
 const tmp = () =>
@@ -20,16 +26,86 @@ const tmp = () =>
 
 const BASE_IDS = new Set(BASE_CATEGORIES.map((c) => c.id));
 
-const MAILS_TEXT = [
-    'ID: m1\nDe: Zalando <news@mail.zalando.fr>\nObjet: SOLDES -50%\nApercu: Profitez vite',
-    'ID: m2\nDe: EDF <service@edf.fr>\nObjet: Votre facture est disponible\nApercu: Montant 84 EUR',
-    'ID: m3\nDe: Plan Immobilier <alerte@plan-immobilier.fr>\nObjet: Nouveaux logements\nApercu: Alerte',
-].join('\n---\n');
+// Forme réelle de list_messages_meta (déjà parsée par le moteur).
+const META = [
+    {
+        id: 'm1',
+        threadId: 't1',
+        from: 'Zalando <news@mail.zalando.fr>',
+        subject: 'SOLDES -50%',
+        snippet: 'Profitez vite',
+        headers: { 'List-Unsubscribe': '<x>' },
+        labelIds: ['INBOX'],
+    },
+    {
+        id: 'm2',
+        threadId: 't2',
+        from: 'EDF <service@edf.fr>',
+        subject: 'Votre facture est disponible',
+        snippet: 'Montant 84 EUR',
+        headers: {},
+        labelIds: ['INBOX'],
+    },
+    {
+        id: 'm3',
+        threadId: 't3',
+        from: 'Plan Immobilier <alerte@plan-immobilier.fr>',
+        subject: 'Nouveaux logements',
+        snippet: 'Alerte',
+        headers: {},
+        labelIds: ['INBOX'],
+    },
+];
 
 const BODIES: Record<string, string> = {
     m2: 'ID: m2\nDe: EDF\nObjet: Votre facture est disponible\n\n--- Corps ---\nBonjour,\n\n\nVotre facture de 84 EUR est disponible http://edf.fr/x   Merci.',
     m3: 'ID: m3\n--- Corps ---\nNouveaux logements neufs près de chez vous.',
 };
+
+const unknownMail = (i: number) => ({
+    id: `u${i}`,
+    threadId: `tu${i}`,
+    from: `Inconnu ${i} <contact${i}@inconnu-${i}.fr>`,
+    subject: `Sujet ${i}`,
+    snippet: `aperçu ${i}`,
+    headers: {},
+    labelIds: ['INBOX'],
+});
+
+/** Concierge de test : boîte mutable, appels enregistrés, LLM injectable. */
+function makeConcierge(opts: {
+    inbox: () => unknown[];
+    complete: ConciergeDeps['complete'];
+    rules?: RuleStore;
+    journal?: MailJournal;
+    readBodies?: boolean;
+    now?: () => number;
+    extra?: Partial<ConciergeDeps>;
+}) {
+    const calls: Array<{ tool: string; args: any }> = [];
+    const rules = opts.rules ?? new RuleStore(tmp());
+    const journal = opts.journal ?? new MailJournal(tmp());
+    const concierge = new MailConcierge(
+        {
+            deviceHandler: async (tool, args) => {
+                calls.push({ tool, args });
+                if (tool === 'list_messages_meta') return opts.inbox();
+                if (tool === 'get_email')
+                    return BODIES[args?.messageId as string] ?? '';
+                return 'ok';
+            },
+            complete: opts.complete,
+            rules,
+            journal,
+            getAutoCategories: () => [],
+            readBodies: opts.readBodies,
+            now: opts.now ?? (() => 1000),
+            ...opts.extra,
+        },
+        tmp(),
+    );
+    return { concierge, calls, rules, journal };
+}
 
 async function run(): Promise<void> {
     // ── Catégories : base + perso, sans doublon ───────────────────────────
@@ -51,7 +127,7 @@ async function run(): Promise<void> {
             BASE_IDS.has('securite'),
     );
 
-    // ── Règles ────────────────────────────────────────────────────────────
+    // ── Règles legacy (helper pur conservé) ──────────────────────────────
     const rules: ConciergeRule[] = [{ match: 'zalando', category: 'promo' }];
     assert.strictEqual(
         applyRules(rules, 'Zalando <news@mail.zalando.fr>', BASE_IDS),
@@ -125,70 +201,162 @@ async function run(): Promise<void> {
     assert.strictEqual(parsed[1]?.doubt?.suggestions[1]?.id, 'nergie');
     assert.strictEqual(parsed[2], null);
     assert.deepStrictEqual(parseClassifyReply('rien', 1, valid), [null]);
+    // Urgence et raison tolérées (remplies par le prompt plus tard).
+    const withUrgency = parseClassifyReply(
+        '[{"i":1,"category":"action","urgency":"now","reason":"échéance demain"},{"i":2,"category":"lire","urgency":"nawak"}]',
+        2,
+        valid,
+    );
+    assert.strictEqual(withUrgency[0]?.urgency, 'now');
+    assert.strictEqual(withUrgency[0]?.reason, 'échéance demain');
+    assert.strictEqual(withUrgency[1]?.urgency, undefined);
 
-    // ── Scan : règle (auto) + LLM avec corps + doute notifié ─────────────
-    const calls: Array<{ tool: string; args: any }> = [];
-    let learned: ConciergeRule[] = [{ match: 'zalando', category: 'promo' }];
+    // ── list_messages_meta : tableau, JSON texte, ou rien ────────────────
+    assert.strictEqual(parseMetaList(META).length, 3);
+    assert.strictEqual(parseMetaList(JSON.stringify(META)).length, 3);
+    assert.deepStrictEqual(parseMetaList('pas du json'), []);
+    assert.deepStrictEqual(parseMetaList(null), []);
+    assert.deepStrictEqual(parseMetaList([{ from: 'sans id' }]), []);
+    const meta = parseMetaList([{ id: 'x', from: 'a@b.c' }])[0]!;
+    assert.deepStrictEqual(meta.headers, {});
+    assert.deepStrictEqual(meta.labelIds, []);
+    assert.strictEqual(meta.subject, '');
+
+    // ── État : fallbackTries absent du fichier → {} ; persisté ensuite ──
+    const stFile = tmp();
+    fs.writeFileSync(
+        stFile,
+        JSON.stringify({ proposals: [], doubts: [], processedIds: [] }),
+    );
+    const loaded = loadTriage(stFile);
+    assert.deepStrictEqual(loaded.fallbackTries, {});
+    loaded.fallbackTries.z = 2;
+    saveTriage(loaded, stFile);
+    assert.deepStrictEqual(loadTriage(stFile).fallbackTries, { z: 2 });
+
+    // ── Scan : signal (quarantaine) + LLM avec corps + doute notifié ─────
+    let inbox: unknown[] = [...META];
     let promptRules: string[] = [];
     let customCats: CustomCategory[] = [];
     let notified: number[] = [];
     let seenSystem = '';
-    const concierge = new MailConcierge(
-        {
-            deviceHandler: async (tool, args) => {
-                calls.push({ tool, args });
-                if (tool === 'search_emails') return MAILS_TEXT;
-                if (tool === 'get_email')
-                    return BODIES[args?.messageId as string] ?? '';
-                return 'ok';
-            },
-            complete: async (sys, u) => {
-                seenSystem = sys;
-                assert.ok(u.includes('Corps: Bonjour,'), 'le corps est lu');
-                assert.ok(!u.includes('zalando'), 'la règle a évité le LLM');
-                return `[{"i":1,"category":"finance"},
-                         {"i":2,"category":"promo","doubt":true,"reason":"alerte non sollicitée ?","alternatives":["promo","osef"],
-                          "suggestions":[{"kind":"rule","text":"Les alertes Plan-Immobilier sont osef"},
-                                         {"kind":"category","id":"immo","label":"Yui/Immobilier","text":"Alertes immobilières","archive":true}]}]`;
-            },
-            getRules: () => learned,
-            addRule: (r) => {
-                learned = [...learned.filter((x) => x.match !== r.match), r];
-            },
-            getAutoCategories: () => [],
+    let completes = 0;
+    const main = makeConcierge({
+        inbox: () => inbox,
+        complete: async (sys, u) => {
+            completes++;
+            seenSystem = sys;
+            assert.ok(u.includes('Corps: Bonjour,'), 'le corps est lu');
+            assert.ok(!u.includes('zalando'), 'le signal a évité le LLM');
+            return `[{"i":1,"category":"finance"},
+                     {"i":2,"category":"promo","doubt":true,"reason":"alerte non sollicitée ?","alternatives":["promo","osef"],
+                      "suggestions":[{"kind":"rule","text":"Les alertes Plan-Immobilier sont osef"},
+                                     {"kind":"category","id":"immo","label":"Yui/Immobilier","text":"Alertes immobilières","archive":true}]}]`;
+        },
+        extra: {
             getPromptRules: () => promptRules,
             addPromptRule: (t) => void promptRules.push(t),
             getCustomCategories: () => customCats,
             addCustomCategory: (c) => void customCats.push(c),
             onDoubts: (d) => void notified.push(d.length),
-            now: () => 1000,
         },
-        tmp(),
-    );
+    });
+    const { concierge, calls, rules: store, journal } = main;
 
     const r1 = await concierge.scan();
     assert.deepStrictEqual(r1, { scanned: 3, classified: 3, doubts: 1 });
+    assert.strictEqual(completes, 1, 'un seul lot LLM (m2, m3)');
     assert.ok(seenSystem.includes('"osef"'));
     assert.strictEqual(
         calls.filter((c) => c.tool === 'get_email').length,
         2,
-        'corps lus pour les non-réglés seulement',
+        'corps lus pour les candidats LLM seulement',
     );
     const applied = calls.filter((c) => c.tool === 'modify_labels');
     assert.strictEqual(
         applied.length,
         1,
-        'seule la règle est auto-appliquée (le doute jamais)',
+        'seul le signal pose un label (le doute jamais)',
     );
     assert.strictEqual(applied[0]!.args.messageId, 'm1');
-    assert.deepStrictEqual(applied[0]!.args.add, ['Yui/Promos']);
-    assert.strictEqual(applied[0]!.args.archive, true);
+    assert.deepStrictEqual(applied[0]!.args.add, ['Yui/Newsletters']);
+    assert.ok(
+        !('archive' in applied[0]!.args),
+        'un signal pose le label seul, jamais d’archive',
+    );
+    const st = concierge.getState();
+    const p1 = st.proposals.find((p) => p.mailId === 'm1')!;
+    assert.strictEqual(p1.via, 'signal');
+    assert.strictEqual(p1.stage, 'signal');
+    assert.strictEqual(p1.category, 'newsletter');
+    assert.strictEqual(p1.proposeArchive, false);
+    assert.strictEqual(p1.auto, true);
+    assert.ok(p1.appliedAt && p1.ruleId);
+    assert.ok(st.processedIds.includes('m1'));
+    const q1 = store.all().find((r) => r.id === p1.ruleId)!;
+    assert.strictEqual(q1.origin, 'signal');
+    assert.strictEqual(q1.confirmed, false);
+    assert.strictEqual(q1.when.from, 'news@mail.zalando.fr');
+    assert.strictEqual(q1.then.category, 'newsletter');
+    assert.strictEqual(q1.hits, 1);
+    const p2 = st.proposals.find((p) => p.mailId === 'm2')!;
+    assert.strictEqual(p2.via, 'llm');
+    assert.strictEqual(p2.stage, 'llm');
+    assert.strictEqual(p2.urgency, 'none');
+    assert.strictEqual(p2.reason, '');
     assert.strictEqual(concierge.pending().length, 2);
     assert.strictEqual(concierge.openDoubts().length, 1);
     assert.deepStrictEqual(notified, [1], 'doute notifié une fois');
+    assert.strictEqual(journal.size(), 3, 'une décision par mail conclu');
+    const j1 = journal.list().find((d) => d.mailId === 'm1')!;
+    assert.strictEqual(j1.stage, 'signal');
+    assert.strictEqual(j1.signal, 'list-unsubscribe');
+    assert.strictEqual(j1.ruleId, p1.ruleId);
+    assert.strictEqual(j1.applied, true);
+    assert.strictEqual(
+        journal.list().find((d) => d.mailId === 'm2')!.applied,
+        false,
+    );
 
     // Re-scan : rien de nouveau.
     assert.strictEqual((await concierge.scan()).classified, 0);
+
+    // Nouveau mail du même expéditeur : la règle de quarantaine encaisse
+    // (hits 2), label seul, pas de LLM.
+    inbox = [
+        ...META,
+        {
+            id: 'm4',
+            from: 'Zalando <news@mail.zalando.fr>',
+            subject: 'Nouveautés automne',
+            snippet: '…',
+            headers: {},
+            labelIds: ['INBOX'],
+        },
+    ];
+    const r2 = await concierge.scan();
+    assert.strictEqual(r2.classified, 1);
+    assert.strictEqual(completes, 1, 'pas de LLM pour un expéditeur connu');
+    assert.strictEqual(store.all().find((r) => r.id === p1.ruleId)!.hits, 2);
+    const m4 = calls.filter((c) => c.tool === 'modify_labels').pop()!;
+    assert.strictEqual(m4.args.messageId, 'm4');
+    assert.ok(!('archive' in m4.args));
+    const p4 = st.proposals.find((p) => p.mailId === 'm4')!;
+    assert.strictEqual(p4.stage, 'signal');
+    assert.strictEqual(p4.ruleId, p1.ruleId);
+
+    // ── rules() / quarantine() ───────────────────────────────────────────
+    assert.strictEqual(concierge.rules().length, 1);
+    const quarantine = concierge.quarantine();
+    assert.strictEqual(quarantine.length, 1);
+    assert.deepStrictEqual(quarantine[0], {
+        ruleId: p1.ruleId,
+        from: 'news@mail.zalando.fr',
+        category: 'newsletter',
+        hits: 2,
+        lastHitAt: 1000,
+        lastSubject: 'Nouveautés automne',
+    });
 
     // ── Trancher le doute : catégorie + suggestions acceptées ────────────
     const doubt = concierge.openDoubts()[0]!;
@@ -202,18 +370,44 @@ async function run(): Promise<void> {
         'Les alertes Plan-Immobilier sont osef',
     ]);
     assert.strictEqual(customCats[0]?.id, 'immo');
-    assert.ok(
-        learned.some(
-            (r) => r.match === 'plan-immobilier.fr' && r.category === 'osef',
-        ),
-        'règle expéditeur apprise',
-    );
+    const learnedRule = store
+        .all()
+        .find(
+            (r) =>
+                r.when.from === 'plan-immobilier.fr' &&
+                r.then.category === 'osef',
+        );
+    assert.ok(learnedRule, 'règle expéditeur apprise (domaine)');
+    assert.strictEqual(learnedRule!.origin, 'correction');
+    assert.strictEqual(learnedRule!.confirmed, true);
     assert.strictEqual(concierge.openDoubts().length, 0);
     const osefApply = calls.filter((c) => c.tool === 'modify_labels').pop()!;
     assert.deepStrictEqual(osefApply.args.add, ['Yui/Osef']);
     assert.strictEqual(osefApply.args.archive, true, 'osef archive');
     // La catégorie perso est désormais valide pour une correction.
     assert.ok(concierge.categories().some((c) => c.id === 'immo'));
+    assert.strictEqual(concierge.rules()[0]!.origin, 'correction', 'triées');
+
+    // ── Correction d'un expéditeur en quarantaine : même id, confirmée ──
+    assert.ok(await concierge.correct('m1', 'perso'));
+    const promoted = store.all().find((r) => r.id === p1.ruleId)!;
+    assert.strictEqual(promoted.origin, 'correction');
+    assert.strictEqual(promoted.confirmed, true);
+    assert.strictEqual(promoted.then.category, 'perso');
+    assert.strictEqual(promoted.when.from, 'news@mail.zalando.fr');
+    assert.strictEqual(concierge.quarantine().length, 0);
+    const fix = calls.filter((c) => c.tool === 'modify_labels').pop()!;
+    assert.deepStrictEqual(fix.args.add, ['Yui/Perso']);
+    assert.deepStrictEqual(fix.args.remove, ['Yui/Newsletters']);
+    // Une seconde correction sur le même domaine remplace la règle (jamais
+    // deux règles concurrentes dont la plus ancienne gagnerait toujours).
+    assert.ok(await concierge.correct('m3', 'immo'));
+    const immoRules = store
+        .all()
+        .filter((r) => r.when.from === 'plan-immobilier.fr');
+    assert.strictEqual(immoRules.length, 1);
+    assert.strictEqual(immoRules[0]!.id, learnedRule!.id);
+    assert.strictEqual(immoRules[0]!.then.category, 'immo');
 
     // ── Application groupée + correction classique ────────────────────────
     assert.strictEqual(await concierge.apply({ category: 'finance' }), 1);
@@ -223,7 +417,157 @@ async function run(): Promise<void> {
         false,
         'catégorie inconnue refusée',
     );
-    assert.strictEqual(concierge.getState().stats.corrected, 1);
+    assert.strictEqual(concierge.getState().stats.corrected, 3);
+
+    // ── Règle utilisateur confirmée : application directe (étage 1) ──────
+    {
+        const rs = new RuleStore(tmp());
+        rs.upsert(
+            newRule({
+                when: { from: 'edf.fr' },
+                category: 'admin',
+                origin: 'user',
+                confirmed: true,
+                now: 500,
+            }),
+        );
+        const edfRule = rs.all()[0]!;
+        let n = 0;
+        const t = makeConcierge({
+            inbox: () => [META[1]],
+            complete: async () => {
+                n++;
+                return '[]';
+            },
+            rules: rs,
+        });
+        const r = await t.concierge.scan();
+        assert.deepStrictEqual(r, { scanned: 1, classified: 1, doubts: 0 });
+        assert.strictEqual(n, 0, 'aucun appel LLM');
+        const lab = t.calls.find((c) => c.tool === 'modify_labels')!;
+        assert.deepStrictEqual(lab.args.add, ['Yui/Admin']);
+        assert.strictEqual(lab.args.archive, false);
+        const p = t.concierge.getState().proposals[0]!;
+        assert.strictEqual(p.via, 'rule');
+        assert.strictEqual(p.stage, 'rule');
+        assert.strictEqual(p.ruleId, edfRule.id);
+        assert.strictEqual(p.auto, true);
+        assert.ok(p.appliedAt);
+        assert.strictEqual(rs.all()[0]!.hits, 1);
+        const d = t.journal.list()[0]!;
+        assert.strictEqual(d.stage, 'rule');
+        assert.strictEqual(d.ruleId, edfRule.id);
+        assert.strictEqual(d.applied, true);
+        assert.ok(t.concierge.getState().processedIds.includes('m2'));
+    }
+
+    // ── 60 inconnus : 24 par sondage (2 lots de 12), le reste attend ────
+    {
+        const sixty = Array.from({ length: 60 }, (_, i) => unknownMail(i));
+        let n = 0;
+        const t = makeConcierge({
+            inbox: () => sixty,
+            readBodies: false,
+            complete: async (_s, u) => {
+                n++;
+                const count = (u.match(/^\d+\. De:/gm) ?? []).length;
+                assert.strictEqual(count, 12, 'lots de 12');
+                return JSON.stringify(
+                    Array.from({ length: count }, (_, i) => ({
+                        i: i + 1,
+                        category: 'lire',
+                    })),
+                );
+            },
+        });
+        const r = await t.concierge.scan('in:inbox', 100);
+        assert.strictEqual(n, 2);
+        assert.strictEqual(r.classified, 24);
+        const s = t.concierge.getState();
+        assert.strictEqual(s.processedIds.length, 24);
+        assert.strictEqual(s.proposals.length, 24);
+        assert.ok(!s.processedIds.includes('u24'));
+        assert.ok(!s.proposals.some((p) => p.mailId === 'u59'));
+        assert.strictEqual(t.journal.size(), 24);
+        // Le sondage suivant reprend les reportés.
+        await t.concierge.scan('in:inbox', 100);
+        assert.strictEqual(n, 4);
+        assert.strictEqual(t.concierge.getState().processedIds.length, 48);
+        assert.ok(t.concierge.getState().processedIds.includes('u24'));
+    }
+
+    // ── LLM en panne : retenté 3 fois, puis repli « lire » ───────────────
+    {
+        const t = makeConcierge({
+            inbox: () => [META[1]],
+            readBodies: false,
+            complete: async () => {
+                throw new Error('LLM down');
+            },
+        });
+        await t.concierge.scan();
+        let s = t.concierge.getState();
+        assert.deepStrictEqual(s.processedIds, []);
+        assert.strictEqual(s.proposals.length, 0);
+        assert.deepStrictEqual(s.fallbackTries, { m2: 1 });
+        assert.strictEqual(
+            t.journal.size(),
+            0,
+            'un retry ne se journalise pas',
+        );
+        await t.concierge.scan();
+        assert.deepStrictEqual(t.concierge.getState().fallbackTries, { m2: 2 });
+        assert.strictEqual(
+            t.calls.filter((c) => c.tool === 'modify_labels').length,
+            0,
+        );
+        const r3 = await t.concierge.scan();
+        assert.strictEqual(r3.classified, 1);
+        s = t.concierge.getState();
+        assert.deepStrictEqual(s.fallbackTries, {});
+        assert.deepStrictEqual(s.processedIds, ['m2']);
+        const p = s.proposals[0]!;
+        assert.strictEqual(p.category, 'lire');
+        assert.strictEqual(p.via, 'fallback');
+        assert.strictEqual(p.stage, 'fallback');
+        assert.strictEqual(p.proposeArchive, false);
+        assert.ok(p.appliedAt);
+        const lab = t.calls.filter((c) => c.tool === 'modify_labels');
+        assert.strictEqual(lab.length, 1);
+        assert.deepStrictEqual(lab[0]!.args.add, ['Yui/A lire']);
+        assert.ok(!('archive' in lab[0]!.args));
+        const d = t.journal.list()[0]!;
+        assert.strictEqual(d.stage, 'fallback');
+        assert.strictEqual(d.applied, true);
+        assert.strictEqual(t.journal.size(), 1);
+    }
+
+    // ── Item illisible dans un lot : même repli ; un succès efface le compteur
+    {
+        let n = 0;
+        const t = makeConcierge({
+            inbox: () => [META[1], META[2]],
+            readBodies: false,
+            complete: async () => {
+                n++;
+                return n === 1
+                    ? '[{"i":1,"category":"finance"}]'
+                    : '[{"i":1,"category":"lire"}]';
+            },
+        });
+        await t.concierge.scan();
+        let s = t.concierge.getState();
+        assert.deepStrictEqual(s.processedIds, ['m2']);
+        assert.deepStrictEqual(s.fallbackTries, { m3: 1 });
+        await t.concierge.scan();
+        s = t.concierge.getState();
+        assert.deepStrictEqual(s.processedIds, ['m2', 'm3']);
+        assert.deepStrictEqual(s.fallbackTries, {});
+        assert.strictEqual(
+            s.proposals.find((p) => p.mailId === 'm3')!.via,
+            'llm',
+        );
+    }
 
     console.log('All concierge tests passed');
 }

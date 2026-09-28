@@ -1,18 +1,26 @@
 // Concierge courrier — trie la boîte Gmail en continu.
 //
-// Chaque mail entrant est classé (règles apprises d'abord — 0 token —, LLM
-// par lots sinon, EN LISANT LE CORPS) et matérialisé en label Gmail « Yui/… » :
-// le tri est visible partout, pas enfermé dans l'app. Mode PROPOSITIONS par
-// défaut : rien n'est appliqué sans validation, sauf les catégories listées
-// dans `concierge.autoCategories` et les règles apprises.
+// Chaque mail entrant traverse quatre étages, du moins au plus cher :
+//  1. règles (`mail-rules.json`, RuleStore) — confirmées seulement, 0 token,
+//     application directe (label + archive selon la catégorie) ;
+//  2. signaux de masse (en-têtes de liste, expéditeur automatisé) — label
+//     SEUL, jamais d'archive, et une règle « signal » non confirmée est
+//     apprise (quarantaine : Jérémy la confirme ou la corrige) ;
+//  3. LLM par lots, EN LISANT LE CORPS, borné à LLM_PER_POLL mails par
+//     sondage — le reste attend le suivant ;
+//  4. repli « lire » après FALLBACK_MAX_TRIES échecs consécutifs du LLM.
+// Le résultat est matérialisé en label Gmail « Yui/… » : le tri est visible
+// partout, pas enfermé dans l'app. Mode PROPOSITIONS par défaut : rien n'est
+// appliqué sans validation, sauf les catégories `concierge.autoCategories`,
+// les règles confirmées et les étages déterministes.
 //
-// Trois boucles d'apprentissage, du moins au plus cher :
-//  1. règles par expéditeur (`concierge.rules`) — une correction en crée une ;
-//  2. règles de prompt (`concierge.promptRules`, texte libre injecté dans le
-//     prompt) et catégories personnalisées (`concierge.customCategories`) ;
-//  3. les DOUTES : quand le LLM hésite, il le dit et propose des règles ou une
-//     nouvelle catégorie ; l'app notifie, Jérémy tranche, et ce qu'il accepte
-//     alimente 1 et 2 pour la prochaine analyse.
+// Boucles d'apprentissage :
+//  - une correction crée (ou promeut) une règle par expéditeur ;
+//  - règles de prompt (`concierge.promptRules`) et catégories personnalisées
+//    (`concierge.customCategories`) ;
+//  - les DOUTES : quand le LLM hésite, il le dit et propose des règles ou une
+//    nouvelle catégorie ; l'app notifie, Jérémy tranche, et ce qu'il accepte
+//    alimente les précédentes pour la prochaine analyse.
 //
 // Sécurité : on ne SUPPRIME jamais — au pire on archive (réversible), et
 // uniquement pour les catégories d'archivage.
@@ -20,10 +28,25 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { dataPath } from '@yui/shared';
 import Logger from '../../../logger';
-import { parseSearchOutput } from '../watchers/deliveries';
-import type { ParsedMail } from '../watchers/deliveries';
 import type { ConciergeRule, CustomCategory } from '../types';
-import { senderDomain } from './rules';
+import {
+    ruleFor,
+    ruleFromCorrection,
+    ruleFromSignal,
+    senderDomain,
+    sortRules,
+} from './rules';
+import type { MailRule, RuleMail, RuleStore } from './rules';
+import {
+    deterministicVerdict,
+    fallbackVerdict,
+    splitForLlm,
+    FALLBACK_MAX_TRIES,
+    LLM_BATCH,
+    LLM_PER_POLL,
+} from './triage';
+import type { Stage, Urgency } from './triage';
+import type { MailJournal } from './journal';
 
 // senderDomain vit désormais dans rules.ts (partagé avec le modèle de règles) ; ré-exporté pour ne pas casser les imports existants (concierge.test.ts).
 export { senderDomain };
@@ -156,7 +179,13 @@ export interface TriageProposal {
     from: string;
     subject: string;
     category: MailCategory;
-    via: 'rule' | 'llm';
+    via: 'rule' | 'llm' | 'signal' | 'fallback';
+    /** Étage qui a conclu — absent sur les propositions antérieures au pipeline. */
+    stage?: Stage;
+    /** Règle qui a conclu ou a été apprise (étages règle et signal). */
+    ruleId?: string;
+    urgency?: Urgency;
+    reason?: string;
     proposeArchive: boolean;
     /** Posé quand le label a été réellement appliqué. */
     appliedAt?: number;
@@ -197,15 +226,23 @@ export interface TriageState {
     doubts: TriageDoubt[];
     /** Ids déjà traités (borné) — évite de reclasser au poll suivant. */
     processedIds: string[];
+    /** mailId → échecs LLM consécutifs ; au-delà de FALLBACK_MAX_TRIES le mail est rangé en lecture. */
+    fallbackTries: Record<string, number>;
     stats: { classified: number; applied: number; corrected: number };
     lastScanAt?: number;
+}
+
+/** Mail tel que le concierge le manipule : forme de list_messages_meta + corps lu à la demande. */
+export interface ConciergeMail extends RuleMail {
+    threadId: string;
+    labelIds: string[];
+    body?: string;
 }
 
 const STATE_FILE = dataPath('mail-triage.json');
 const MAX_PROCESSED = 1000;
 const MAX_PROPOSALS = 200;
 const MAX_DOUBTS = 60;
-const BATCH_SIZE = 8;
 /** Corps de mail injecté dans le prompt (par mail). */
 const BODY_CHARS = 700;
 
@@ -219,6 +256,13 @@ export function loadTriage(file: string = STATE_FILE): TriageState {
                 processedIds: Array.isArray(raw.processedIds)
                     ? raw.processedIds
                     : [],
+                // un fichier écrit avant le pipeline n'a pas ce champ
+                fallbackTries:
+                    raw.fallbackTries &&
+                    typeof raw.fallbackTries === 'object' &&
+                    !Array.isArray(raw.fallbackTries)
+                        ? raw.fallbackTries
+                        : {},
                 stats: raw.stats ?? { classified: 0, applied: 0, corrected: 0 },
                 lastScanAt: raw.lastScanAt,
             };
@@ -230,6 +274,7 @@ export function loadTriage(file: string = STATE_FILE): TriageState {
         proposals: [],
         doubts: [],
         processedIds: [],
+        fallbackTries: {},
         stats: { classified: 0, applied: 0, corrected: 0 },
     };
 }
@@ -282,6 +327,50 @@ export function extractBody(full: string, max = BODY_CHARS): string {
     return body.length > max ? body.slice(0, max) + '…' : body;
 }
 
+/**
+ * Sortie de list_messages_meta → mails du concierge. Le moteur livre déjà le
+ * tableau parsé quand le texte est du JSON ; un texte brut est aussi accepté.
+ * Tout ce qui n'est pas exploitable vaut [] (un mail sans id est ignoré).
+ */
+export function parseMetaList(raw: unknown): ConciergeMail[] {
+    let list: unknown = raw;
+    if (typeof raw === 'string') {
+        try {
+            list = JSON.parse(raw);
+        } catch {
+            return [];
+        }
+    }
+    if (!Array.isArray(list)) return [];
+    const out: ConciergeMail[] = [];
+    for (const item of list) {
+        if (!item || typeof item !== 'object') continue;
+        const o = item as Record<string, unknown>;
+        const id = typeof o.id === 'string' ? o.id : '';
+        if (!id) continue;
+        const headers: Record<string, string> = {};
+        if (o.headers && typeof o.headers === 'object') {
+            for (const [k, v] of Object.entries(
+                o.headers as Record<string, unknown>,
+            )) {
+                if (typeof v === 'string') headers[k] = v;
+            }
+        }
+        out.push({
+            id,
+            threadId: typeof o.threadId === 'string' ? o.threadId : '',
+            from: typeof o.from === 'string' ? o.from : '',
+            subject: typeof o.subject === 'string' ? o.subject : '',
+            snippet: typeof o.snippet === 'string' ? o.snippet : '',
+            headers,
+            labelIds: Array.isArray(o.labelIds)
+                ? o.labelIds.filter((l): l is string => typeof l === 'string')
+                : [],
+        });
+    }
+    return out;
+}
+
 /** System prompt : catégories (base + perso) + règles apprises. Pur, testé. */
 export function buildClassifySystem(
     categories: CategoryDef[],
@@ -307,7 +396,11 @@ Réponds UNIQUEMENT en JSON : [{"i":1,"category":"promo"},{"i":2,"category":"lir
 
 /** Prompt utilisateur du lot (corps compacté si fourni). Pur, testé. */
 export function buildClassifyUser(
-    mails: Array<ParsedMail & { body?: string }>,
+    mails: Array<
+        Pick<RuleMail, 'id' | 'from' | 'subject' | 'snippet'> & {
+            body?: string;
+        }
+    >,
 ): string {
     return mails
         .map(
@@ -323,6 +416,8 @@ export function buildClassifyUser(
 
 export interface ClassifyItem {
     category: MailCategory;
+    urgency?: Urgency;
+    reason?: string;
     doubt?: {
         reason: string;
         alternatives: MailCategory[];
@@ -347,6 +442,16 @@ export function parseClassifyReply(
             const cat = String(item?.category ?? '');
             if (i < 0 || i >= count || !valid.has(cat)) continue;
             const entry: ClassifyItem = { category: cat };
+            if (
+                item?.urgency === 'none' ||
+                item?.urgency === 'soon' ||
+                item?.urgency === 'now'
+            ) {
+                entry.urgency = item.urgency;
+            }
+            if (typeof item?.reason === 'string' && item.reason.trim()) {
+                entry.reason = item.reason.trim();
+            }
             if (item?.doubt === true) {
                 const suggestions: DoubtSuggestion[] = [];
                 for (const s of Array.isArray(item.suggestions)
@@ -396,8 +501,8 @@ export interface ConciergeDeps {
         args?: Record<string, unknown>,
     ) => Promise<unknown>;
     complete: (system: string, user: string) => Promise<string>;
-    getRules: () => ConciergeRule[];
-    addRule: (rule: ConciergeRule) => void;
+    rules: RuleStore;
+    journal: MailJournal;
     getAutoCategories: () => MailCategory[];
     getPromptRules?: () => string[];
     addPromptRule?: (text: string) => void;
@@ -455,6 +560,44 @@ export class MailConcierge {
         return this.state.doubts.filter((d) => !d.resolvedAt);
     }
 
+    /** Toutes les règles, triées dans l'ordre d'évaluation (user → correction → signal). */
+    rules(): MailRule[] {
+        return sortRules(this.deps.rules.all());
+    }
+
+    /** Règles apprises d'un signal et pas encore confirmées — à valider ou corriger depuis l'app. */
+    quarantine(): Array<{
+        ruleId: string;
+        from: string;
+        category: string;
+        hits: number;
+        lastHitAt?: number;
+        lastSubject?: string;
+    }> {
+        return this.rules()
+            .filter((r) => r.origin === 'signal' && !r.confirmed)
+            .map((r) => {
+                // le dernier sujet vient des propositions : la règle ne le mémorise pas
+                let lastSubject: string | undefined;
+                for (let i = this.state.proposals.length - 1; i >= 0; i--) {
+                    if (this.state.proposals[i]!.ruleId === r.id) {
+                        lastSubject = this.state.proposals[i]!.subject;
+                        break;
+                    }
+                }
+                return {
+                    ruleId: r.id,
+                    from: r.when.from ?? '',
+                    category: r.then.category ?? '',
+                    hits: r.hits,
+                    ...(r.lastHitAt !== undefined
+                        ? { lastHitAt: r.lastHitAt }
+                        : {}),
+                    ...(lastSubject !== undefined ? { lastSubject } : {}),
+                };
+            });
+    }
+
     /**
      * Scanne la boîte et classe les mails non encore traités.
      * `query` permet le nettoyage d'arriéré (ex: "in:inbox older_than:6m").
@@ -464,16 +607,15 @@ export class MailConcierge {
         max = 40,
     ): Promise<{ scanned: number; classified: number; doubts: number }> {
         const now = this.deps.now?.() ?? Date.now();
-        const raw = await this.deps.deviceHandler('search_emails', {
-            query,
-            maxResults: max,
-        });
-        const mails = typeof raw === 'string' ? parseSearchOutput(raw) : [];
+        const mails = parseMetaList(
+            await this.deps.deviceHandler('list_messages_meta', {
+                query,
+                maxResults: max,
+            }),
+        );
         const seen = new Set(this.state.processedIds);
         const known = new Set(this.state.proposals.map((p) => p.mailId));
-        const fresh = mails.filter(
-            (m) => m.id && !seen.has(m.id) && !known.has(m.id),
-        );
+        const fresh = mails.filter((m) => !seen.has(m.id) && !known.has(m.id));
         if (!fresh.length) {
             this.state.lastScanAt = now;
             saveTriage(this.state, this.stateFile);
@@ -481,31 +623,74 @@ export class MailConcierge {
         }
 
         const valid = this.validIds();
+        let concluded = 0;
 
-        // 1. règles apprises (0 token)
-        const rules = this.deps.getRules();
-        const needLlm: Array<ParsedMail & { body?: string }> = [];
-        const classified: Array<{
-            mail: ParsedMail;
-            item: ClassifyItem;
-            via: 'rule' | 'llm';
-        }> = [];
+        // 1-2. règles confirmées puis signaux (0 token). `rules.all()` est relu
+        // à chaque mail : une règle de quarantaine apprise sur le premier mail
+        // d'un expéditeur doit déjà compter pour le second du même sondage.
+        const candidates: ConciergeMail[] = [];
         for (const m of fresh) {
-            const cat = applyRules(rules, m.from, valid);
-            if (cat) {
-                classified.push({
-                    mail: m,
-                    item: { category: cat },
+            const v = deterministicVerdict(m, this.deps.rules.all(), valid);
+            if (!v) {
+                candidates.push(m);
+                continue;
+            }
+            if (v.stage === 'rule' && v.ruleId) {
+                this.deps.rules.recordHit(v.ruleId, now);
+                const proposal = this.conclude(m, {
+                    category: v.category,
                     via: 'rule',
+                    stage: 'rule',
+                    ruleId: v.ruleId,
                 });
+                // Une règle confirmée = déjà validée par Jérémy : application
+                // directe, archive comprise si la catégorie le prévoit.
+                try {
+                    await this.applyProposal(proposal, { auto: true });
+                } catch (err) {
+                    Logger.warn(`concierge: règle ${m.id} — ${err}`);
+                }
+                this.journal(proposal, { ruleId: v.ruleId });
+                concluded++;
+            } else if (v.stage === 'signal') {
+                let ruleId = v.ruleId;
+                if (ruleId) {
+                    this.deps.rules.recordHit(ruleId, now);
+                } else {
+                    const learned = ruleFromSignal(m.from, v.category, now);
+                    this.deps.rules.upsert(learned);
+                    // le mail fondateur compte comme premier hit de la règle
+                    this.deps.rules.recordHit(learned.id, now);
+                    ruleId = learned.id;
+                }
+                const proposal = this.conclude(m, {
+                    category: v.category,
+                    via: 'signal',
+                    stage: 'signal',
+                    ruleId,
+                    // jamais d'archive sur un signal : la règle n'est pas confirmée
+                    proposeArchive: false,
+                });
+                await this.labelOnly(proposal, `signal ${m.id}`);
+                this.journal(proposal, { ruleId, signal: v.signal });
+                concluded++;
             } else {
-                needLlm.push(m);
+                candidates.push(m);
             }
         }
 
-        // 2. corps des mails (le sujet seul trompe : « Jérémy, c'est Jimmy… »)
+        // 3. LLM — borné par sondage ; les reportés ne sont pas touchés
+        // (ni proposition ni processedIds) et reviennent au prochain scan.
+        const { now: toLlm, later } = splitForLlm(candidates, LLM_PER_POLL);
+        if (later.length) {
+            Logger.info(
+                `concierge: ${later.length} mail(s) reportés au prochain poll`,
+            );
+        }
+
+        // corps des mails (le sujet seul trompe : « Jérémy, c'est Jimmy… »)
         if (this.deps.readBodies !== false) {
-            for (const m of needLlm) {
+            for (const m of toLlm) {
                 try {
                     const full = await this.deps.deviceHandler('get_email', {
                         messageId: m.id,
@@ -517,46 +702,46 @@ export class MailConcierge {
             }
         }
 
-        // 3. LLM par lots
         const system = buildClassifySystem(
             this.categories(),
             this.deps.getPromptRules?.() ?? [],
         );
-        for (let i = 0; i < needLlm.length; i += BATCH_SIZE) {
-            const batch = needLlm.slice(i, i + BATCH_SIZE);
+        const classified: Array<{ mail: ConciergeMail; item: ClassifyItem }> =
+            [];
+        const failed: ConciergeMail[] = [];
+        for (let i = 0; i < toLlm.length; i += LLM_BATCH) {
+            const batch = toLlm.slice(i, i + LLM_BATCH);
+            let items: Array<ClassifyItem | null>;
             try {
                 const reply = await this.deps.complete(
                     system,
                     buildClassifyUser(batch),
                 );
-                const items = parseClassifyReply(reply, batch.length, valid);
-                batch.forEach((mail, j) => {
-                    const item = items[j];
-                    if (item) classified.push({ mail, item, via: 'llm' });
-                    // Mail illisible pour le LLM → on le laisse pour un
-                    // prochain scan (pas marqué traité).
-                });
+                items = parseClassifyReply(reply, batch.length, valid);
             } catch (err) {
                 Logger.warn(`concierge: classification LLM échouée — ${err}`);
+                items = new Array(batch.length).fill(null);
             }
+            batch.forEach((mail, j) => {
+                const item = items[j];
+                if (item) classified.push({ mail, item });
+                else failed.push(mail);
+            });
         }
 
-        // 4. propositions, doutes, auto-application
+        // propositions, doutes, auto-application
         const auto = new Set(this.deps.getAutoCategories());
         const newDoubts: TriageDoubt[] = [];
         for (const c of classified) {
-            const proposal: TriageProposal = {
-                mailId: c.mail.id,
-                from: c.mail.from,
-                subject: c.mail.subject,
+            delete this.state.fallbackTries[c.mail.id];
+            const proposal = this.conclude(c.mail, {
                 category: c.item.category,
-                via: c.via,
-                proposeArchive: this.archives(c.item.category),
+                via: 'llm',
+                stage: 'llm',
+                urgency: c.item.urgency ?? 'none',
+                reason: c.item.reason ?? '',
                 ...(c.item.doubt ? { doubt: true } : {}),
-            };
-            this.state.proposals.push(proposal);
-            this.state.processedIds.push(c.mail.id);
-            this.state.stats.classified++;
+            });
             if (c.item.doubt) {
                 const d: TriageDoubt = {
                     id: `${now.toString(36)}-${c.mail.id.slice(-6)}`,
@@ -571,18 +756,43 @@ export class MailConcierge {
                 };
                 this.state.doubts.push(d);
                 newDoubts.push(d);
-                continue; // un doute n'est jamais auto-appliqué
+                // un doute n'est jamais auto-appliqué
+            } else if (auto.has(c.item.category)) {
+                // les autoCategories sont opt-in explicites : application directe
+                try {
+                    await this.applyProposal(proposal, { auto: true });
+                } catch (err) {
+                    Logger.warn(`concierge: application ${c.mail.id} — ${err}`);
+                }
             }
-            if (auto.has(c.item.category) || c.via === 'rule') {
-                // Une règle apprise = déjà validée par une correction ; les
-                // autoCategories sont opt-in explicites. Application directe.
-                await this.applyProposal(proposal, { auto: true });
-            }
+            this.journal(proposal);
+            concluded++;
         }
+
+        // 4. repli : un mail que le LLM n'a pas su lire est retenté aux
+        // sondages suivants, puis rangé en lecture plutôt que bloqué à jamais.
+        for (const m of failed) {
+            const tries = (this.state.fallbackTries[m.id] ?? 0) + 1;
+            if (tries < FALLBACK_MAX_TRIES) {
+                this.state.fallbackTries[m.id] = tries;
+                continue;
+            }
+            delete this.state.fallbackTries[m.id];
+            const proposal = this.conclude(m, {
+                category: fallbackVerdict().category,
+                via: 'fallback',
+                stage: 'fallback',
+                proposeArchive: false,
+            });
+            await this.labelOnly(proposal, `repli ${m.id}`);
+            this.journal(proposal);
+            concluded++;
+        }
+
         this.state.lastScanAt = now;
         saveTriage(this.state, this.stateFile);
         Logger.info(
-            `concierge: scan "${query}" → ${fresh.length} nouveau(x), ${classified.length} classé(s), ${newDoubts.length} doute(s)`,
+            `concierge: scan "${query}" → ${fresh.length} nouveau(x), ${concluded} classé(s), ${newDoubts.length} doute(s)`,
         );
         if (newDoubts.length) {
             try {
@@ -593,9 +803,78 @@ export class MailConcierge {
         }
         return {
             scanned: mails.length,
-            classified: classified.length,
+            classified: concluded,
             doubts: newDoubts.length,
         };
+    }
+
+    /** Enregistre une conclusion : proposition + mail marqué traité. */
+    private conclude(
+        m: ConciergeMail,
+        v: Pick<TriageProposal, 'category' | 'via' | 'stage'> &
+            Partial<
+                Pick<
+                    TriageProposal,
+                    'ruleId' | 'urgency' | 'reason' | 'proposeArchive' | 'doubt'
+                >
+            >,
+    ): TriageProposal {
+        const proposal: TriageProposal = {
+            mailId: m.id,
+            from: m.from,
+            subject: m.subject,
+            category: v.category,
+            via: v.via,
+            stage: v.stage,
+            ...(v.ruleId ? { ruleId: v.ruleId } : {}),
+            ...(v.urgency ? { urgency: v.urgency } : {}),
+            ...(v.reason !== undefined ? { reason: v.reason } : {}),
+            proposeArchive: v.proposeArchive ?? this.archives(v.category),
+            ...(v.doubt ? { doubt: true } : {}),
+        };
+        this.state.proposals.push(proposal);
+        this.state.processedIds.push(m.id);
+        this.state.stats.classified++;
+        return proposal;
+    }
+
+    /** Label seul, sans archive — étages signal et repli (rien de confirmé par Jérémy). */
+    private async labelOnly(p: TriageProposal, what: string): Promise<void> {
+        try {
+            await this.deps.deviceHandler('modify_labels', {
+                messageId: p.mailId,
+                add: [this.labelOf(p.category)],
+            });
+            p.appliedAt = this.deps.now?.() ?? Date.now();
+            p.auto = true;
+            this.state.stats.applied++;
+        } catch (err) {
+            Logger.warn(`concierge: ${what} — ${err}`);
+        }
+    }
+
+    /** Une décision par mail conclu ; `applied` = un label vient d'être posé. Best-effort. */
+    private journal(
+        p: TriageProposal,
+        extra: { ruleId?: string; signal?: string } = {},
+    ): void {
+        try {
+            this.deps.journal.add({
+                at: this.deps.now?.() ?? Date.now(),
+                mailId: p.mailId,
+                from: p.from,
+                subject: p.subject,
+                category: p.category,
+                stage: p.stage ?? 'llm',
+                ...(extra.ruleId ? { ruleId: extra.ruleId } : {}),
+                ...(extra.signal ? { signal: extra.signal } : {}),
+                ...(p.urgency ? { urgency: p.urgency } : {}),
+                ...(p.reason ? { reason: p.reason } : {}),
+                applied: p.appliedAt !== undefined,
+            });
+        } catch (err) {
+            Logger.warn(`concierge: journal ${p.mailId} — ${err}`);
+        }
     }
 
     private async applyProposal(
@@ -633,6 +912,41 @@ export class MailConcierge {
     }
 
     /**
+     * Une correction promeut la règle de quarantaine de l'adresse exacte si
+     * elle existe (même id, désormais confirmée), sinon apprend une règle de
+     * domaine. Une règle de correction déjà apprise sur ce domaine est
+     * remplacée : deux règles concurrentes laisseraient toujours gagner la
+     * plus ancienne, et la seconde correction resterait lettre morte.
+     */
+    private learnCorrection(from: string, category: MailCategory): void {
+        const now = this.deps.now?.() ?? Date.now();
+        const all = this.deps.rules.all();
+        const exact = ruleFor(all, from);
+        if (exact && !exact.confirmed) {
+            this.deps.rules.upsert({
+                ...exact,
+                then: { category },
+                origin: 'correction',
+                confirmed: true,
+            });
+            return;
+        }
+        const domain = senderDomain(from);
+        const fresh = ruleFromCorrection(from, category, now);
+        const previous = all.find(
+            (r) =>
+                r.origin === 'correction' &&
+                Object.keys(r.when).length === 1 &&
+                r.when.from === domain,
+        );
+        this.deps.rules.upsert(
+            previous
+                ? { ...fresh, id: previous.id, createdAt: previous.createdAt }
+                : fresh,
+        );
+    }
+
+    /**
      * Correction : reclasse un mail ET apprend la règle (domaine expéditeur).
      * C'est la boucle d'apprentissage — la prochaine fois, 0 token.
      */
@@ -656,7 +970,7 @@ export class MailConcierge {
             Logger.warn(`concierge: correction ${mailId} — ${err}`);
         }
         this.state.stats.corrected++;
-        this.deps.addRule({ match: senderDomain(p.from), category });
+        this.learnCorrection(p.from, category);
         // Un doute ouvert sur ce mail est tranché par la correction.
         for (const d of this.state.doubts) {
             if (d.mailId === mailId && !d.resolvedAt) {

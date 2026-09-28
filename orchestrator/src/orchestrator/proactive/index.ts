@@ -40,6 +40,8 @@ import type { Situation } from './situation';
 import { detectMoments, returnMomentFacts } from './moments';
 import { MailConcierge } from './mail/concierge';
 import type { MailCategory } from './mail/concierge';
+import { RuleStore, migrateRulesOnce } from './mail/rules';
+import { MailJournal } from './mail/journal';
 import { saveConfig } from './config';
 import type { MomentKind, MomentState } from './moments';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
@@ -140,19 +142,24 @@ export class ProactiveEngine {
             speak: (t) => this.deps.speak(t),
             now: this.now,
         });
+        // Les règles vivent dans mail-rules.json ; `concierge.rules` de la
+        // config n'est relu qu'une fois, pour peupler un store encore absent.
+        const rules = new RuleStore();
+        const migrated = migrateRulesOnce(
+            rules,
+            this.cfg.concierge?.rules,
+            this.now(),
+        );
+        if (migrated > 0) {
+            Logger.info(
+                `concierge: ${migrated} règle(s) legacy migrée(s) vers mail-rules.json`,
+            );
+        }
         this.concierge = new MailConcierge({
             deviceHandler: (t, a) => this.deps.deviceHandler(t, a),
             complete: (sys, user) => this.deps.complete(sys, user),
-            getRules: () => this.cfg.concierge?.rules ?? [],
-            addRule: (rule) => {
-                const rules = [
-                    ...(this.cfg.concierge?.rules ?? []).filter(
-                        (r) => r.match !== rule.match,
-                    ),
-                    rule,
-                ];
-                this.patchConcierge({ rules });
-            },
+            rules,
+            journal: new MailJournal(),
             getAutoCategories: () =>
                 (this.cfg.concierge?.autoCategories ?? []) as MailCategory[],
             getPromptRules: () => this.cfg.concierge?.promptRules ?? [],

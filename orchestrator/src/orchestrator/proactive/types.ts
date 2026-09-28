@@ -75,7 +75,7 @@ export interface ConciergeConfig {
     pollMinutes?: number;
     /** Catégories appliquées sans validation (labels + archivage promo/news). */
     autoCategories?: string[];
-    /** Règles apprises des corrections — appliquées avant le LLM (0 token). */
+    /** Legacy — migré vers mail-rules.json au premier démarrage, ignoré ensuite. */
     rules?: ConciergeRule[];
     /** Règles en français injectées dans le prompt (acceptées depuis les doutes). */
     promptRules?: string[];
