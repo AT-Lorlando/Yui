@@ -46,6 +46,7 @@ const REGISTRY: Record<string, DataCategory> = {
     'situation.json': 'state',
     'postits.json': 'state',
     'mail-triage.json': 'state',
+    'mail-journal.json': 'state',
     'scene-cycle.json': 'state',
     'automation-history.json': 'state',
     'activity-log.json': 'state',

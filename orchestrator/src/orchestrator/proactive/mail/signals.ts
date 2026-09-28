@@ -2,7 +2,7 @@
 // Les signaux ne décident jamais seuls — une règle non confirmée peut être
 // bloquée par une règle utilisateur opposée.
 import type { MailRule, RuleMail } from './rules';
-import { ruleFor, senderLocalPart, firstMatch, matchRule } from './rules';
+import { ruleFor, senderLocalPart, firstMatch } from './rules';
 
 export type Signal =
     | 'list-unsubscribe'
