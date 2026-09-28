@@ -23,6 +23,10 @@ import Logger from '../../../logger';
 import { parseSearchOutput } from '../watchers/deliveries';
 import type { ParsedMail } from '../watchers/deliveries';
 import type { ConciergeRule, CustomCategory } from '../types';
+import { senderDomain } from './rules';
+
+// senderDomain vit désormais dans rules.ts (partagé avec le modèle de règles) ; ré-exporté pour ne pas casser les imports existants (concierge.test.ts).
+export { senderDomain };
 
 /** Catégorie = id libre (base ou personnalisée). */
 export type MailCategory = string;
@@ -258,12 +262,6 @@ export function applyRules(
         }
     }
     return null;
-}
-
-/** Domaine de l'expéditeur ("Zalando <news@mail.zalando.fr>" → "mail.zalando.fr"). */
-export function senderDomain(from: string): string {
-    const m = /@([\w.-]+)/.exec(from);
-    return (m?.[1] ?? from).toLowerCase();
 }
 
 /** Corps utile d'une sortie get_email (après « --- Corps --- »), compacté. */
