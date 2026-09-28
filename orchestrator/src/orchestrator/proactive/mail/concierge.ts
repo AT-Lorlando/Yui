@@ -34,6 +34,7 @@ import {
     ruleFor,
     ruleFromCorrection,
     ruleFromSignal,
+    senderAddress,
     senderDomain,
     sortRules,
     validateRuleInput,
@@ -586,7 +587,7 @@ export class MailConcierge {
     }
 
     /** Propositions « lire » appliquées ces 7 derniers jours — approximation
-     *  locale de la pile à lire (le compte exact vient de Gmail, Task 7). */
+     *  locale de la pile à lire (le compte exact vient de Gmail, cf. `reading()`). */
     readingCount(): number {
         const now = this.deps.now?.() ?? Date.now();
         const WEEK_MS = 7 * 24 * 3600_000;
@@ -702,8 +703,13 @@ export class MailConcierge {
         // règle utilisateur/correction et dérangerait ses mails, et
         // `confirm` réarchiverait une règle déjà tranchée.
         if (!rule || rule.origin !== 'signal' || rule.confirmed) return false;
-        const now = this.deps.now?.() ?? Date.now();
         const from = rule.when.from ?? '';
+        // Une règle de quarantaine sans expéditeur ne devrait jamais exister
+        // (cf. le garde-fou de `scan()`), mais si une ancienne s'est glissée
+        // dans le store : `from:` vide n'est pas un opérateur Gmail valide et
+        // `list_messages_meta`/`modify_labels` toucheraient toute la boîte.
+        if (!from) return false;
+        const now = this.deps.now?.() ?? Date.now();
         const oldCategory = rule.then.category;
         const oldLabel =
             oldCategory !== null ? this.labelOf(oldCategory) : null;
@@ -930,7 +936,11 @@ export class MailConcierge {
                 }
                 this.journal(proposal, { ruleId: v.ruleId });
                 concluded++;
-            } else if (v.stage === 'signal') {
+            } else if (v.stage === 'signal' && senderAddress(m.from)) {
+                // Expéditeur vide : `ruleFromSignal` apprendrait une règle
+                // `{when:{from:''}}` que Gmail ignore comme opérateur — elle
+                // matcherait alors n'importe quel mail via `ruleFor`. On
+                // renvoie ce mail au LLM plutôt que d'entrer en quarantaine.
                 let ruleId = v.ruleId;
                 if (ruleId) {
                     this.deps.rules.recordHit(ruleId, now);
@@ -1200,7 +1210,13 @@ export class MailConcierge {
         const now = this.deps.now?.() ?? Date.now();
         const all = this.deps.rules.all();
         const exact = ruleFor(all, from);
-        if (exact && !exact.confirmed) {
+        // Règle en quarantaine (promotion) OU règle négative déjà confirmée
+        // (un rejet antérieur) sur cette adresse exacte : dans les deux cas
+        // elle passerait toujours avant une règle de domaine (`user`/rejet
+        // avant `correction` dans `sortRules`), rendant la correction muette
+        // si on se contentait d'apprendre une règle concurrente — on la
+        // remplace donc directement, même id.
+        if (exact && (!exact.confirmed || exact.then.category === null)) {
             this.deps.rules.upsert({
                 ...exact,
                 then: { category },
@@ -1249,7 +1265,36 @@ export class MailConcierge {
             Logger.warn(`concierge: correction ${mailId} — ${err}`);
         }
         this.state.stats.corrected++;
+        // Une correction peut promouvoir une règle de quarantaine (signal non
+        // confirmé sur cette adresse) — capturée AVANT `learnCorrection` qui
+        // la remplace. Comme `quarantineAct('correct')`, il faut alors
+        // relabeliser rétroactivement les autres mails déjà étiquetés avec
+        // l'ancien label de quarantaine, sinon ils restent orphelins.
+        const quarantineRule = ruleFor(this.deps.rules.all(), p.from);
+        const promotedCategory =
+            quarantineRule &&
+            !quarantineRule.confirmed &&
+            quarantineRule.then.category !== null
+                ? quarantineRule.then.category
+                : null;
         this.learnCorrection(p.from, category);
+        if (promotedCategory) {
+            try {
+                const oldLabel = this.labelOf(promotedCategory);
+                await this.relabelQuarantine(
+                    `from:${senderAddress(p.from)} label:"${oldLabel}"`,
+                    {
+                        add: [this.labelOf(category)],
+                        remove: [oldLabel],
+                        archive: this.archives(category),
+                    },
+                );
+            } catch (err) {
+                Logger.warn(
+                    `concierge: relabel rétroactif correction ${mailId} — ${err}`,
+                );
+            }
+        }
         try {
             this.deps.onCorrected?.(mailId, previousCategory, category);
         } catch {

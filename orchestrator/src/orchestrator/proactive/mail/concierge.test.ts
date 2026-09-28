@@ -961,6 +961,211 @@ async function run(): Promise<void> {
         );
     }
 
+    // ── Étage signal : expéditeur vide — jamais de règle "from:''" (Gmail
+    // ignore l'opérateur vide et matcherait toute la boîte), le mail part
+    // directement au LLM comme un inconnu ──────────────────────────────────
+    {
+        const rs = new RuleStore(tmp());
+        let n = 0;
+        const t = makeConcierge({
+            inbox: () => [
+                {
+                    id: 'e1',
+                    from: '',
+                    subject: 'S',
+                    snippet: 'aperçu',
+                    headers: { 'List-Unsubscribe': '<x>' },
+                    labelIds: ['INBOX'],
+                },
+            ],
+            readBodies: false,
+            complete: async () => {
+                n++;
+                return '[{"i":1,"category":"lire"}]';
+            },
+            rules: rs,
+        });
+        const r = await t.concierge.scan();
+        assert.strictEqual(n, 1, 'expéditeur vide → LLM, pas de quarantaine');
+        assert.strictEqual(r.classified, 1);
+        const p = t.concierge.getState().proposals[0]!;
+        assert.strictEqual(p.via, 'llm');
+        assert.strictEqual(
+            rs.all().find((rule) => rule.when.from === ''),
+            undefined,
+            'aucune règle "from vide" apprise',
+        );
+    }
+
+    // ── quarantineAct : une règle de quarantaine sans expéditeur (glissée
+    // dans le store avant le garde-fou ci-dessus) ne doit jamais s'exécuter —
+    // `from:` vide toucherait toute la boîte via label ─────────────────────
+    {
+        const rs = new RuleStore(tmp());
+        const emptyRule = newRule({
+            when: { from: '' },
+            category: 'newsletter',
+            origin: 'signal',
+            confirmed: false,
+            now: 500,
+        });
+        rs.upsert(emptyRule);
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            rules: rs,
+        });
+        const ok = await t.concierge.quarantineAct(emptyRule.id, 'confirm');
+        assert.strictEqual(ok, false);
+        assert.strictEqual(
+            t.calls.filter(
+                (c) =>
+                    c.tool === 'list_messages_meta' ||
+                    c.tool === 'modify_labels',
+            ).length,
+            0,
+            'aucun appel Gmail sur une règle sans expéditeur',
+        );
+    }
+
+    // ── Rejet puis correction : la correction doit gagner, pas la règle
+    // négative laissée par le rejet (sortRules classe "user" avant
+    // "correction" — sans remplacement, la correction restait lettre morte) ─
+    {
+        const rs = new RuleStore(tmp());
+        const quarantineRule = newRule({
+            when: { from: 'x@y.fr' },
+            category: 'newsletter',
+            origin: 'signal',
+            confirmed: false,
+            now: 500,
+        });
+        rs.upsert(quarantineRule);
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            rules: rs,
+        });
+        assert.ok(await t.concierge.quarantineAct(quarantineRule.id, 'reject'));
+        const negative = rs.all().find((r) => r.when.from === 'x@y.fr')!;
+        assert.strictEqual(negative.then.category, null);
+
+        t.concierge.getState().proposals.push({
+            mailId: 'c1',
+            from: 'x@y.fr',
+            subject: 'S',
+            category: 'lire',
+            via: 'llm',
+            stage: 'llm',
+            proposeArchive: false,
+        });
+        assert.ok(await t.concierge.correct('c1', 'action'));
+        const rulesForAddress = rs
+            .all()
+            .filter((r) => r.when.from === 'x@y.fr');
+        assert.strictEqual(
+            rulesForAddress.length,
+            1,
+            'la règle négative est remplacée, pas dupliquée',
+        );
+        assert.strictEqual(rulesForAddress[0]!.id, negative.id, 'même id');
+        assert.strictEqual(rulesForAddress[0]!.then.category, 'action');
+        assert.strictEqual(rulesForAddress[0]!.origin, 'correction');
+        assert.strictEqual(rulesForAddress[0]!.confirmed, true);
+
+        // Un mail suivant du même expéditeur conclut désormais à l'étage
+        // règle, sans LLM.
+        let n = 0;
+        const t2 = makeConcierge({
+            inbox: () => [
+                {
+                    id: 'c2',
+                    from: 'x@y.fr',
+                    subject: 'S2',
+                    snippet: '',
+                    headers: {},
+                    labelIds: ['INBOX'],
+                },
+            ],
+            complete: async () => {
+                n++;
+                return '[]';
+            },
+            rules: rs,
+            readBodies: false,
+        });
+        const r = await t2.concierge.scan();
+        assert.strictEqual(n, 0, 'conclut à l’étage règle, pas de LLM');
+        const p2 = t2.concierge.getState().proposals[0]!;
+        assert.strictEqual(p2.via, 'rule');
+        assert.strictEqual(p2.category, 'action');
+    }
+
+    // ── Correction qui promeut une règle de quarantaine : relabellise aussi
+    // les AUTRES mails déjà étiquetés avec l'ancien label (pas seulement le
+    // mail corrigé) — même rattrapage rétroactif que `quarantineAct('correct')` ─
+    {
+        const rs = new RuleStore(tmp());
+        const quarantineRule = newRule({
+            when: { from: 'promo@list.fr' },
+            category: 'newsletter',
+            origin: 'signal',
+            confirmed: false,
+            now: 500,
+        });
+        rs.upsert(quarantineRule);
+        const t = makeConcierge({
+            inbox: () => [
+                {
+                    id: 'old1',
+                    from: 'promo@list.fr',
+                    subject: 'x',
+                    snippet: '',
+                    headers: {},
+                    labelIds: [],
+                },
+                {
+                    id: 'old2',
+                    from: 'promo@list.fr',
+                    subject: 'y',
+                    snippet: '',
+                    headers: {},
+                    labelIds: [],
+                },
+            ],
+            complete: async () => '[]',
+            rules: rs,
+        });
+        t.concierge.getState().proposals.push({
+            mailId: 'c1',
+            from: 'promo@list.fr',
+            subject: 'S',
+            category: 'newsletter',
+            via: 'signal',
+            stage: 'signal',
+            ruleId: quarantineRule.id,
+            proposeArchive: false,
+        });
+        assert.ok(await t.concierge.correct('c1', 'admin'));
+        const listCall = t.calls.find((c) => c.tool === 'list_messages_meta')!;
+        assert.strictEqual(
+            listCall.args.query,
+            'from:promo@list.fr label:"Yui/Newsletters"',
+        );
+        const relabels = t.calls.filter(
+            (c) => c.tool === 'modify_labels' && c.args.messageId !== 'c1',
+        );
+        assert.strictEqual(
+            relabels.length,
+            2,
+            'les 2 vieux mails de quarantaine relabellisés',
+        );
+        for (const rc of relabels) {
+            assert.deepStrictEqual(rc.args.add, ['Yui/Admin']);
+            assert.deepStrictEqual(rc.args.remove, ['Yui/Newsletters']);
+        }
+    }
+
     // ── saveRule / deleteRule ───────────────────────────────────────────────
     {
         const t = makeConcierge({

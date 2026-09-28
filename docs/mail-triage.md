@@ -26,7 +26,7 @@ Les règles vivent dans `data/config/mail-rules.json` (non versionné), registre
         "subject": "facture|invoice",        // regex insensible à la casse, optionnelle
         "header": "List-Unsubscribe"         // présence d'un en-tête, optionnelle
       },
-      "then": { "category": "newsletter" },  // null = règle négative (bloque signaux et étage 3, n'attribue rien)
+      "then": { "category": "newsletter" },  // null = règle négative (bloque les signaux et renvoie au LLM à l'étage 3, n'attribue rien)
       "origin": "user" | "correction" | "signal",
       "confirmed": true,                     // false = quarantaine (en attente de validation)
       "hits": 12,                            // nombre d'appariements

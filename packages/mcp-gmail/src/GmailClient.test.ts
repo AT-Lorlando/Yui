@@ -9,6 +9,30 @@ const fakeApi = {
             },
             get: async (p: any) => {
                 calls.push(['get', p]);
+                if (p.id === 'm2') {
+                    // En-têtes tels qu'un expéditeur réel les écrit — pas la
+                    // casse canonique attendue par un .includes() strict.
+                    return {
+                        data: {
+                            id: p.id,
+                            threadId: 't2',
+                            internalDate: '1759050000000',
+                            snippet: 'Aperçu',
+                            labelIds: ['INBOX'],
+                            payload: {
+                                headers: [
+                                    { name: 'From', value: 'B <b@c.d>' },
+                                    { name: 'Subject', value: 'S2' },
+                                    {
+                                        name: 'list-unsubscribe',
+                                        value: '<y>',
+                                    },
+                                    { name: 'PRECEDENCE', value: 'bulk' },
+                                ],
+                            },
+                        },
+                    };
+                }
                 return {
                     data: {
                         id: p.id,
@@ -38,6 +62,10 @@ async function run() {
     assert.strictEqual(out[0]!.headers['List-Unsubscribe'], '<x>');
     assert.strictEqual(out[0]!.date, new Date(1759050000000).toISOString());
     assert.deepStrictEqual(out[0]!.labelIds, ['INBOX', 'UNREAD']);
+    // En-têtes casés comme l'expéditeur les a écrits : gardés quand même
+    // (comparaison insensible à la casse, nom d'en-tête reçu conservé).
+    assert.strictEqual(out[1]!.headers['list-unsubscribe'], '<y>');
+    assert.strictEqual(out[1]!.headers['PRECEDENCE'], 'bulk');
     const list = calls.find((c) => c[0] === 'list')![1];
     assert.strictEqual(list.q, 'in:inbox');
     assert.strictEqual(list.maxResults, 7);

@@ -305,7 +305,16 @@ export class GmailClient {
         return results.map((msg) => {
             const headers: Record<string, string> = {};
             for (const h of msg.payload?.headers ?? []) {
-                if (h.name && h.value && CONCIERGE_HEADERS.includes(h.name)) {
+                // Gmail restitue les en-têtes tels que l'expéditeur les a écrits
+                // (List-ID, list-unsubscribe, PRECEDENCE…) — comparaison insensible
+                // à la casse, mais on garde le nom d'en-tête reçu.
+                if (
+                    h.name &&
+                    h.value &&
+                    CONCIERGE_HEADERS.some(
+                        (c) => c.toLowerCase() === h.name!.toLowerCase(),
+                    )
+                ) {
                     headers[h.name] = h.value;
                 }
             }
