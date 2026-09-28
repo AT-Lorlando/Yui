@@ -129,6 +129,22 @@ export interface ProactiveHandler {
         id: string,
         opts: { category?: string; accept?: number[] },
     ) => Promise<boolean>;
+    /** Règles manuelles (page /mail) : lecture (tri déjà fait), écriture, suppression. */
+    mailRules?: () => unknown;
+    mailRuleSave?: (raw: unknown) => unknown;
+    mailRuleDelete?: (id: string) => boolean;
+    /** Quarantaine (signaux non confirmés) : liste + décision humaine. */
+    mailQuarantine?: () => unknown;
+    mailQuarantineAct?: (
+        id: string,
+        action: string,
+        opts: { category?: string },
+    ) => Promise<boolean>;
+    /** Pile à lire côté Gmail + accusé de lecture (page /mail). */
+    mailReading?: () => Promise<unknown>;
+    mailMarkRead?: (id: string) => Promise<void>;
+    /** Journal des décisions de tri (page /mail). */
+    mailJournal?: (limit?: number) => unknown;
     /** `POST /events` : le bus reçoit, filtre (péremption/dédup/cooldown) et compte. */
     ingest?: (
         events: import('../orchestrator/proactive/events').Event[],

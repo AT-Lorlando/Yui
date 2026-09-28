@@ -259,6 +259,26 @@ async function main() {
                 }) => proactive.concierge.apply(filter),
                 triageCorrect: (mailId: string, category: string) =>
                     proactive.concierge.correct(mailId, category),
+                mailRules: () => proactive.concierge.rules(),
+                mailRuleSave: (raw: unknown) =>
+                    proactive.concierge.saveRule(raw),
+                mailRuleDelete: (id: string) =>
+                    proactive.concierge.deleteRule(id),
+                mailQuarantine: () => proactive.concierge.quarantine(),
+                mailQuarantineAct: (
+                    id: string,
+                    action: string,
+                    opts: { category?: string },
+                ) =>
+                    proactive.concierge.quarantineAct(
+                        id,
+                        action as 'confirm' | 'correct' | 'reject',
+                        opts,
+                    ),
+                mailReading: () => proactive.concierge.reading(),
+                mailMarkRead: (id: string) => proactive.concierge.markRead(id),
+                mailJournal: (limit?: number) =>
+                    proactive.concierge.listJournal(limit),
                 ingest: (events) => proactive.ingestAll(events),
                 brief: (scope?: string) =>
                     proactive.brief(

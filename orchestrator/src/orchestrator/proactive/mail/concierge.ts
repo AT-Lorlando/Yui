@@ -30,11 +30,13 @@ import { dataPath } from '@yui/shared';
 import Logger from '../../../logger';
 import type { ConciergeRule, CustomCategory } from '../types';
 import {
+    newRule,
     ruleFor,
     ruleFromCorrection,
     ruleFromSignal,
     senderDomain,
     sortRules,
+    validateRuleInput,
 } from './rules';
 import type { MailRule, RuleMail, RuleStore } from './rules';
 import {
@@ -46,7 +48,7 @@ import {
     LLM_PER_POLL,
 } from './triage';
 import type { Stage, Urgency } from './triage';
-import type { MailJournal } from './journal';
+import type { MailDecision, MailJournal } from './journal';
 
 // senderDomain vit désormais dans rules.ts (partagé avec le modèle de règles) ; ré-exporté pour ne pas casser les imports existants (concierge.test.ts).
 export { senderDomain };
@@ -632,6 +634,231 @@ export class MailConcierge {
                     ...(lastSubject !== undefined ? { lastSubject } : {}),
                 };
             });
+    }
+
+    /** Décisions déjà journalisées (page /mail) — même anneau que `deps.journal`. */
+    listJournal(limit?: number): MailDecision[] {
+        return this.deps.journal.list(limit);
+    }
+
+    /**
+     * Règle manuelle (page /mail) : `input.id` désigne une règle existante à
+     * remplacer (id/hits/createdAt conservés) — sinon une règle neuve est
+     * créée. Toujours `origin:'user'`, `confirmed:true` : posée à la main,
+     * elle n'a pas besoin de repasser par la quarantaine.
+     */
+    saveRule(
+        input: unknown,
+    ): { ok: true; rule: MailRule } | { ok: false; error: string } {
+        const validated = validateRuleInput(input, this.validIds());
+        if (!validated.ok) return validated;
+        const now = this.deps.now?.() ?? Date.now();
+        const id = (input as Record<string, unknown>).id;
+        const existing =
+            typeof id === 'string'
+                ? this.deps.rules.all().find((r) => r.id === id)
+                : undefined;
+        const fresh = newRule({
+            when: validated.rule.when,
+            category: validated.rule.then.category,
+            origin: 'user',
+            confirmed: true,
+            now,
+        });
+        const rule: MailRule = existing
+            ? {
+                  ...fresh,
+                  id: existing.id,
+                  hits: existing.hits,
+                  createdAt: existing.createdAt,
+              }
+            : fresh;
+        this.deps.rules.upsert(rule);
+        return { ok: true, rule };
+    }
+
+    /** Supprime une règle (utilisateur, correction ou quarantaine rejetée). */
+    deleteRule(id: string): boolean {
+        return this.deps.rules.remove(id);
+    }
+
+    /**
+     * Décision humaine sur une règle de quarantaine (signal non confirmé) :
+     * `confirm` l'entérine (et archive rétroactivement si la catégorie
+     * archive), `correct` la remplace par une règle de correction confirmée,
+     * `reject` la supprime et apprend une règle négative (l'expéditeur ne
+     * sera plus jamais conclu par un signal, direction LLM). Rattrapage
+     * rétroactif des mails déjà étiquetés, plafonné à 100, best-effort par
+     * mail — jamais de suppression.
+     */
+    async quarantineAct(
+        ruleId: string,
+        action: 'confirm' | 'correct' | 'reject',
+        opts: { category?: string } = {},
+    ): Promise<boolean> {
+        const rule = this.deps.rules.all().find((r) => r.id === ruleId);
+        if (!rule) return false;
+        const now = this.deps.now?.() ?? Date.now();
+        const from = rule.when.from ?? '';
+        const oldCategory = rule.then.category;
+        const oldLabel =
+            oldCategory !== null ? this.labelOf(oldCategory) : null;
+
+        if (action === 'confirm') {
+            if (oldCategory === null) return false;
+            this.deps.rules.upsert({ ...rule, confirmed: true });
+            if (this.archives(oldCategory) && oldLabel) {
+                await this.relabelQuarantine(
+                    `from:${from} label:"${oldLabel}" in:inbox`,
+                    { archive: true },
+                );
+            }
+            this.journalQuarantine(action, from, oldCategory);
+        } else if (action === 'correct') {
+            const category = opts.category;
+            if (!category || !this.validIds().has(category)) return false;
+            const newLabel = this.labelOf(category);
+            this.deps.rules.upsert({
+                ...rule,
+                then: { category },
+                origin: 'correction',
+                confirmed: true,
+            });
+            const query = oldLabel
+                ? `from:${from} label:"${oldLabel}"`
+                : `from:${from}`;
+            await this.relabelQuarantine(query, {
+                add: [newLabel],
+                remove: oldLabel ? [oldLabel] : [],
+                archive: this.archives(category),
+            });
+            for (const p of this.state.proposals) {
+                if (p.ruleId === ruleId) {
+                    p.category = category;
+                    p.proposeArchive = this.archives(category);
+                }
+            }
+            this.journalQuarantine(action, from, category);
+        } else {
+            this.deps.rules.remove(ruleId);
+            this.deps.rules.upsert(
+                newRule({
+                    when: { from },
+                    category: null,
+                    origin: 'user',
+                    confirmed: true,
+                    now,
+                }),
+            );
+            if (oldLabel) {
+                await this.relabelQuarantine(
+                    `from:${from} label:"${oldLabel}"`,
+                    { remove: [oldLabel] },
+                );
+            }
+            this.state.proposals = this.state.proposals.filter(
+                (p) => p.ruleId !== ruleId,
+            );
+            this.journalQuarantine(action, from, oldCategory ?? '');
+        }
+        saveTriage(this.state, this.stateFile);
+        return true;
+    }
+
+    /** Relabel best-effort d'un lot de mails déjà en boîte (rattrapage de quarantaine) — un échec par mail n'interrompt pas les autres, plafonné à 100 comme les autres relectures rétroactives. */
+    private async relabelQuarantine(
+        query: string,
+        args: { add?: string[]; remove?: string[]; archive?: boolean },
+    ): Promise<void> {
+        const mails = parseMetaList(
+            await this.deps.deviceHandler('list_messages_meta', {
+                query,
+                maxResults: 100,
+            }),
+        );
+        for (const m of mails) {
+            try {
+                await this.deps.deviceHandler('modify_labels', {
+                    messageId: m.id,
+                    ...args,
+                });
+            } catch (err) {
+                Logger.warn(`concierge: quarantaine relabel ${m.id} — ${err}`);
+            }
+        }
+    }
+
+    /** Une entrée par décision de quarantaine — même journal que le tri, sujet et mailId vides (l'action porte sur un expéditeur, pas un mail précis). */
+    private journalQuarantine(
+        action: 'confirm' | 'correct' | 'reject',
+        from: string,
+        category: string,
+    ): void {
+        try {
+            this.deps.journal.add({
+                at: this.deps.now?.() ?? Date.now(),
+                mailId: '',
+                from,
+                subject: '',
+                category,
+                stage: 'rule',
+                reason: `quarantaine : ${action}`,
+                applied: true,
+            });
+        } catch (err) {
+            Logger.warn(`concierge: journal quarantaine ${from} — ${err}`);
+        }
+    }
+
+    /** Pile à lire côté Gmail (pas seulement l'approximation locale de `readingCount()`) — `GET /mail/reading`. */
+    async reading(limit = 50): Promise<
+        Array<{
+            id: string;
+            from: string;
+            subject: string;
+            date: string;
+            snippet: string;
+        }>
+    > {
+        const raw = await this.deps.deviceHandler('list_messages_meta', {
+            query: 'label:"Yui/A lire" is:unread',
+            maxResults: limit,
+        });
+        let list: unknown = raw;
+        if (typeof raw === 'string') {
+            try {
+                list = JSON.parse(raw);
+            } catch {
+                return [];
+            }
+        }
+        if (!Array.isArray(list)) return [];
+        const out: Array<{
+            id: string;
+            from: string;
+            subject: string;
+            date: string;
+            snippet: string;
+        }> = [];
+        for (const item of list) {
+            if (!item || typeof item !== 'object') continue;
+            const o = item as Record<string, unknown>;
+            const id = typeof o.id === 'string' ? o.id : '';
+            if (!id) continue;
+            out.push({
+                id,
+                from: typeof o.from === 'string' ? o.from : '',
+                subject: typeof o.subject === 'string' ? o.subject : '',
+                date: typeof o.date === 'string' ? o.date : '',
+                snippet: typeof o.snippet === 'string' ? o.snippet : '',
+            });
+        }
+        return out;
+    }
+
+    /** Accusé de lecture depuis la pile (n'affecte ni label ni tri). */
+    async markRead(mailId: string): Promise<void> {
+        await this.deps.deviceHandler('mark_read', { messageId: mailId });
     }
 
     /**

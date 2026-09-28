@@ -650,6 +650,343 @@ async function run(): Promise<void> {
         );
     }
 
+    // ── Quarantaine : confirmer (archive rétroactive plafonnée à 100) ─────
+    {
+        const rs = new RuleStore(tmp());
+        const quarantineRule = newRule({
+            when: { from: 'news@mail.zalando.fr' },
+            category: 'newsletter',
+            origin: 'signal',
+            confirmed: false,
+            now: 500,
+        });
+        rs.upsert(quarantineRule);
+        const t = makeConcierge({
+            inbox: () => [
+                {
+                    id: 'z1',
+                    from: 'news@mail.zalando.fr',
+                    subject: 'S',
+                    snippet: '',
+                    headers: {},
+                    labelIds: ['INBOX'],
+                },
+            ],
+            complete: async () => '[]',
+            rules: rs,
+        });
+        const ok = await t.concierge.quarantineAct(
+            quarantineRule.id,
+            'confirm',
+        );
+        assert.ok(ok);
+        assert.strictEqual(
+            rs.all().find((r) => r.id === quarantineRule.id)!.confirmed,
+            true,
+        );
+        const archived = t.calls.filter(
+            (c) => c.tool === 'modify_labels' && c.args.archive === true,
+        );
+        assert.strictEqual(archived.length, 1);
+        assert.strictEqual(archived[0]!.args.messageId, 'z1');
+        const listCall = t.calls.find((c) => c.tool === 'list_messages_meta')!;
+        assert.strictEqual(
+            listCall.args.query,
+            'from:news@mail.zalando.fr label:"Yui/Newsletters" in:inbox',
+        );
+        assert.strictEqual(listCall.args.maxResults, 100);
+        const journalEntry = t.journal.list()[0]!;
+        assert.strictEqual(journalEntry.reason, 'quarantaine : confirm');
+        assert.strictEqual(journalEntry.stage, 'rule');
+        assert.strictEqual(journalEntry.applied, true);
+        assert.strictEqual(journalEntry.mailId, '');
+        assert.strictEqual(journalEntry.subject, '');
+        assert.strictEqual(journalEntry.from, 'news@mail.zalando.fr');
+        // Confirmer une règle inconnue échoue.
+        assert.strictEqual(
+            await t.concierge.quarantineAct('inconnue', 'confirm'),
+            false,
+        );
+    }
+
+    // ── Quarantaine : corriger (relabel + proposition mise à jour) ────────
+    {
+        const rs = new RuleStore(tmp());
+        const rule = newRule({
+            when: { from: 'x@y.fr' },
+            category: 'newsletter',
+            origin: 'signal',
+            confirmed: false,
+            now: 500,
+        });
+        rs.upsert(rule);
+        const t = makeConcierge({
+            inbox: () => [
+                {
+                    id: 'z2',
+                    from: 'x@y.fr',
+                    subject: 'S',
+                    snippet: '',
+                    headers: {},
+                    labelIds: [],
+                },
+            ],
+            complete: async () => '[]',
+            rules: rs,
+        });
+        t.concierge.getState().proposals.push({
+            mailId: 'z2',
+            from: 'x@y.fr',
+            subject: 'S',
+            category: 'newsletter',
+            via: 'signal',
+            stage: 'signal',
+            ruleId: rule.id,
+            proposeArchive: false,
+        });
+        // Catégorie manquante ou inconnue : refusée avant tout effet.
+        assert.strictEqual(
+            await t.concierge.quarantineAct(rule.id, 'correct', {}),
+            false,
+        );
+        assert.strictEqual(
+            await t.concierge.quarantineAct(rule.id, 'correct', {
+                category: 'nawak',
+            }),
+            false,
+        );
+        assert.strictEqual(
+            t.calls.filter((c) => c.tool === 'modify_labels').length,
+            0,
+            'aucun effet tant que la catégorie n’est pas valide',
+        );
+        const ok = await t.concierge.quarantineAct(rule.id, 'correct', {
+            category: 'admin',
+        });
+        assert.ok(ok);
+        const updated = rs.all().find((r) => r.id === rule.id)!;
+        assert.strictEqual(updated.then.category, 'admin');
+        assert.strictEqual(updated.origin, 'correction');
+        assert.strictEqual(updated.confirmed, true);
+        const relabel = t.calls.find((c) => c.tool === 'modify_labels')!;
+        assert.deepStrictEqual(relabel.args.add, ['Yui/Admin']);
+        assert.deepStrictEqual(relabel.args.remove, ['Yui/Newsletters']);
+        assert.strictEqual(relabel.args.archive, false);
+        const listCall = t.calls.find((c) => c.tool === 'list_messages_meta')!;
+        assert.strictEqual(
+            listCall.args.query,
+            'from:x@y.fr label:"Yui/Newsletters"',
+        );
+        const prop = t.concierge
+            .getState()
+            .proposals.find((p) => p.mailId === 'z2')!;
+        assert.strictEqual(prop.category, 'admin');
+        assert.strictEqual(prop.proposeArchive, false);
+    }
+
+    // ── Quarantaine : rejeter — règle négative, label retiré, le signal ne
+    // conclut plus (Focus 5 : le mail suivant du même expéditeur va au LLM) ─
+    {
+        const rs = new RuleStore(tmp());
+        const rule = newRule({
+            when: { from: 'promo@shop.fr' },
+            category: 'newsletter',
+            origin: 'signal',
+            confirmed: false,
+            now: 500,
+        });
+        rs.upsert(rule);
+        const t = makeConcierge({
+            inbox: () => [
+                {
+                    id: 'z3',
+                    from: 'promo@shop.fr',
+                    subject: 'S',
+                    snippet: '',
+                    headers: {},
+                    labelIds: [],
+                },
+            ],
+            complete: async () => '[{"i":1,"category":"promo"}]',
+            rules: rs,
+        });
+        t.concierge.getState().proposals.push({
+            mailId: 'zold',
+            from: 'promo@shop.fr',
+            subject: 'x',
+            category: 'newsletter',
+            via: 'signal',
+            stage: 'signal',
+            ruleId: rule.id,
+            proposeArchive: false,
+        });
+        const ok = await t.concierge.quarantineAct(rule.id, 'reject');
+        assert.ok(ok);
+        assert.strictEqual(
+            rs.all().find((r) => r.id === rule.id),
+            undefined,
+            'ancienne règle supprimée',
+        );
+        const negative = rs.all().find((r) => r.when.from === 'promo@shop.fr')!;
+        assert.strictEqual(negative.then.category, null);
+        assert.strictEqual(negative.origin, 'user');
+        assert.strictEqual(negative.confirmed, true);
+        const relabel = t.calls.find((c) => c.tool === 'modify_labels')!;
+        assert.deepStrictEqual(relabel.args.remove, ['Yui/Newsletters']);
+        assert.ok(!('add' in relabel.args));
+        assert.ok(
+            !t.concierge.getState().proposals.some((p) => p.mailId === 'zold'),
+            'proposition de la règle rejetée retirée',
+        );
+
+        // Un mail suivant du même expéditeur, avec signal List-Unsubscribe :
+        // la règle négative confirmée bloque le signal → part au LLM.
+        const t2 = makeConcierge({
+            inbox: () => [
+                {
+                    id: 'z4',
+                    from: 'promo@shop.fr',
+                    subject: 'S',
+                    snippet: '…',
+                    headers: { 'List-Unsubscribe': '<x>' },
+                    labelIds: [],
+                },
+            ],
+            complete: async () => '[{"i":1,"category":"promo"}]',
+            rules: rs,
+            readBodies: false,
+        });
+        const r = await t2.concierge.scan();
+        assert.strictEqual(r.classified, 1);
+        const p = t2.concierge.getState().proposals[0]!;
+        assert.strictEqual(p.via, 'llm');
+        assert.strictEqual(p.stage, 'llm');
+    }
+
+    // ── saveRule / deleteRule ───────────────────────────────────────────────
+    {
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+        });
+        const bad = t.concierge.saveRule({
+            when: { subject: '[' },
+            then: { category: 'action' },
+        });
+        assert.strictEqual(bad.ok, false, 'regex de sujet invalide refusée');
+
+        const good = t.concierge.saveRule({
+            when: { from: 'z@z.fr' },
+            then: { category: 'action' },
+        });
+        assert.ok(good.ok);
+        if (!good.ok) throw new Error('unreachable');
+        assert.strictEqual(good.rule.origin, 'user');
+        assert.strictEqual(good.rule.confirmed, true);
+        assert.strictEqual(t.rules.all().length, 1);
+
+        const replaced = t.concierge.saveRule({
+            id: good.rule.id,
+            when: { from: 'z@z.fr' },
+            then: { category: 'perso' },
+        });
+        assert.ok(replaced.ok);
+        if (!replaced.ok) throw new Error('unreachable');
+        assert.strictEqual(replaced.rule.id, good.rule.id, 'id conservé');
+        assert.strictEqual(
+            t.rules.all().length,
+            1,
+            'remplace, ne duplique pas',
+        );
+        assert.strictEqual(replaced.rule.then.category, 'perso');
+
+        // Un id fourni qui ne correspond à rien : traité comme une règle neuve.
+        const orphanId = t.concierge.saveRule({
+            id: 'r-inconnue',
+            when: { from: 'q@q.fr' },
+            then: { category: 'action' },
+        });
+        assert.ok(orphanId.ok);
+        if (orphanId.ok) assert.notStrictEqual(orphanId.rule.id, 'r-inconnue');
+
+        assert.ok(t.concierge.deleteRule(good.rule.id));
+        assert.strictEqual(t.concierge.deleteRule(good.rule.id), false);
+        assert.strictEqual(t.concierge.deleteRule('jamais-vue'), false);
+    }
+
+    // ── reading() / markRead() ───────────────────────────────────────────────
+    {
+        let seenArgs: any;
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            extra: {
+                deviceHandler: async (tool, args) => {
+                    if (tool === 'list_messages_meta') {
+                        seenArgs = args;
+                        return [
+                            {
+                                id: 'r1',
+                                from: 'a@b.fr',
+                                subject: 'S',
+                                date: '2026-01-01',
+                                snippet: 'sn',
+                            },
+                            { from: 'sans id' },
+                        ];
+                    }
+                    return 'ok';
+                },
+            },
+        });
+        const result = await t.concierge.reading();
+        assert.deepStrictEqual(seenArgs, {
+            query: 'label:"Yui/A lire" is:unread',
+            maxResults: 50,
+        });
+        assert.deepStrictEqual(result, [
+            {
+                id: 'r1',
+                from: 'a@b.fr',
+                subject: 'S',
+                date: '2026-01-01',
+                snippet: 'sn',
+            },
+        ]);
+        await t.concierge.reading(5);
+        assert.strictEqual(seenArgs.maxResults, 5);
+    }
+    {
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+        });
+        await t.concierge.markRead('m9');
+        const call = t.calls.find((c) => c.tool === 'mark_read')!;
+        assert.deepStrictEqual(call.args, { messageId: 'm9' });
+    }
+
+    // ── listJournal() ─────────────────────────────────────────────────────
+    {
+        const jr = new MailJournal(tmp());
+        jr.add({
+            at: 1,
+            mailId: 'x',
+            from: 'a',
+            subject: 'b',
+            category: 'lire',
+            stage: 'llm',
+            applied: false,
+        });
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            journal: jr,
+        });
+        assert.strictEqual(t.concierge.listJournal().length, 1);
+        assert.strictEqual(t.concierge.listJournal(0).length, 0);
+    }
+
     console.log('All concierge tests passed');
 }
 

@@ -33,6 +33,7 @@ import { presenceRoutes } from './routes/presence';
 import { memoryRoutes } from './routes/memory';
 import { promptRoutes } from './routes/prompts';
 import { configRoutes } from './routes/config';
+import { mailRoutes } from './routes/mail';
 import { miscRoutes } from './routes/misc';
 
 // ── TTS helper ────────────────────────────────────────────────────────────────
@@ -434,6 +435,7 @@ export class HttpSource implements InputSource {
         app.use('/', paletteRoutes(requireAuth));
         app.use('/', notifyRoutes(requireAuth));
         app.use('/', eventRoutes(requireAuth, proactiveHandler));
+        app.use('/', mailRoutes(requireAuth, proactiveHandler));
         if (scenesHandler) {
             app.use('/scenes', sceneRoutes(requireAuth, scenesHandler));
         }
