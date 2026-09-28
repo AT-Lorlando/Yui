@@ -98,6 +98,13 @@ export const BASE_CATEGORIES: CategoryDef[] = [
         archive: false,
     },
     {
+        id: 'notification',
+        label: 'Yui/Notifications',
+        description:
+            'Message automatique d’un service (confirmation, alerte système, relevé, rappel de connexion) — aucun humain derrière, rien à faire.',
+        archive: true,
+    },
+    {
         id: 'newsletter',
         label: 'Yui/Newsletters',
         description:
