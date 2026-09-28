@@ -83,6 +83,11 @@ async function run(): Promise<void> {
         mailQuarantine: () => rules.filter((r) => r.origin === 'signal'),
         mailQuarantineAct: async (id, action, opts) => {
             quarantineActs.push({ id, action, opts });
+            if (action === 'correct' && opts?.category === 'nope') {
+                // même signal que le vrai concierge pour une catégorie
+                // inconnue — la route doit le traduire en 400, pas 500.
+                throw new Error('catégorie inconnue');
+            }
             return id === 'r1';
         },
         mailReading: async () => reading,
@@ -175,6 +180,16 @@ async function run(): Promise<void> {
         400,
         'action inconnue',
     );
+    // Catégorie fournie mais inconnue : 400 (requête mal formée), pas 404 ni
+    // 500 — le concierge le signale par une erreur précise.
+    const unknownCategory = await post('/mail/quarantine/r1/correct', {
+        category: 'nope',
+    });
+    assert.strictEqual(unknownCategory.status, 400);
+    assert.strictEqual(
+        (await unknownCategory.json()).error,
+        'catégorie inconnue',
+    );
 
     // ── GET /mail/reading, POST /mail/reading/:id/read ────────────────────
     const readingRes = await get('/mail/reading');
@@ -213,6 +228,53 @@ async function run(): Promise<void> {
         });
     }
     bare.close();
+
+    // ── 500 : les handlers synchrones aussi (pas seulement les async) ─────
+    const throwingHandler: MailHandler = {
+        mailRules: () => {
+            throw new Error('boom rules');
+        },
+        mailRuleSave: () => {
+            throw new Error('boom save');
+        },
+        mailRuleDelete: () => {
+            throw new Error('boom delete');
+        },
+        mailQuarantine: () => {
+            throw new Error('boom quarantine');
+        },
+        mailJournal: () => {
+            throw new Error('boom journal');
+        },
+    };
+    const throwingApp = express();
+    throwingApp.use(express.json());
+    throwingApp.use('/', mailRoutes(requireAuth as any, throwingHandler));
+    const throwing = await listen(throwingApp);
+    const throwingBase = `http://127.0.0.1:${throwing.port}`;
+    const authed = (path: string, init: RequestInit = {}) =>
+        fetch(`${throwingBase}${path}`, {
+            ...init,
+            headers: { ...init.headers, Authorization: 'Bearer t' },
+        });
+    assert.strictEqual((await authed('/mail/rules')).status, 500);
+    assert.strictEqual(
+        (
+            await authed('/mail/rules', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+            })
+        ).status,
+        500,
+    );
+    assert.strictEqual(
+        (await authed('/mail/rules/x', { method: 'DELETE' })).status,
+        500,
+    );
+    assert.strictEqual((await authed('/mail/quarantine')).status, 500);
+    assert.strictEqual((await authed('/mail/journal')).status, 500);
+    throwing.close();
 
     console.log('All mail route tests passed');
 }

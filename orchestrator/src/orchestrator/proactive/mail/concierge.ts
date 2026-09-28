@@ -697,7 +697,11 @@ export class MailConcierge {
         opts: { category?: string } = {},
     ): Promise<boolean> {
         const rule = this.deps.rules.all().find((r) => r.id === ruleId);
-        if (!rule) return false;
+        // seule une règle de quarantaine réelle (signal, pas encore
+        // confirmée) peut être décidée ici — sinon `reject` supprimerait une
+        // règle utilisateur/correction et dérangerait ses mails, et
+        // `confirm` réarchiverait une règle déjà tranchée.
+        if (!rule || rule.origin !== 'signal' || rule.confirmed) return false;
         const now = this.deps.now?.() ?? Date.now();
         const from = rule.when.from ?? '';
         const oldCategory = rule.then.category;
@@ -716,7 +720,12 @@ export class MailConcierge {
             this.journalQuarantine(action, from, oldCategory);
         } else if (action === 'correct') {
             const category = opts.category;
-            if (!category || !this.validIds().has(category)) return false;
+            if (!category) return false;
+            // catégorie fournie mais inconnue : requête mal formée, pas une
+            // règle absente — la route la distingue d'un 404 par ce message.
+            if (!this.validIds().has(category)) {
+                throw new Error('catégorie inconnue');
+            }
             const newLabel = this.labelOf(category);
             this.deps.rules.upsert({
                 ...rule,
@@ -741,15 +750,21 @@ export class MailConcierge {
             this.journalQuarantine(action, from, category);
         } else {
             this.deps.rules.remove(ruleId);
-            this.deps.rules.upsert(
-                newRule({
-                    when: { from },
-                    category: null,
-                    origin: 'user',
-                    confirmed: true,
-                    now,
-                }),
-            );
+            // une règle négative pour cette adresse existe déjà (rejet
+            // antérieur, ou règle posée à la main) : ne pas en dupliquer une
+            // seconde, qui laisserait deux règles concurrentes coexister.
+            const existingNegative = ruleFor(this.deps.rules.all(), from);
+            if (!existingNegative || existingNegative.then.category !== null) {
+                this.deps.rules.upsert(
+                    newRule({
+                        when: { from },
+                        category: null,
+                        origin: 'user',
+                        confirmed: true,
+                        now,
+                    }),
+                );
+            }
             if (oldLabel) {
                 await this.relabelQuarantine(
                     `from:${from} label:"${oldLabel}"`,

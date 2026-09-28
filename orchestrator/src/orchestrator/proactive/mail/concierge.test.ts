@@ -709,6 +709,59 @@ async function run(): Promise<void> {
         );
     }
 
+    // ── Quarantaine : seules les règles de quarantaine réelles (signal, pas
+    // encore confirmées) sont décidables ici — une règle utilisateur ou déjà
+    // confirmée doit être ignorée, jamais supprimée ni réarchivée ───────────
+    {
+        const rs = new RuleStore(tmp());
+        const userRule = newRule({
+            when: { from: 'z@z.fr' },
+            category: 'action',
+            origin: 'user',
+            confirmed: true,
+            now: 10,
+        });
+        rs.upsert(userRule);
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            rules: rs,
+        });
+        assert.strictEqual(
+            await t.concierge.quarantineAct(userRule.id, 'reject'),
+            false,
+        );
+        assert.deepStrictEqual(
+            rs.all(),
+            [userRule],
+            'règle utilisateur intacte',
+        );
+        assert.strictEqual(
+            t.calls.filter((c) => c.tool === 'modify_labels').length,
+            0,
+            'aucun relabel sur une règle qui n’est pas en quarantaine',
+        );
+
+        const correctionRule = newRule({
+            when: { from: 'c@c.fr' },
+            category: 'newsletter',
+            origin: 'correction',
+            confirmed: true,
+            now: 10,
+        });
+        rs.upsert(correctionRule);
+        assert.strictEqual(
+            await t.concierge.quarantineAct(correctionRule.id, 'confirm'),
+            false,
+            'déjà confirmée : rien à réentériner',
+        );
+        assert.strictEqual(
+            t.calls.filter((c) => c.tool === 'modify_labels').length,
+            0,
+            'pas de réarchivage',
+        );
+    }
+
     // ── Quarantaine : corriger (relabel + proposition mise à jour) ────────
     {
         const rs = new RuleStore(tmp());
@@ -744,16 +797,20 @@ async function run(): Promise<void> {
             ruleId: rule.id,
             proposeArchive: false,
         });
-        // Catégorie manquante ou inconnue : refusée avant tout effet.
+        // Catégorie manquante : refusée avant tout effet (false, pas d'erreur).
         assert.strictEqual(
             await t.concierge.quarantineAct(rule.id, 'correct', {}),
             false,
         );
-        assert.strictEqual(
-            await t.concierge.quarantineAct(rule.id, 'correct', {
-                category: 'nawak',
-            }),
-            false,
+        // Catégorie fournie mais inconnue : la route doit pouvoir la
+        // distinguer d'une règle absente (400, pas 404) — signalée par une
+        // exception plutôt qu'un simple `false`.
+        await assert.rejects(
+            () =>
+                t.concierge.quarantineAct(rule.id, 'correct', {
+                    category: 'nawak',
+                }),
+            /catégorie inconnue/,
         );
         assert.strictEqual(
             t.calls.filter((c) => c.tool === 'modify_labels').length,
@@ -861,6 +918,47 @@ async function run(): Promise<void> {
         const p = t2.concierge.getState().proposals[0]!;
         assert.strictEqual(p.via, 'llm');
         assert.strictEqual(p.stage, 'llm');
+    }
+
+    // ── Quarantaine : rejeter — une règle négative pour cette adresse existe
+    // déjà (rejet antérieur) : pas de doublon ───────────────────────────────
+    {
+        const rs = new RuleStore(tmp());
+        rs.upsert(
+            newRule({
+                when: { from: 'dup@shop.fr' },
+                category: null,
+                origin: 'user',
+                confirmed: true,
+                now: 10,
+            }),
+        );
+        const quarantineRule = newRule({
+            when: { from: 'dup@shop.fr' },
+            category: 'newsletter',
+            origin: 'signal',
+            confirmed: false,
+            now: 500,
+        });
+        rs.upsert(quarantineRule);
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            rules: rs,
+        });
+        const ok = await t.concierge.quarantineAct(quarantineRule.id, 'reject');
+        assert.ok(ok);
+        const negatives = rs
+            .all()
+            .filter(
+                (r) =>
+                    r.when.from === 'dup@shop.fr' && r.then.category === null,
+            );
+        assert.strictEqual(
+            negatives.length,
+            1,
+            'pas de règle négative dupliquée',
+        );
     }
 
     // ── saveRule / deleteRule ───────────────────────────────────────────────

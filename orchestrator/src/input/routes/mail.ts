@@ -24,6 +24,10 @@ const UNAVAILABLE = { error: 'proactivité indisponible' };
 const QUARANTINE_ACTIONS = new Set(['confirm', 'correct', 'reject']);
 const JOURNAL_DEFAULT_LIMIT = 50;
 const JOURNAL_MAX_LIMIT = 200;
+// Le concierge lève cette erreur précise quand `correct` reçoit une
+// catégorie qui n'existe pas — la route la distingue d'un id de règle
+// inconnu (404) pour répondre 400 (requête mal formée) à la place.
+const UNKNOWN_CATEGORY_MESSAGE = 'catégorie inconnue';
 
 export function mailRoutes(
     requireAuth: RequireAuth,
@@ -36,18 +40,23 @@ export function mailRoutes(
             res.status(503).json(UNAVAILABLE);
             return;
         }
-        const rules =
-            (h.mailRules() as Array<{
-                origin: string;
-                confirmed: boolean;
-            }>) ?? [];
-        // les signaux non confirmés vivent dans la quarantaine (page dédiée) —
-        // les montrer aussi ici doublonnerait la même décision à deux endroits
-        res.json(
-            rules.filter(
-                (rule) => !(rule.origin === 'signal' && !rule.confirmed),
-            ),
-        );
+        try {
+            const rules =
+                (h.mailRules() as Array<{
+                    origin: string;
+                    confirmed: boolean;
+                }>) ?? [];
+            // les signaux non confirmés vivent dans la quarantaine (page
+            // dédiée) — les montrer aussi ici doublonnerait la même décision
+            // à deux endroits
+            res.json(
+                rules.filter(
+                    (rule) => !(rule.origin === 'signal' && !rule.confirmed),
+                ),
+            );
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
     });
 
     r.post('/mail/rules', requireAuth, (req: any, res: any) => {
@@ -55,14 +64,18 @@ export function mailRoutes(
             res.status(503).json(UNAVAILABLE);
             return;
         }
-        const result = h.mailRuleSave(req.body) as
-            | { ok: true; rule: unknown }
-            | { ok: false; error: string };
-        if (!result.ok) {
-            res.status(400).json({ error: result.error });
-            return;
+        try {
+            const result = h.mailRuleSave(req.body) as
+                | { ok: true; rule: unknown }
+                | { ok: false; error: string };
+            if (!result.ok) {
+                res.status(400).json({ error: result.error });
+                return;
+            }
+            res.json(result.rule);
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
         }
-        res.json(result.rule);
     });
 
     r.delete('/mail/rules/:id', requireAuth, (req: any, res: any) => {
@@ -70,12 +83,16 @@ export function mailRoutes(
             res.status(503).json(UNAVAILABLE);
             return;
         }
-        const ok = h.mailRuleDelete(String(req.params.id));
-        if (!ok) {
-            res.status(404).json({ error: 'règle inconnue' });
-            return;
+        try {
+            const ok = h.mailRuleDelete(String(req.params.id));
+            if (!ok) {
+                res.status(404).json({ error: 'règle inconnue' });
+                return;
+            }
+            res.json({ ok: true });
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
         }
-        res.json({ ok: true });
     });
 
     r.get('/mail/quarantine', requireAuth, (_req: any, res: any) => {
@@ -83,7 +100,11 @@ export function mailRoutes(
             res.status(503).json(UNAVAILABLE);
             return;
         }
-        res.json(h.mailQuarantine());
+        try {
+            res.json(h.mailQuarantine());
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
     });
 
     r.post(
@@ -122,6 +143,10 @@ export function mailRoutes(
                 }
                 res.json({ ok: true });
             } catch (e: any) {
+                if (e?.message === UNKNOWN_CATEGORY_MESSAGE) {
+                    res.status(400).json({ error: e.message });
+                    return;
+                }
                 res.status(500).json({ error: e.message });
             }
         },
@@ -166,7 +191,11 @@ export function mailRoutes(
             JOURNAL_MAX_LIMIT,
             Math.max(1, Number.isFinite(raw) ? raw : JOURNAL_DEFAULT_LIMIT),
         );
-        res.json(h.mailJournal(limit));
+        try {
+            res.json(h.mailJournal(limit));
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
     });
 
     return r;
