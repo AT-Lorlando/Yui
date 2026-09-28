@@ -192,6 +192,8 @@ pm2 logs             # logs en temps réel
 
 `POST /events` (même Bearer) pousse des événements dans le bus de proactivité — filtrés, puis arbitrés par le juge : [`docs/events-api.md`](docs/events-api.md). Un événement avec `todo` crée en plus un post-it Yoji.
 
+Le courrier Gmail est trié par un pipeline à quatre étages (règles, signaux de masse, LLM, repli) avec quarantaine par expéditeur — voir [`docs/mail-triage.md`](docs/mail-triage.md) pour le modèle de règles, les routes API et la gestion de la pile « à lire ».
+
 La secrétaire (proactivité) ne parle plus que par moments de vie (réveil, départ, retour, coucher) ou à la demande (« fais le point »), avec une mémoire dite durable pour ne jamais se répéter et des post-its Yoji pour les intentions « à faire ».
 
 ## Développement
