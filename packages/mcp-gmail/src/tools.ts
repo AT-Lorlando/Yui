@@ -210,6 +210,27 @@ export const GMAIL_TOOLS = [
         },
     },
     {
+        name: 'list_messages_meta',
+        description:
+            'Metadata (sender, subject, date, snippet, selected headers) for a Gmail query, as JSON — no body. Used by the mail concierge.',
+        inputSchema: {
+            type: 'object' as const,
+            'x-audience': ['system'],
+            properties: {
+                query: {
+                    type: 'string',
+                    description: 'Gmail search query',
+                },
+                maxResults: {
+                    type: 'number',
+                    description: 'Max results (default 50, max 100)',
+                    maximum: 100,
+                },
+            },
+            required: ['query'],
+        },
+    },
+    {
         name: 'list_labels',
         description:
             'List all Gmail labels (inbox, sent, drafts, custom labels, etc.).',

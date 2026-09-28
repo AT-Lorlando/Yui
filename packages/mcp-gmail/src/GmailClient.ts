@@ -4,11 +4,38 @@ import Logger from './logger';
 
 const TIMEZONE = 'Europe/Paris';
 
+// En-têtes lus par le concierge — jamais le corps.
+const CONCIERGE_HEADERS = [
+    'From',
+    'To',
+    'Reply-To',
+    'Subject',
+    'Date',
+    'List-Unsubscribe',
+    'List-Id',
+    'Precedence',
+    'Auto-Submitted',
+    'X-Auto-Response-Suppress',
+];
+
+export interface MessageMeta {
+    id: string;
+    threadId: string;
+    from: string;
+    to: string;
+    subject: string;
+    date: string;
+    snippet: string;
+    labelIds: string[];
+    headers: Record<string, string>;
+}
+
 export class GmailClient {
     private gmail: gmail_v1.Gmail;
 
-    constructor(auth: Auth.OAuth2Client) {
-        this.gmail = google.gmail({ version: 'v1', auth });
+    // api injecté = tests (pas d'appel réseau réel)
+    constructor(auth: Auth.OAuth2Client, api?: gmail_v1.Gmail) {
+        this.gmail = api ?? google.gmail({ version: 'v1', auth });
     }
 
     // ── Formatting helpers ────────────────────────────────────────────────────
@@ -243,6 +270,57 @@ export class GmailClient {
         return `${
             messages.length
         } résultat(s) pour "${query}" :\n\n${lines.join('\n\n---\n\n')}`;
+    }
+
+    /** Métadonnées + en-têtes choisis, jamais le corps — usage concierge. */
+    async listMessagesMeta(
+        query: string,
+        maxResults = 50,
+    ): Promise<MessageMeta[]> {
+        const capped = Math.min(maxResults, 100);
+        const listRes = await this.gmail.users.messages.list({
+            userId: 'me',
+            q: query,
+            maxResults: capped,
+        });
+
+        const messages = listRes.data.messages ?? [];
+        // Tranches de 10 pour ne pas saturer le quota Gmail
+        const results: gmail_v1.Schema$Message[] = [];
+        for (let i = 0; i < messages.length; i += 10) {
+            const chunk = messages.slice(i, i + 10);
+            const chunkRes = await Promise.all(
+                chunk.map((m) =>
+                    this.gmail.users.messages.get({
+                        userId: 'me',
+                        id: m.id!,
+                        format: 'metadata',
+                        metadataHeaders: CONCIERGE_HEADERS,
+                    }),
+                ),
+            );
+            results.push(...chunkRes.map((r) => r.data));
+        }
+
+        return results.map((msg) => {
+            const headers: Record<string, string> = {};
+            for (const h of msg.payload?.headers ?? []) {
+                if (h.name && h.value && CONCIERGE_HEADERS.includes(h.name)) {
+                    headers[h.name] = h.value;
+                }
+            }
+            return {
+                id: msg.id ?? '',
+                threadId: msg.threadId ?? '',
+                from: this.header(msg, 'From'),
+                to: this.header(msg, 'To'),
+                subject: this.header(msg, 'Subject'),
+                date: new Date(parseInt(msg.internalDate ?? '0')).toISOString(),
+                snippet: msg.snippet ?? '',
+                labelIds: msg.labelIds ?? [],
+                headers,
+            };
+        });
     }
 
     async sendEmail(

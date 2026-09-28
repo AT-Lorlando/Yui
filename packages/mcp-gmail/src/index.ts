@@ -162,6 +162,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     ],
                 };
 
+            case 'list_messages_meta':
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(
+                                await gmail.listMessagesMeta(
+                                    String(a.query),
+                                    a.maxResults,
+                                ),
+                            ),
+                        },
+                    ],
+                };
+
             case 'list_labels':
                 return {
                     content: [{ type: 'text', text: await gmail.listLabels() }],
