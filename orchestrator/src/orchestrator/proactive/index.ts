@@ -183,6 +183,11 @@ export class ProactiveEngine {
                 ];
                 this.patchConcierge({ customCategories });
             },
+            // Un mail corrigé hors « action » n'attend plus rien de Jérémy :
+            // le sujet proactif qu'il avait ouvert (retenu + « dit ») se referme.
+            onCorrected: (id, _previous, next) => {
+                if (next !== 'action') this.closeMailSubject(id);
+            },
             now: this.now,
         });
         this.connectors = buildConnectors({
@@ -273,6 +278,14 @@ export class ProactiveEngine {
                     new Date(p.appliedAt).toDateString() === today,
             ).length,
         };
+    }
+
+    /** Referme le sujet proactif d'un mail « à traiter » (retenu + « dit ») —
+     *  appelé quand une correction sort le mail de la catégorie « action ». */
+    closeMailSubject(mailId: string): void {
+        const key = `mail:mail-action-${mailId}`;
+        this.held.remove([key]);
+        this.said.close(key);
     }
 
     getBricks() {

@@ -338,8 +338,15 @@ export class RuleStore {
     }
 
     private save(): void {
-        fs.mkdirSync(path.dirname(this.file), { recursive: true });
-        const data: RulesFile = { version: 1, rules: this.rules };
-        fs.writeFileSync(this.file, JSON.stringify(data, null, 2));
+        // best-effort : une écriture qui échoue (disque plein, droits, parent
+        // = fichier…) ne doit jamais faire planter le tri qui l'appelle
+        // (upsert/recordHit) — la règle reste au moins en mémoire
+        try {
+            fs.mkdirSync(path.dirname(this.file), { recursive: true });
+            const data: RulesFile = { version: 1, rules: this.rules };
+            fs.writeFileSync(this.file, JSON.stringify(data, null, 2));
+        } catch (e) {
+            Logger.warn(`mail-rules.json non écrit : ${e}`);
+        }
     }
 }

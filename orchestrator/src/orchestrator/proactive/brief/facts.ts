@@ -138,6 +138,20 @@ function parcelFacts(s: Situation): BriefFact[] {
     });
 }
 
+/** Pile « à lire » (fact `mail`/« À lire », posé par le connecteur) —
+ *  approximation locale, jamais montrée aux points réguliers (since-last,
+ *  today) : seulement à la demande explicite du scope "pending". */
+function readingPileFacts(s: Situation): BriefFact[] {
+    return sectionFacts(s, 'mail', 'À lire').map((f) => ({
+        subject: 'situation:mail-reading',
+        text: f.value,
+        importance: 'info' as Importance,
+        at: s.at,
+        nature: 'info' as SaidNature,
+        fingerprint: fingerprintOf(f.value),
+    }));
+}
+
 function mailFacts(s: Situation): BriefFact[] {
     return s.mailActions.map((subject) => {
         const text = `Mail à traiter : « ${subject} »`;
@@ -171,6 +185,11 @@ export function collectFacts(input: BriefInputs, _now: number): BriefFact[] {
         if (includePending) {
             out.push(...mailFacts(input.situation));
             out.push(...stalePostitFacts(input.situation));
+        }
+        // Scope explicite uniquement — pas "since-last" (includePending le
+        // couvre aussi) : la pile à lire ne se dit qu'à la demande de l'état.
+        if (input.scope === 'pending') {
+            out.push(...readingPileFacts(input.situation));
         }
     }
 

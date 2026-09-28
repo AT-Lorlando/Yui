@@ -40,6 +40,9 @@ const situation: Situation = {
             },
         ],
         weather: [{ label: 'Météo', value: '20°C à Toulouse' }],
+        mail: [
+            { label: 'À lire', value: '3 mails à lire', key: 'mail-reading' },
+        ],
     },
 };
 const inputs = (over: Partial<BriefInputs> = {}): BriefInputs => ({
@@ -152,6 +155,29 @@ async function run(): Promise<void> {
     assert.ok(pending.some((f) => f.subject === 'postit:b-stale'));
     assert.ok(
         !pending.some((f) => f.subject.startsWith('situation:agenda-early')),
+    );
+
+    // Pile « à lire » (section mail) : UNIQUEMENT pour le scope "pending" —
+    // ni "since-last" (bruit à chaque point), ni "today".
+    const readingFact = pending.find(
+        (f) => f.subject === 'situation:mail-reading',
+    );
+    assert.ok(readingFact, 'pile à lire présente pour "pending"');
+    assert.strictEqual(readingFact!.text, '3 mails à lire');
+    assert.strictEqual(readingFact!.importance, 'info');
+    assert.strictEqual(readingFact!.nature, 'info');
+    assert.strictEqual(readingFact!.at, T);
+    assert.ok(
+        !since.some((f) => f.subject === 'situation:mail-reading'),
+        'absente pour "since-last"',
+    );
+    assert.ok(
+        !today.some((f) => f.subject === 'situation:mail-reading'),
+        'absente pour "today"',
+    );
+    assert.ok(
+        !all.some((f) => f.subject === 'situation:mail-reading'),
+        'absente sans scope explicite',
     );
 
     // Sans sections (situation d'avant les connecteurs) : rien ne casse.

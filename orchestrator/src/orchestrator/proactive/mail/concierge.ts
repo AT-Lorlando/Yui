@@ -243,6 +243,7 @@ const STATE_FILE = dataPath('mail-triage.json');
 const MAX_PROCESSED = 1000;
 const MAX_PROPOSALS = 200;
 const MAX_DOUBTS = 60;
+const MAX_FALLBACK = 200;
 /** Corps de mail injecté dans le prompt (par mail). */
 const BODY_CHARS = 700;
 
@@ -282,6 +283,18 @@ export function loadTriage(file: string = STATE_FILE): TriageState {
 export function saveTriage(st: TriageState, file: string = STATE_FILE): void {
     try {
         fs.mkdirSync(path.dirname(file), { recursive: true });
+        // Plafonné comme les autres listes : sans borne, un LLM en panne
+        // prolongée gonflerait ce dictionnaire indéfiniment. L'ordre des clés
+        // d'un objet suit l'insertion — les plus anciennes sautent en premier.
+        const fallbackKeys = Object.keys(st.fallbackTries);
+        const fallbackTries =
+            fallbackKeys.length > MAX_FALLBACK
+                ? Object.fromEntries(
+                      fallbackKeys
+                          .slice(-MAX_FALLBACK)
+                          .map((k) => [k, st.fallbackTries[k]!]),
+                  )
+                : st.fallbackTries;
         fs.writeFileSync(
             file,
             JSON.stringify({
@@ -289,6 +302,7 @@ export function saveTriage(st: TriageState, file: string = STATE_FILE): void {
                 proposals: st.proposals.slice(-MAX_PROPOSALS),
                 doubts: st.doubts.slice(-MAX_DOUBTS),
                 processedIds: st.processedIds.slice(-MAX_PROCESSED),
+                fallbackTries,
             }),
         );
     } catch (err) {
@@ -389,9 +403,15 @@ ${cats}
 ${rules}
 En cas d'hésitation entre "action" et autre chose : ce n'est pas une action.
 
+Pour chaque mail, indique aussi "urgency" :
+- "none" (défaut) : rien n'est attendu de lui, ou pas de date.
+- "soon" : quelque chose est attendu de lui sous quelques jours (échéance, relance, document à fournir).
+- "now" : à traiter aujourd'hui — échéance dans les 48 h, accès ou sécurité d'un compte, une personne qui attend sa réponse aujourd'hui, un incident en cours.
+"now" est RARE. Une newsletter, une promo, une notification ou un message marketing n'est JAMAIS "soon" ni "now", quel que soit son vocabulaire (« urgent », « dernière chance »). Donne "reason" : une ligne factuelle (la date ou la demande), vide si "none".
+
 Si tu HÉSITES vraiment sur un mail (deux catégories plausibles, ou aucune ne colle), dis-le : "doubt":true, "reason" en une phrase, "alternatives" (les catégories envisagées), et propose dans "suggestions" ce qui te permettrait de trancher la prochaine fois — soit une règle en français à ajouter au prompt ({"kind":"rule","text":"Les alertes immobilières sont osef"}), soit une nouvelle catégorie ({"kind":"category","id":"immo","label":"Yui/Immobilier","text":"Annonces et alertes immobilières","archive":true}). Ne propose rien pour un mail sûr.
 
-Réponds UNIQUEMENT en JSON : [{"i":1,"category":"promo"},{"i":2,"category":"lire","doubt":true,"reason":"…","alternatives":["lire","admin"],"suggestions":[…]}] — un objet par mail, dans l'ordre.`;
+Réponds UNIQUEMENT en JSON : [{"i":1,"category":"action","urgency":"soon","reason":"Échéance le 3 octobre"},{"i":2,"category":"lire","doubt":true,"reason":"…","alternatives":["lire","admin"],"suggestions":[…]}] — un objet par mail, dans l'ordre.`;
 }
 
 /** Prompt utilisateur du lot (corps compacté si fourni). Pur, testé. */
@@ -416,8 +436,8 @@ export function buildClassifyUser(
 
 export interface ClassifyItem {
     category: MailCategory;
-    urgency?: Urgency;
-    reason?: string;
+    urgency: Urgency;
+    reason: string;
     doubt?: {
         reason: string;
         alternatives: MailCategory[];
@@ -441,17 +461,17 @@ export function parseClassifyReply(
             const i = Number(item?.i) - 1;
             const cat = String(item?.category ?? '');
             if (i < 0 || i >= count || !valid.has(cat)) continue;
-            const entry: ClassifyItem = { category: cat };
-            if (
-                item?.urgency === 'none' ||
-                item?.urgency === 'soon' ||
-                item?.urgency === 'now'
-            ) {
-                entry.urgency = item.urgency;
-            }
-            if (typeof item?.reason === 'string' && item.reason.trim()) {
-                entry.reason = item.reason.trim();
-            }
+            // urgency/reason toujours présentes (défaut "none"/"") : une valeur
+            // absente ou inconnue du LLM ne doit jamais remonter comme urgente.
+            const urgency: Urgency =
+                item?.urgency === 'soon' || item?.urgency === 'now'
+                    ? item.urgency
+                    : 'none';
+            const reason =
+                typeof item?.reason === 'string'
+                    ? item.reason.trim().slice(0, 160)
+                    : '';
+            const entry: ClassifyItem = { category: cat, urgency, reason };
             if (item?.doubt === true) {
                 const suggestions: DoubtSuggestion[] = [];
                 for (const s of Array.isArray(item.suggestions)
@@ -510,6 +530,9 @@ export interface ConciergeDeps {
     addCustomCategory?: (c: CustomCategory) => void;
     /** Nouveaux doutes après un scan → l'app notifie (best-effort). */
     onDoubts?: (doubts: TriageDoubt[]) => void;
+    /** Une correction change la catégorie retenue — le moteur s'en sert pour
+     *  refermer le sujet proactif d'un mail qui n'est plus « action ». */
+    onCorrected?: (mailId: string, previous: string, next: string) => void;
     /** Lire le corps des mails avant classement (défaut oui). */
     readBodies?: boolean;
     now?: () => number;
@@ -558,6 +581,19 @@ export class MailConcierge {
     /** Doutes non tranchés. */
     openDoubts(): TriageDoubt[] {
         return this.state.doubts.filter((d) => !d.resolvedAt);
+    }
+
+    /** Propositions « lire » appliquées ces 7 derniers jours — approximation
+     *  locale de la pile à lire (le compte exact vient de Gmail, Task 7). */
+    readingCount(): number {
+        const now = this.deps.now?.() ?? Date.now();
+        const WEEK_MS = 7 * 24 * 3600_000;
+        return this.state.proposals.filter(
+            (p) =>
+                p.category === 'lire' &&
+                p.appliedAt !== undefined &&
+                now - p.appliedAt < WEEK_MS,
+        ).length;
     }
 
     /** Toutes les règles, triées dans l'ordre d'évaluation (user → correction → signal). */
@@ -738,8 +774,8 @@ export class MailConcierge {
                 category: c.item.category,
                 via: 'llm',
                 stage: 'llm',
-                urgency: c.item.urgency ?? 'none',
-                reason: c.item.reason ?? '',
+                urgency: c.item.urgency,
+                reason: c.item.reason,
                 ...(c.item.doubt ? { doubt: true } : {}),
             });
             if (c.item.doubt) {
@@ -954,6 +990,7 @@ export class MailConcierge {
         const p = this.state.proposals.find((x) => x.mailId === mailId);
         if (!p || !this.validIds().has(category)) return false;
         const previous = this.labelOf(p.category);
+        const previousCategory = p.category;
         p.category = category;
         p.proposeArchive = this.archives(category);
         p.doubt = false;
@@ -971,6 +1008,11 @@ export class MailConcierge {
         }
         this.state.stats.corrected++;
         this.learnCorrection(p.from, category);
+        try {
+            this.deps.onCorrected?.(mailId, previousCategory, category);
+        } catch {
+            /* best-effort : la correction elle-même a déjà réussi */
+        }
         // Un doute ouvert sur ce mail est tranché par la correction.
         for (const d of this.state.doubts) {
             if (d.mailId === mailId && !d.resolvedAt) {

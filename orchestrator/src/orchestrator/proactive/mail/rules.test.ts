@@ -133,6 +133,17 @@ async function run(): Promise<void> {
     assert.strictEqual(again.remove(r1.id), true);
     assert.strictEqual(new R.RuleStore(file).all().length, 0);
 
+    // écriture best-effort : parent = fichier (impossible à mkdir dedans) →
+    // upsert() ne plante pas, la règle reste au moins en mémoire
+    const blockerDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'yui-rules-blocked-'),
+    );
+    const blockerFile = path.join(blockerDir, 'x');
+    fs.writeFileSync(blockerFile, 'not a directory');
+    const blocked = new R.RuleStore(path.join(blockerFile, 'rules.json'));
+    assert.doesNotThrow(() => blocked.upsert(r1));
+    assert.strictEqual(blocked.all().length, 1);
+
     // migration une seule fois : store absent → écrit, puis idempotent
     const migFile = path.join(process.env.YUI_DATA_DIR!, 'mig.json');
     const migStore = new R.RuleStore(migFile);

@@ -10,8 +10,9 @@ import {
     TODO_DESCRIPTION_MAX,
 } from '../events';
 import type { Event, Fact } from '../events';
+import type { Importance } from '../types';
 import type { ConnectorDef } from '../connector';
-import type { MailConcierge } from '../mail/concierge';
+import type { MailConcierge, TriageProposal } from '../mail/concierge';
 
 export const DEFAULT_MAIL_QUERY = 'is:important is:unread newer_than:1d';
 const DOUBTS_COOLDOWN_MS = 3 * 3600_000;
@@ -21,6 +22,23 @@ const ACTION_TTL_MS = 7 * 24 * 3600_000;
 const MAX_SIGNALED = 500;
 /** Sujets « à traiter » exposés au journal de situation. */
 const MAX_SNAPSHOT_ACTIONS = 5;
+/** Mails "now" traités en urgent par jour — au-delà, importance rabattue en
+ *  "utile" (le juge/budget quotidien reste la dernière digue). */
+export const MAIL_URGENT_PER_DAY = 2;
+
+const VIA_LABEL: Record<TriageProposal['via'], string> = {
+    rule: 'par une règle',
+    signal: 'par un signal de masse',
+    fallback: 'par défaut (IA indisponible)',
+    llm: 'par le concierge',
+};
+
+/** Jour local (YYYY-MM-DD) — assiette du plafond quotidien d'urgences. */
+function localDay(ms: number): string {
+    const d = new Date(ms);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 export function mailConnector(services: {
     concierge: MailConcierge;
@@ -74,24 +92,48 @@ export function mailConnector(services: {
             const { concierge } = services;
             await concierge.scan();
             const signaled = new Set(ctx.state.get<string[]>('signaled', []));
+            const today = localDay(now);
+            let urgentDay = ctx.state.get<string>('urgentDay', '');
+            let urgentCount = ctx.state.get<number>('urgentCount', 0);
+            if (urgentDay !== today) {
+                urgentDay = today;
+                urgentCount = 0;
+            }
             for (const p of concierge.getState().proposals) {
-                if (p.category !== 'action' || signaled.has(p.mailId)) continue;
+                const relevant =
+                    p.category === 'action' ||
+                    (p.urgency && p.urgency !== 'none');
+                if (!relevant || signaled.has(p.mailId)) continue;
                 signaled.add(p.mailId);
+
+                let importance: Importance = 'utile';
+                const facts = [
+                    `Classé « ${p.category} » ${
+                        VIA_LABEL[p.via] ?? VIA_LABEL.llm
+                    }.`,
+                ];
+                if (p.urgency === 'now') {
+                    if (urgentCount < MAIL_URGENT_PER_DAY) {
+                        importance = 'urgent';
+                        urgentCount++;
+                    } else {
+                        facts.push('Urgence plafonnée pour aujourd’hui.');
+                        ctx.log.info(
+                            `mail: urgence plafonnée (${MAIL_URGENT_PER_DAY}/jour) pour ${p.mailId}`,
+                        );
+                    }
+                }
+                if (p.reason) facts.push(p.reason);
+
                 out.push({
                     source: 'mail',
                     key: `mail-action-${p.mailId}`,
                     kind: 'request',
-                    importance: 'utile',
+                    importance,
                     subject: `Mail à traiter — ${p.from} : « ${p.subject} »`
                         .replace(/\s+/g, ' ')
                         .slice(0, SUBJECT_MAX),
-                    facts: [
-                        `Classé « ${p.category} » ${
-                            p.via === 'rule'
-                                ? 'par une règle apprise'
-                                : 'par le concierge'
-                        }.`,
-                    ],
+                    facts,
                     at: now,
                     ttlMs: ACTION_TTL_MS,
                     // Un mail à traiter devient un post-it ; l'id Gmail dans
@@ -100,14 +142,16 @@ export function mailConnector(services: {
                         title: `Répondre : ${p.subject}`
                             .replace(/\s+/g, ' ')
                             .slice(0, TODO_TITLE_MAX),
-                        description: `De ${p.from} — gmail:${p.mailId}`.slice(
-                            0,
-                            TODO_DESCRIPTION_MAX,
-                        ),
+                        description: (
+                            `De ${p.from} — gmail:${p.mailId}` +
+                            (p.reason ? ` — ${p.reason}` : '')
+                        ).slice(0, TODO_DESCRIPTION_MAX),
                     },
                 });
             }
             ctx.state.set('signaled', [...signaled].slice(-MAX_SIGNALED));
+            ctx.state.set('urgentDay', urgentDay);
+            ctx.state.set('urgentCount', urgentCount);
 
             // Les doutes ouverts s'accumulent : un seul événement récapitulatif,
             // le cooldown (3 h) faisant office d'anti-répétition.
@@ -148,6 +192,14 @@ export function mailConnector(services: {
                         concierge.openDoubts().length
                     } doute(s)`,
                 });
+                const reading = concierge.readingCount();
+                if (reading > 0) {
+                    facts.push({
+                        label: 'À lire',
+                        value: `${reading} mail(s) à lire`,
+                        key: 'mail-reading',
+                    });
+                }
             }
             for (const p of actions) {
                 facts.push({

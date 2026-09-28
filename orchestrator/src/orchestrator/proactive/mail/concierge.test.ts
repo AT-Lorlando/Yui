@@ -190,7 +190,11 @@ async function run(): Promise<void> {
         3,
         valid,
     );
-    assert.deepStrictEqual(parsed[0], { category: 'promo' });
+    assert.deepStrictEqual(parsed[0], {
+        category: 'promo',
+        urgency: 'none',
+        reason: '',
+    });
     assert.strictEqual(parsed[1]?.category, 'lire');
     assert.deepStrictEqual(parsed[1]?.doubt?.alternatives, ['lire', 'admin']);
     assert.strictEqual(
@@ -201,15 +205,32 @@ async function run(): Promise<void> {
     assert.strictEqual(parsed[1]?.doubt?.suggestions[1]?.id, 'nergie');
     assert.strictEqual(parsed[2], null);
     assert.deepStrictEqual(parseClassifyReply('rien', 1, valid), [null]);
-    // Urgence et raison tolérées (remplies par le prompt plus tard).
+    // Urgence et raison : toujours présentes, défaut "none" / "" (jamais absentes).
+    assert.deepStrictEqual(
+        parseClassifyReply(
+            '[{"i":1,"category":"action","urgency":"now","reason":"Échéance demain"}]',
+            1,
+            valid,
+        )[0],
+        { category: 'action', urgency: 'now', reason: 'Échéance demain' },
+    );
     const withUrgency = parseClassifyReply(
-        '[{"i":1,"category":"action","urgency":"now","reason":"échéance demain"},{"i":2,"category":"lire","urgency":"nawak"}]',
+        '[{"i":1,"category":"action","reason":"échéance demain"},{"i":2,"category":"lire","urgency":"nawak"}]',
         2,
         valid,
     );
-    assert.strictEqual(withUrgency[0]?.urgency, 'now');
+    assert.strictEqual(withUrgency[0]?.urgency, 'none', 'absente → none');
     assert.strictEqual(withUrgency[0]?.reason, 'échéance demain');
-    assert.strictEqual(withUrgency[1]?.urgency, undefined);
+    assert.strictEqual(
+        withUrgency[1]?.urgency,
+        'none',
+        'valeur inconnue → none',
+    );
+    assert.strictEqual(withUrgency[1]?.reason, '');
+    assert.ok(
+        buildClassifySystem(cats).includes('"now" est RARE'),
+        'le prompt met en garde contre le surclassement en urgence',
+    );
 
     // ── list_messages_meta : tableau, JSON texte, ou rien ────────────────
     assert.strictEqual(parseMetaList(META).length, 3);
@@ -459,6 +480,66 @@ async function run(): Promise<void> {
         assert.strictEqual(d.ruleId, edfRule.id);
         assert.strictEqual(d.applied, true);
         assert.ok(t.concierge.getState().processedIds.includes('m2'));
+    }
+
+    // ── Règle utilisateur confirmée sur une catégorie d'archivage : l'étage
+    // règle applique aussi l'archive (pas seulement le label) ─────────────
+    {
+        const rs = new RuleStore(tmp());
+        rs.upsert(
+            newRule({
+                when: { from: 'zalando.fr' },
+                category: 'newsletter',
+                origin: 'user',
+                confirmed: true,
+                now: 500,
+            }),
+        );
+        const t = makeConcierge({
+            inbox: () => [META[0]],
+            complete: async () => {
+                throw new Error('pas de LLM attendu');
+            },
+            rules: rs,
+        });
+        const r = await t.concierge.scan();
+        assert.deepStrictEqual(r, { scanned: 1, classified: 1, doubts: 0 });
+        const lab = t.calls.find((c) => c.tool === 'modify_labels')!;
+        assert.deepStrictEqual(lab.args.add, ['Yui/Newsletters']);
+        assert.strictEqual(lab.args.archive, true, 'catégorie archivante');
+        const p = t.concierge.getState().proposals[0]!;
+        assert.strictEqual(p.via, 'rule');
+        assert.strictEqual(p.proposeArchive, true);
+    }
+
+    // ── onCorrected : appelé après la correction avec l'ancienne et la
+    // nouvelle catégorie ───────────────────────────────────────────────────
+    {
+        const corrections: Array<[string, string, string]> = [];
+        const t = makeConcierge({
+            inbox: () => [META[1]],
+            complete: async () => '[{"i":1,"category":"finance"}]',
+            extra: {
+                onCorrected: (id, prev, next) =>
+                    void corrections.push([id, prev, next]),
+            },
+        });
+        await t.concierge.scan();
+        assert.ok(await t.concierge.correct('m2', 'admin'));
+        assert.deepStrictEqual(corrections, [['m2', 'finance', 'admin']]);
+    }
+
+    // ── fallbackTries : plafonné à 200 entrées à la sauvegarde (les plus
+    // anciennes sautent, jamais les plus récentes) ────────────────────────
+    {
+        const st = loadTriage(tmp());
+        for (let i = 0; i < 205; i++) st.fallbackTries[`m${i}`] = 1;
+        const file = tmp();
+        saveTriage(st, file);
+        const reloaded = loadTriage(file);
+        assert.strictEqual(Object.keys(reloaded.fallbackTries).length, 200);
+        assert.ok(!('m0' in reloaded.fallbackTries), 'plus ancienne écartée');
+        assert.ok('m204' in reloaded.fallbackTries, 'plus récente conservée');
     }
 
     // ── 60 inconnus : 24 par sondage (2 lots de 12), le reste attend ────
