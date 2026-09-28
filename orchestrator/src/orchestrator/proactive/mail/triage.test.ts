@@ -82,6 +82,18 @@ async function run() {
         T.deterministicVerdict(m('marie@gmail.com'), [], VALID),
         null,
     );
+    // règle négative NON confirmée (quarantaine) → rien à proposer, pas de repli signal
+    const negQuarantine = R.newRule({
+        when: { from: 'noreply@github.com' },
+        category: null,
+        origin: 'signal',
+        confirmed: false,
+        now: NOW,
+    });
+    assert.strictEqual(
+        T.deterministicVerdict(m('noreply@github.com'), [negQuarantine], VALID),
+        null,
+    );
     // plafond du lot
     const sixty = Array.from({ length: 60 }, (_, i) => i);
     const { now, later } = T.splitForLlm(sixty);

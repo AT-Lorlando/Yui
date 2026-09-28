@@ -50,10 +50,13 @@ export function deterministicVerdict(
                 };
             }
             // catégorie devenue inconnue (supprimée depuis) : la règle est périmée, on continue comme si elle n'existait pas
+        } else if (rule.then.category === null) {
+            // règle négative en quarantaine : rien à proposer, pas de repli signal
+            return null;
         } else {
             // règle en quarantaine (signal appris, pas encore confirmé) : proposition seulement
             return {
-                category: rule.then.category as string,
+                category: rule.then.category,
                 stage: 'signal',
                 ruleId: rule.id,
                 final: false,

@@ -46,7 +46,8 @@ export class MailJournal {
     }
 
     list(limit: number = 50): MailDecision[] {
-        return this.decisions.slice(0, limit);
+        // copies : un appelant qui mute le résultat ne doit pas corrompre l'anneau interne
+        return this.decisions.slice(0, limit).map((d) => ({ ...d }));
     }
 
     size(): number {
@@ -72,10 +73,20 @@ export class MailJournal {
     }
 
     private save(): void {
-        fs.mkdirSync(path.dirname(this.file), { recursive: true });
-        fs.writeFileSync(
-            this.file,
-            JSON.stringify({ version: 1, decisions: this.decisions }, null, 2),
-        );
+        // best-effort : une écriture qui échoue (disque plein, droits, parent = fichier…) ne doit
+        // jamais faire planter le tri qu'elle journalise — l'entrée reste au moins en mémoire
+        try {
+            fs.mkdirSync(path.dirname(this.file), { recursive: true });
+            fs.writeFileSync(
+                this.file,
+                JSON.stringify(
+                    { version: 1, decisions: this.decisions },
+                    null,
+                    2,
+                ),
+            );
+        } catch (e) {
+            Logger.warn(`mail-journal.json non écrit : ${e}`);
+        }
     }
 }

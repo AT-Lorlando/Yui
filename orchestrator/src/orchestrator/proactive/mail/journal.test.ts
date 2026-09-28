@@ -47,6 +47,17 @@ async function run() {
     assert.strictEqual(corrupted.size(), 0);
     assert.deepStrictEqual(corrupted.list(), []);
 
+    // écriture best-effort : parent = fichier (impossible à mkdir dedans) → add() ne plante pas,
+    // l'entrée reste comptée en mémoire
+    const blockerDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'yui-journal-blocked-'),
+    );
+    const blockerFile = path.join(blockerDir, 'x');
+    fs.writeFileSync(blockerFile, 'not a directory');
+    const blocked = new J.MailJournal(path.join(blockerFile, 'journal.json'));
+    blocked.add(decision(999));
+    assert.strictEqual(blocked.size(), 1);
+
     // fichier par défaut résolu via dataPath('mail-journal.json')
     const def = new J.MailJournal();
     assert.ok(J.MailJournal.defaultFile().endsWith('mail-journal.json'));
