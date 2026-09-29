@@ -54,8 +54,47 @@ async function run(): Promise<void> {
     const reading = [
         { id: 'm1', from: 'a@b.fr', subject: 'S', date: '2026', snippet: '…' },
     ];
+    const dryRunSeen: Array<{ query?: string; max?: number }> = [];
+    const classifySeen: string[][] = [];
+    const rulesFile = {
+        version: 1,
+        rules: [
+            {
+                id: 'r-user',
+                when: { from: 'ami@x.fr' },
+                then: { category: 'perso' },
+            },
+        ],
+    };
+    let replacedRules: unknown;
 
     const handler: MailHandler = {
+        mailDryRun: async (query, max) => {
+            dryRunSeen.push({ query, max });
+            return {
+                query,
+                total: 0,
+                items: [],
+                summary: { rule: 0, signal: 0, none: 0, byRule: {} },
+            };
+        },
+        mailClassify: async (mailIds) => {
+            classifySeen.push(mailIds);
+            return { classified: mailIds.length, skipped: [] };
+        },
+        mailRulesRaw: () => rulesFile,
+        mailRulesReplace: (raw) => {
+            replacedRules = raw;
+            if ((raw as any)?.rules?.[0]?.id === 'bad') {
+                return {
+                    ok: false,
+                    errors: [
+                        { index: 0, id: 'bad', error: 'catégorie inconnue' },
+                    ],
+                };
+            }
+            return { ok: true, count: (raw as any)?.rules?.length ?? 0 };
+        },
         mailRules: () => rules,
         mailRuleSave: (raw: any) => {
             if (
@@ -120,6 +159,15 @@ async function run(): Promise<void> {
         fetch(`${base}${p}`, {
             method: 'DELETE',
             headers: { Authorization: auth },
+        });
+    const put = (p: string, body: unknown = {}, auth = 'Bearer t') =>
+        fetch(`${base}${p}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: auth,
+            },
+            body: JSON.stringify(body),
         });
 
     // ── 401 sans Bearer ────────────────────────────────────────────────────
@@ -204,6 +252,105 @@ async function run(): Promise<void> {
     await get('/mail/journal');
     assert.strictEqual(journalLimitSeen, 50, 'défaut 50');
 
+    // ── 401 sans Bearer (nouvelles routes) ────────────────────────────────
+    assert.strictEqual(
+        (await post('/mail/rules/dry-run', {}, 'Bearer nope')).status,
+        401,
+    );
+
+    // ── POST /mail/rules/dry-run : 200, query/max transmis, 400 sur entrée invalide ──
+    const dryRunRes = await post('/mail/rules/dry-run', {
+        query: 'newer_than:7d',
+        max: 100,
+    });
+    assert.strictEqual(dryRunRes.status, 200);
+    assert.deepStrictEqual(await dryRunRes.json(), {
+        query: 'newer_than:7d',
+        total: 0,
+        items: [],
+        summary: { rule: 0, signal: 0, none: 0, byRule: {} },
+    });
+    assert.deepStrictEqual(dryRunSeen[0], { query: 'newer_than:7d', max: 100 });
+    assert.strictEqual(
+        (await post('/mail/rules/dry-run', {})).status,
+        200,
+        'query/max optionnels',
+    );
+    assert.strictEqual(
+        (await post('/mail/rules/dry-run', { max: 500 })).status,
+        400,
+        'max > 200',
+    );
+    assert.strictEqual(
+        (await post('/mail/rules/dry-run', { query: 42 })).status,
+        400,
+        'query non chaîne',
+    );
+
+    // ── POST /mail/triage/classify : 200, 400 sur mailIds absent/vide/trop grand ──
+    const classifyRes = await post('/mail/triage/classify', {
+        mailIds: ['m1', 'm2'],
+    });
+    assert.strictEqual(classifyRes.status, 200);
+    assert.deepStrictEqual(await classifyRes.json(), {
+        classified: 2,
+        skipped: [],
+    });
+    assert.deepStrictEqual(classifySeen[0], ['m1', 'm2']);
+    assert.strictEqual(
+        (await post('/mail/triage/classify', {})).status,
+        400,
+        'mailIds manquant',
+    );
+    assert.strictEqual(
+        (await post('/mail/triage/classify', { mailIds: [] })).status,
+        400,
+        'mailIds vide',
+    );
+    assert.strictEqual(
+        (
+            await post('/mail/triage/classify', {
+                mailIds: Array.from({ length: 25 }, (_, i) => `m${i}`),
+            })
+        ).status,
+        400,
+        'mailIds > 24',
+    );
+    assert.strictEqual(
+        (await post('/mail/triage/classify', { mailIds: [1, 2] })).status,
+        400,
+        'mailIds non chaînes',
+    );
+
+    // ── GET /mail/rules/raw : 200, fichier complet ────────────────────────
+    const rawRes = await get('/mail/rules/raw');
+    assert.strictEqual(rawRes.status, 200);
+    assert.deepStrictEqual(await rawRes.json(), rulesFile);
+    assert.strictEqual(
+        (await get('/mail/rules/raw', 'Bearer nope')).status,
+        401,
+    );
+
+    // ── PUT /mail/rules : 200 {ok,count}, 400 {errors} ────────────────────
+    const putOk = await put('/mail/rules', {
+        version: 1,
+        rules: [{ id: 'r-1' }],
+    });
+    assert.strictEqual(putOk.status, 200);
+    assert.deepStrictEqual(await putOk.json(), { ok: true, count: 1 });
+    assert.deepStrictEqual(replacedRules, {
+        version: 1,
+        rules: [{ id: 'r-1' }],
+    });
+    const putBad = await put('/mail/rules', {
+        version: 1,
+        rules: [{ id: 'bad' }],
+    });
+    assert.strictEqual(putBad.status, 400);
+    assert.deepStrictEqual(await putBad.json(), {
+        errors: [{ index: 0, id: 'bad', error: 'catégorie inconnue' }],
+    });
+
     main.close();
 
     // ── 503 : proactivité non câblée (handler absent) ─────────────────────
@@ -217,10 +364,25 @@ async function run(): Promise<void> {
         ['GET', '/mail/quarantine'],
         ['GET', '/mail/reading'],
         ['GET', '/mail/journal'],
+        ['POST', '/mail/rules/dry-run'],
+        ['POST', '/mail/triage/classify'],
+        ['GET', '/mail/rules/raw'],
+        ['PUT', '/mail/rules'],
     ] as const) {
         const res = await fetch(`${bareBase}${path}`, {
             method,
-            headers: { Authorization: 'Bearer t' },
+            headers: {
+                Authorization: 'Bearer t',
+                'Content-Type': 'application/json',
+            },
+            body:
+                method === 'POST' || method === 'PUT'
+                    ? JSON.stringify(
+                          path === '/mail/triage/classify'
+                              ? { mailIds: ['m1'] }
+                              : {},
+                      )
+                    : undefined,
         });
         assert.strictEqual(res.status, 503, `${method} ${path}`);
         assert.deepStrictEqual(await res.json(), {
@@ -245,6 +407,18 @@ async function run(): Promise<void> {
         },
         mailJournal: () => {
             throw new Error('boom journal');
+        },
+        mailDryRun: async () => {
+            throw new Error('boom dry-run');
+        },
+        mailClassify: async () => {
+            throw new Error('boom classify');
+        },
+        mailRulesRaw: () => {
+            throw new Error('boom raw');
+        },
+        mailRulesReplace: () => {
+            throw new Error('boom replace');
         },
     };
     const throwingApp = express();
@@ -274,6 +448,37 @@ async function run(): Promise<void> {
     );
     assert.strictEqual((await authed('/mail/quarantine')).status, 500);
     assert.strictEqual((await authed('/mail/journal')).status, 500);
+    assert.strictEqual(
+        (
+            await authed('/mail/rules/dry-run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+            })
+        ).status,
+        500,
+    );
+    assert.strictEqual(
+        (
+            await authed('/mail/triage/classify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mailIds: ['m1'] }),
+            })
+        ).status,
+        500,
+    );
+    assert.strictEqual((await authed('/mail/rules/raw')).status, 500);
+    assert.strictEqual(
+        (
+            await authed('/mail/rules', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ version: 1, rules: [] }),
+            })
+        ).status,
+        500,
+    );
     throwing.close();
 
     console.log('All mail route tests passed');

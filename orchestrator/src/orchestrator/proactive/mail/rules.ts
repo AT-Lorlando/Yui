@@ -313,6 +313,12 @@ export class RuleStore {
         return true;
     }
 
+    /** Remplace tout le fichier (édition JSON brut, tout-ou-rien côté appelant — validée avant d'arriver ici). */
+    replaceAll(rules: MailRule[]): void {
+        this.rules = rules;
+        this.save();
+    }
+
     recordHit(id: string, now: number): void {
         const rule = this.rules.find((r) => r.id === id);
         if (!rule) return;

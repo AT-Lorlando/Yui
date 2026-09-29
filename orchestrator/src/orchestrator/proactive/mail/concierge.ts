@@ -39,7 +39,7 @@ import {
     sortRules,
     validateRuleInput,
 } from './rules';
-import type { MailRule, RuleMail, RuleStore } from './rules';
+import type { MailRule, RuleMail, RuleStore, RulesFile } from './rules';
 import {
     deterministicVerdict,
     fallbackVerdict,
@@ -235,12 +235,49 @@ export interface TriageState {
     lastScanAt?: number;
 }
 
+/** Verdict d'un mail en essai à blanc — jamais `stage:'llm'` : c'est justement ce qui reste à classer. */
+export type DryRunVerdict =
+    | { stage: 'rule'; ruleId: string; category: string; archive: boolean }
+    | { stage: 'signal'; category: string; ruleId?: string; signal?: string }
+    | { stage: 'none' };
+
+export interface DryRunItem {
+    id: string;
+    from: string;
+    subject: string;
+    date: string;
+    verdict: DryRunVerdict;
+    /** Déjà dans `processedIds` — évalué quand même (on teste les règles, pas l'historique). */
+    alreadyProcessed?: boolean;
+}
+
+export interface DryRunResult {
+    query: string;
+    total: number;
+    items: DryRunItem[];
+    summary: {
+        rule: number;
+        signal: number;
+        none: number;
+        byRule: Record<string, number>;
+    };
+}
+
 /** Mail tel que le concierge le manipule : forme de list_messages_meta + corps lu à la demande. */
 export interface ConciergeMail extends RuleMail {
     threadId: string;
     labelIds: string[];
     body?: string;
+    /** Date d'en-tête brute (list_messages_meta) — absente des anciens appels, jamais interprétée. */
+    date: string;
 }
+
+/**
+ * Forme minimale requise par l'étage LLM (corps + repli) : `ConciergeMail`
+ * la satisfait toujours, mais le cache de `dryRun` (pour `classifyMails`)
+ * n'a ni `threadId` ni `labelIds` — pas besoin d'eux pour classer.
+ */
+type LlmMail = RuleMail & { date?: string; body?: string };
 
 const STATE_FILE = dataPath('mail-triage.json');
 const MAX_PROCESSED = 1000;
@@ -383,6 +420,7 @@ export function parseMetaList(raw: unknown): ConciergeMail[] {
             labelIds: Array.isArray(o.labelIds)
                 ? o.labelIds.filter((l): l is string => typeof l === 'string')
                 : [],
+            date: typeof o.date === 'string' ? o.date : '',
         });
     }
     return out;
@@ -544,6 +582,10 @@ export interface ConciergeDeps {
 export class MailConcierge {
     private state: TriageState;
     private stateFile: string;
+    /** Mails du dernier essai à blanc, par id — c'est le seul moyen pour
+     *  `classifyMails` de retrouver un mail sans relire la boîte (l'app
+     *  n'envoie que des ids). Remplacé entier à chaque `dryRun`. */
+    private lastDryRun: Map<string, LlmMail> = new Map();
 
     constructor(private deps: ConciergeDeps, stateFile?: string) {
         this.stateFile = stateFile ?? STATE_FILE;
@@ -967,18 +1009,50 @@ export class MailConcierge {
             }
         }
 
-        // 3. LLM — borné par sondage ; les reportés ne sont pas touchés
-        // (ni proposition ni processedIds) et reviennent au prochain scan.
+        // 3-4. LLM (par lots, corps lu) puis repli — borné par sondage ; les
+        // reportés ne sont pas touchés (ni proposition ni processedIds) et
+        // reviennent au prochain scan. Factorisé dans `runLlmStage`, réutilisé
+        // tel quel par `classifyMails` (mêmes étapes, sur une liste choisie
+        // à la main plutôt que sur les restes des étages 1-2).
         const { now: toLlm, later } = splitForLlm(candidates, LLM_PER_POLL);
         if (later.length) {
             Logger.info(
                 `concierge: ${later.length} mail(s) reportés au prochain poll`,
             );
         }
+        const { concluded: llmConcluded, doubts: newDoubts } =
+            await this.runLlmStage(toLlm);
+        concluded += llmConcluded;
+
+        this.state.lastScanAt = now;
+        saveTriage(this.state, this.stateFile);
+        Logger.info(
+            `concierge: scan "${query}" → ${fresh.length} nouveau(x), ${concluded} classé(s), ${newDoubts.length} doute(s)`,
+        );
+        return {
+            scanned: mails.length,
+            classified: concluded,
+            doubts: newDoubts.length,
+        };
+    }
+
+    /**
+     * Étages 3 (LLM par lots, corps lu) et 4 (repli) — partagés par `scan()`
+     * et `classifyMails()`. `mails` est déjà la liste à traiter (bornée par
+     * l'appelant, cf. `LLM_PER_POLL`) : ce n'est PAS ici qu'on décide combien
+     * en prendre. Notifie `onDoubts` best-effort si de nouveaux doutes
+     * apparaissent — les deux appelants en profitent sans dupliquer l'appel.
+     */
+    private async runLlmStage(
+        mails: LlmMail[],
+    ): Promise<{ concluded: number; doubts: TriageDoubt[] }> {
+        const now = this.deps.now?.() ?? Date.now();
+        const valid = this.validIds();
+        let concluded = 0;
 
         // corps des mails (le sujet seul trompe : « Jérémy, c'est Jimmy… »)
         if (this.deps.readBodies !== false) {
-            for (const m of toLlm) {
+            for (const m of mails) {
                 try {
                     const full = await this.deps.deviceHandler('get_email', {
                         messageId: m.id,
@@ -994,11 +1068,10 @@ export class MailConcierge {
             this.categories(),
             this.deps.getPromptRules?.() ?? [],
         );
-        const classified: Array<{ mail: ConciergeMail; item: ClassifyItem }> =
-            [];
-        const failed: ConciergeMail[] = [];
-        for (let i = 0; i < toLlm.length; i += LLM_BATCH) {
-            const batch = toLlm.slice(i, i + LLM_BATCH);
+        const classified: Array<{ mail: LlmMail; item: ClassifyItem }> = [];
+        const failed: LlmMail[] = [];
+        for (let i = 0; i < mails.length; i += LLM_BATCH) {
+            const batch = mails.slice(i, i + LLM_BATCH);
             let items: Array<ClassifyItem | null>;
             try {
                 const reply = await this.deps.complete(
@@ -1077,11 +1150,6 @@ export class MailConcierge {
             concluded++;
         }
 
-        this.state.lastScanAt = now;
-        saveTriage(this.state, this.stateFile);
-        Logger.info(
-            `concierge: scan "${query}" → ${fresh.length} nouveau(x), ${concluded} classé(s), ${newDoubts.length} doute(s)`,
-        );
         if (newDoubts.length) {
             try {
                 this.deps.onDoubts?.(newDoubts);
@@ -1089,16 +1157,239 @@ export class MailConcierge {
                 /* best-effort */
             }
         }
-        return {
-            scanned: mails.length,
-            classified: concluded,
-            doubts: newDoubts.length,
+
+        return { concluded, doubts: newDoubts };
+    }
+
+    /**
+     * Essai à blanc : évalue les étages déterministes (règles + signaux)
+     * sur la boîte SANS AUCUNE écriture — pas de label, pas de `recordHit`,
+     * pas de règle signal apprise, pas de journal, pas de `processedIds`.
+     * `deterministicVerdict` est une fonction pure (triage.ts) : c'est ce qui
+     * garantit l'absence d'effet de bord ici. Les mails sont mis en cache
+     * (`lastDryRun`, remplacé entier à chaque appel) pour que `classifyMails`
+     * puisse ensuite retrouver ceux que Jérémy choisit d'envoyer au LLM.
+     */
+    async dryRun(query = 'newer_than:30d', max = 200): Promise<DryRunResult> {
+        const maxResults = Math.min(max, 200);
+        const mails = parseMetaList(
+            await this.deps.deviceHandler('list_messages_meta', {
+                query,
+                maxResults,
+            }),
+        );
+        const valid = this.validIds();
+        const rules = this.deps.rules.all();
+        const processed = new Set(this.state.processedIds);
+        const items: DryRunItem[] = [];
+        const summary: DryRunResult['summary'] = {
+            rule: 0,
+            signal: 0,
+            none: 0,
+            byRule: {},
         };
+        const cache = new Map<string, LlmMail>();
+
+        for (const m of mails) {
+            const v = deterministicVerdict(m, rules, valid);
+            let verdict: DryRunVerdict;
+            if (v?.stage === 'rule' && v.ruleId) {
+                verdict = {
+                    stage: 'rule',
+                    ruleId: v.ruleId,
+                    category: v.category,
+                    archive: this.archives(v.category),
+                };
+                summary.rule++;
+                summary.byRule[v.ruleId] = (summary.byRule[v.ruleId] ?? 0) + 1;
+            } else if (v?.stage === 'signal') {
+                verdict = {
+                    stage: 'signal',
+                    category: v.category,
+                    ...(v.ruleId ? { ruleId: v.ruleId } : {}),
+                    ...(v.signal ? { signal: v.signal } : {}),
+                };
+                summary.signal++;
+            } else {
+                verdict = { stage: 'none' };
+                summary.none++;
+            }
+            const item: DryRunItem = {
+                id: m.id,
+                from: m.from,
+                subject: m.subject,
+                date: m.date,
+                verdict,
+            };
+            if (processed.has(m.id)) item.alreadyProcessed = true;
+            items.push(item);
+            cache.set(m.id, {
+                id: m.id,
+                from: m.from,
+                subject: m.subject,
+                snippet: m.snippet,
+                headers: m.headers,
+                date: m.date,
+            });
+        }
+
+        this.lastDryRun = cache;
+        return { query, total: mails.length, items, summary };
+    }
+
+    /**
+     * Classement à la demande d'un lot choisi par Jérémy (page /mail, bouton
+     * « Classer par l'IA les N restants »), depuis le cache du dernier
+     * `dryRun` — l'app n'a que des ids, pas les mails. Un id absent du cache
+     * (essai à blanc trop ancien, remplacé par un autre depuis) → `skipped`,
+     * sans lever d'erreur : l'appelant relance un dry-run et réessaie. Les
+     * mails déjà conclus (poll automatique passé entre-temps) sont ignorés
+     * en silence — ni classés, ni signalés absents, ils ne le sont pas.
+     */
+    async classifyMails(
+        mailIds: string[],
+    ): Promise<{ classified: number; skipped: string[] }> {
+        const skipped: string[] = [];
+        const known = new Set(this.state.proposals.map((p) => p.mailId));
+        const toProcess: LlmMail[] = [];
+        for (const id of mailIds) {
+            const cached = this.lastDryRun.get(id);
+            if (!cached) {
+                skipped.push(id);
+                continue;
+            }
+            if (this.state.processedIds.includes(id) || known.has(id)) {
+                continue;
+            }
+            toProcess.push({ ...cached });
+        }
+        // Même plafond que le poll automatique (LLM_PER_POLL) : un bouton
+        // « classer tout » ne doit pas pouvoir envoyer une boîte entière en
+        // un seul appel — le reste attend un prochain clic.
+        const { concluded } = await this.runLlmStage(
+            toProcess.slice(0, LLM_PER_POLL),
+        );
+        saveTriage(this.state, this.stateFile);
+        return { classified: concluded, skipped };
+    }
+
+    /** Fichier de règles complet (page /mail, édition JSON brut) — y compris les signaux non confirmés. */
+    rulesFile(): RulesFile {
+        return { version: 1, rules: this.deps.rules.all() };
+    }
+
+    /**
+     * Remplace le fichier de règles en bloc (édition JSON brut, tout-ou-rien) :
+     * chaque règle est validée (condition + catégorie via `validateRuleInput`,
+     * puis id/origin/confirmed/hits/createdAt), et la moindre erreur annule
+     * tout le remplacement — jamais un fichier à moitié appliqué. Une règle
+     * `signal` non confirmée absente du nouveau fichier disparaît purement et
+     * simplement : c'est le seul moyen prévu de sortir une quarantaine sans
+     * passer par `quarantineAct('reject')`.
+     */
+    replaceRules(raw: unknown):
+        | { ok: true; count: number }
+        | {
+              ok: false;
+              errors: Array<{ index: number; id?: string; error: string }>;
+          } {
+        const fail = (error: string) => ({
+            ok: false as const,
+            errors: [{ index: -1, error }],
+        });
+        if (typeof raw !== 'object' || raw === null) {
+            return fail('fichier invalide');
+        }
+        const obj = raw as Record<string, unknown>;
+        if (obj.version !== 1) return fail('version invalide');
+        if (!Array.isArray(obj.rules))
+            return fail('rules doit être un tableau');
+
+        const valid = this.validIds();
+        const now = this.deps.now?.() ?? Date.now();
+        const errors: Array<{ index: number; id?: string; error: string }> = [];
+        const seenIds = new Set<string>();
+        const rules: MailRule[] = [];
+
+        obj.rules.forEach((entry: unknown, index: number) => {
+            if (typeof entry !== 'object' || entry === null) {
+                errors.push({ index, error: 'règle invalide' });
+                return;
+            }
+            const r = entry as Record<string, unknown>;
+            const id = r.id;
+            if (typeof id !== 'string' || !id.trim()) {
+                errors.push({ index, error: 'id manquant' });
+                return;
+            }
+            if (seenIds.has(id)) {
+                errors.push({ index, id, error: 'id dupliqué' });
+                return;
+            }
+            const validated = validateRuleInput(
+                { when: r.when, then: r.then },
+                valid,
+            );
+            if (!validated.ok) {
+                errors.push({ index, id, error: validated.error });
+                return;
+            }
+            const origin = r.origin;
+            if (
+                origin !== 'user' &&
+                origin !== 'correction' &&
+                origin !== 'signal'
+            ) {
+                errors.push({ index, id, error: 'origin invalide' });
+                return;
+            }
+            const confirmed = r.confirmed;
+            if (typeof confirmed !== 'boolean') {
+                errors.push({
+                    index,
+                    id,
+                    error: 'confirmed doit être un booléen',
+                });
+                return;
+            }
+            const hits = r.hits ?? 0;
+            if (
+                typeof hits !== 'number' ||
+                !Number.isInteger(hits) ||
+                hits < 0
+            ) {
+                errors.push({
+                    index,
+                    id,
+                    error: 'hits doit être un entier ≥ 0',
+                });
+                return;
+            }
+            const createdAt =
+                typeof r.createdAt === 'number' ? r.createdAt : now;
+            const lastHitAt =
+                typeof r.lastHitAt === 'number' ? r.lastHitAt : undefined;
+            seenIds.add(id);
+            rules.push({
+                id,
+                when: validated.rule.when,
+                then: validated.rule.then,
+                origin,
+                confirmed,
+                hits,
+                ...(lastHitAt !== undefined ? { lastHitAt } : {}),
+                createdAt,
+            });
+        });
+
+        if (errors.length) return { ok: false, errors };
+        this.deps.rules.replaceAll(rules);
+        return { ok: true, count: rules.length };
     }
 
     /** Enregistre une conclusion : proposition + mail marqué traité. */
     private conclude(
-        m: ConciergeMail,
+        m: LlmMail,
         v: Pick<TriageProposal, 'category' | 'via' | 'stage'> &
             Partial<
                 Pick<

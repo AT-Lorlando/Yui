@@ -144,6 +144,18 @@ async function run(): Promise<void> {
     assert.doesNotThrow(() => blocked.upsert(r1));
     assert.strictEqual(blocked.all().length, 1);
 
+    // replaceAll : remplace tout le fichier (édition JSON brut) — même une
+    // règle non confirmée peut en sortir, c'est le but de l'édition brute
+    const replFile = path.join(process.env.YUI_DATA_DIR!, 'repl.json');
+    const replStore = new R.RuleStore(replFile);
+    replStore.upsert(r1);
+    replStore.upsert(sig);
+    replStore.replaceAll([corr]);
+    assert.deepStrictEqual(
+        new R.RuleStore(replFile).all().map((r) => r.id),
+        [corr.id],
+    );
+
     // migration une seule fois : store absent → écrit, puis idempotent
     const migFile = path.join(process.env.YUI_DATA_DIR!, 'mig.json');
     const migStore = new R.RuleStore(migFile);

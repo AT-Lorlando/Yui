@@ -1217,6 +1217,376 @@ async function run(): Promise<void> {
         assert.strictEqual(t.concierge.deleteRule('jamais-vue'), false);
     }
 
+    // ── dryRun : trois verdicts, résumé, AUCUNE écriture ─────────────────
+    {
+        const now = 1000;
+        const rule = newRule({
+            when: { from: 'edf.fr' },
+            category: 'finance',
+            origin: 'user',
+            confirmed: true,
+            now,
+        });
+        const store = new RuleStore(tmp());
+        store.upsert(rule);
+        const t = makeConcierge({
+            inbox: () => META,
+            complete: async () => {
+                throw new Error('le dry-run ne doit jamais appeler le LLM');
+            },
+            rules: store,
+            now: () => now,
+        });
+        const result = await t.concierge.dryRun('newer_than:7d', 50);
+        assert.strictEqual(result.query, 'newer_than:7d');
+        assert.strictEqual(result.total, 3);
+        assert.strictEqual(result.items.length, 3);
+        const byId = new Map(result.items.map((i) => [i.id, i]));
+        assert.deepStrictEqual(byId.get('m2')!.verdict, {
+            stage: 'rule',
+            ruleId: rule.id,
+            category: 'finance',
+            archive: false,
+        });
+        assert.deepStrictEqual(byId.get('m1')!.verdict, {
+            stage: 'signal',
+            category: 'newsletter',
+            signal: 'list-unsubscribe',
+        });
+        assert.deepStrictEqual(byId.get('m3')!.verdict, { stage: 'none' });
+        assert.deepStrictEqual(result.summary, {
+            rule: 1,
+            signal: 1,
+            none: 1,
+            byRule: { [rule.id]: 1 },
+        });
+        assert.ok(!byId.get('m1')!.alreadyProcessed);
+
+        // Aucune écriture : ni label, ni journal, ni règle apprise, ni processedIds.
+        assert.strictEqual(
+            t.calls.filter((c) => c.tool === 'modify_labels').length,
+            0,
+        );
+        assert.strictEqual(
+            t.calls.filter((c) => c.tool === 'list_messages_meta').length,
+            1,
+        );
+        assert.strictEqual(
+            store.all().find((r) => r.id === rule.id)!.hits,
+            0,
+            'aucun recordHit',
+        );
+        assert.strictEqual(
+            store.all().length,
+            1,
+            'aucune règle signal apprise',
+        );
+        assert.strictEqual(t.journal.size(), 0);
+        assert.deepStrictEqual(t.concierge.getState().processedIds, []);
+        assert.deepStrictEqual(t.concierge.getState().proposals, []);
+
+        // max plafonné à 200 côté list_messages_meta, même si demandé plus haut.
+        let seenMax: unknown;
+        const t2 = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            extra: {
+                deviceHandler: async (tool, args) => {
+                    if (tool === 'list_messages_meta') {
+                        seenMax = args?.maxResults;
+                        return [];
+                    }
+                    return 'ok';
+                },
+            },
+        });
+        await t2.concierge.dryRun('q', 500);
+        assert.strictEqual(seenMax, 200);
+    }
+
+    // ── dryRun : un mail déjà traité est réévalué mais marqué alreadyProcessed ──
+    {
+        let completeCalls = 0;
+        const t = makeConcierge({
+            inbox: () => [META[1]],
+            readBodies: false,
+            complete: async () => {
+                completeCalls++;
+                return '[{"i":1,"category":"finance"}]';
+            },
+        });
+        await t.concierge.scan();
+        assert.strictEqual(completeCalls, 1);
+        const dry = await t.concierge.dryRun('any', 10);
+        assert.strictEqual(
+            completeCalls,
+            1,
+            'dry-run ne relance jamais le LLM',
+        );
+        const item = dry.items.find((i) => i.id === 'm2')!;
+        assert.strictEqual(item.alreadyProcessed, true);
+        assert.strictEqual(item.verdict.stage, 'none');
+    }
+
+    // ── classifyMails : id absent du cache → skipped ─────────────────────
+    {
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+        });
+        const r = await t.concierge.classifyMails(['fantome']);
+        assert.deepStrictEqual(r, { classified: 0, skipped: ['fantome'] });
+    }
+
+    // ── classifyMails : mail en cache (dry-run) → proposition via:'llm' ──
+    {
+        let completeCalls = 0;
+        const t = makeConcierge({
+            inbox: () => [META[2]],
+            readBodies: false,
+            complete: async (_s, u) => {
+                completeCalls++;
+                assert.ok(u.includes('Plan Immobilier'));
+                return '[{"i":1,"category":"osef"}]';
+            },
+        });
+        const dry = await t.concierge.dryRun();
+        assert.strictEqual(dry.items[0]!.verdict.stage, 'none');
+        assert.strictEqual(completeCalls, 0, 'dry-run seul ne classe rien');
+        const res = await t.concierge.classifyMails(['m3']);
+        assert.strictEqual(completeCalls, 1);
+        assert.deepStrictEqual(res, { classified: 1, skipped: [] });
+        const st = t.concierge.getState();
+        const p = st.proposals.find((x) => x.mailId === 'm3')!;
+        assert.strictEqual(p.via, 'llm');
+        assert.strictEqual(p.category, 'osef');
+        assert.ok(st.processedIds.includes('m3'));
+        assert.strictEqual(t.journal.size(), 1);
+        assert.strictEqual(
+            t.calls.filter((c) => c.tool === 'modify_labels').length,
+            0,
+            'catégorie pas en autoCategories : proposition seule',
+        );
+    }
+
+    // ── classifyMails : plafond LLM_PER_POLL (24), le reste attend ───────
+    {
+        const many = Array.from({ length: 30 }, (_, i) => unknownMail(i));
+        let batches = 0;
+        const t = makeConcierge({
+            inbox: () => many,
+            readBodies: false,
+            complete: async (_s, u) => {
+                batches++;
+                const count = (u.match(/^\d+\. De:/gm) ?? []).length;
+                return JSON.stringify(
+                    Array.from({ length: count }, (_, i) => ({
+                        i: i + 1,
+                        category: 'lire',
+                    })),
+                );
+            },
+        });
+        await t.concierge.dryRun('in:inbox', 100);
+        const res = await t.concierge.classifyMails(many.map((m) => m.id));
+        assert.strictEqual(res.classified, 24);
+        assert.deepStrictEqual(res.skipped, []);
+        assert.strictEqual(t.concierge.getState().processedIds.length, 24);
+        assert.strictEqual(batches, 2, '24 mails = 2 lots de 12');
+    }
+
+    // ── classifyMails : mail déjà traité → ignoré (ni classé, ni skipped) ──
+    {
+        const t = makeConcierge({
+            inbox: () => [META[1]],
+            readBodies: false,
+            complete: async () => '[{"i":1,"category":"finance"}]',
+        });
+        await t.concierge.scan();
+        await t.concierge.dryRun();
+        const res = await t.concierge.classifyMails(['m2']);
+        assert.deepStrictEqual(res, { classified: 0, skipped: [] });
+    }
+
+    // ── replaceRules : validation tout-ou-rien, remplace le fichier ─────────
+    {
+        const store = new RuleStore(tmp());
+        store.upsert(
+            newRule({
+                when: { from: 'old.fr' },
+                category: 'lire',
+                origin: 'user',
+                confirmed: true,
+                now: 1,
+            }),
+        );
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            rules: store,
+        });
+
+        const dup = t.concierge.replaceRules({
+            version: 1,
+            rules: [
+                {
+                    id: 'r-a',
+                    when: { from: 'a@b.fr' },
+                    then: { category: 'lire' },
+                    origin: 'user',
+                    confirmed: true,
+                    hits: 0,
+                    createdAt: 1,
+                },
+                {
+                    id: 'r-a',
+                    when: { from: 'c@d.fr' },
+                    then: { category: 'lire' },
+                    origin: 'user',
+                    confirmed: true,
+                    hits: 0,
+                    createdAt: 2,
+                },
+            ],
+        });
+        assert.strictEqual(dup.ok, false);
+        if (!dup.ok) {
+            assert.strictEqual(dup.errors.length, 1);
+            assert.strictEqual(dup.errors[0]!.index, 1);
+            assert.strictEqual(dup.errors[0]!.id, 'r-a');
+        }
+
+        const badCat = t.concierge.replaceRules({
+            version: 1,
+            rules: [
+                {
+                    id: 'r-b',
+                    when: { from: 'x@y.fr' },
+                    then: { category: 'nawak' },
+                    origin: 'user',
+                    confirmed: true,
+                    hits: 0,
+                    createdAt: 1,
+                },
+            ],
+        });
+        assert.strictEqual(badCat.ok, false);
+        if (!badCat.ok) assert.strictEqual(badCat.errors[0]!.index, 0);
+
+        const badRegex = t.concierge.replaceRules({
+            version: 1,
+            rules: [
+                {
+                    id: 'r-c',
+                    when: { subject: '(' },
+                    then: { category: 'lire' },
+                    origin: 'user',
+                    confirmed: true,
+                    hits: 0,
+                    createdAt: 1,
+                },
+            ],
+        });
+        assert.strictEqual(badRegex.ok, false);
+        if (!badRegex.ok) assert.strictEqual(badRegex.errors[0]!.index, 0);
+
+        // Rien n'a bougé après les échecs (tout-ou-rien).
+        assert.strictEqual(store.all().length, 1);
+        assert.strictEqual(store.all()[0]!.when.from, 'old.fr');
+
+        const badVersion = t.concierge.replaceRules({ version: 2, rules: [] });
+        assert.strictEqual(badVersion.ok, false);
+        const notArray = t.concierge.replaceRules({
+            version: 1,
+            rules: 'nope',
+        });
+        assert.strictEqual(notArray.ok, false);
+
+        const invalids = t.concierge.replaceRules({
+            version: 1,
+            rules: [
+                {
+                    id: '',
+                    when: { from: 'a@a.fr' },
+                    then: { category: 'lire' },
+                    origin: 'user',
+                    confirmed: true,
+                },
+                {
+                    id: 'r-o',
+                    when: { from: 'b@b.fr' },
+                    then: { category: 'lire' },
+                    origin: 'nawak',
+                    confirmed: true,
+                },
+                {
+                    id: 'r-p',
+                    when: { from: 'c@c.fr' },
+                    then: { category: 'lire' },
+                    origin: 'user',
+                    confirmed: 'oui',
+                },
+            ],
+        });
+        assert.strictEqual(invalids.ok, false);
+        if (!invalids.ok) assert.strictEqual(invalids.errors.length, 3);
+
+        const defaults = t.concierge.replaceRules({
+            version: 1,
+            rules: [
+                {
+                    id: 'r-d',
+                    when: { from: 'd@e.fr' },
+                    then: { category: 'lire' },
+                    origin: 'user',
+                    confirmed: true,
+                },
+            ],
+        });
+        assert.ok(defaults.ok);
+        assert.strictEqual(store.all()[0]!.hits, 0, 'défaut 0');
+        assert.ok(store.all()[0]!.createdAt > 0, 'défaut now');
+
+        const ok = t.concierge.replaceRules({
+            version: 1,
+            rules: [
+                {
+                    id: 'r-1',
+                    when: { from: 'a@b.fr' },
+                    then: { category: 'lire' },
+                    origin: 'user',
+                    confirmed: true,
+                    hits: 3,
+                    createdAt: 10,
+                },
+                {
+                    id: 'r-2',
+                    when: { from: 'x@y.fr' },
+                    then: { category: null },
+                    origin: 'signal',
+                    confirmed: false,
+                    hits: 0,
+                    createdAt: 20,
+                },
+            ],
+        });
+        assert.deepStrictEqual(ok, { ok: true, count: 2 });
+        assert.deepStrictEqual(
+            store.all().map((r) => r.id),
+            ['r-1', 'r-2'],
+        );
+        assert.strictEqual(store.all()[0]!.hits, 3);
+        assert.strictEqual(store.all()[1]!.confirmed, false);
+
+        // rulesFile() : tout le fichier, y compris une règle signal non confirmée.
+        const file = t.concierge.rulesFile();
+        assert.strictEqual(file.version, 1);
+        assert.deepStrictEqual(
+            file.rules.map((r) => r.id),
+            ['r-1', 'r-2'],
+        );
+    }
+
     // ── reading() / markRead() ───────────────────────────────────────────────
     {
         let seenArgs: any;

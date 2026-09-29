@@ -18,12 +18,21 @@ export type MailHandler = Pick<
     | 'mailReading'
     | 'mailMarkRead'
     | 'mailJournal'
+    | 'mailDryRun'
+    | 'mailClassify'
+    | 'mailRulesRaw'
+    | 'mailRulesReplace'
 >;
 
 const UNAVAILABLE = { error: 'proactivité indisponible' };
 const QUARANTINE_ACTIONS = new Set(['confirm', 'correct', 'reject']);
 const JOURNAL_DEFAULT_LIMIT = 50;
 const JOURNAL_MAX_LIMIT = 200;
+// Bornes de l'essai à blanc et du classement à la demande — mêmes plafonds
+// que le poll automatique côté concierge (`LLM_PER_POLL`), pour éviter
+// qu'un appel direct dépasse ce que le concierge accepterait lui-même.
+const DRY_RUN_MAX_LIMIT = 200;
+const CLASSIFY_MAX_IDS = 24;
 // Le concierge lève cette erreur précise quand `correct` reçoit une
 // catégorie qui n'existe pas — la route la distingue d'un id de règle
 // inconnu (404) pour répondre 400 (requête mal formée) à la place.
@@ -193,6 +202,87 @@ export function mailRoutes(
         );
         try {
             res.json(h.mailJournal(limit));
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    r.post('/mail/rules/dry-run', requireAuth, async (req: any, res: any) => {
+        if (!h?.mailDryRun) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        const { query, max } = req.body ?? {};
+        if (query !== undefined && typeof query !== 'string') {
+            res.status(400).json({ error: 'query doit être une chaîne' });
+            return;
+        }
+        if (
+            max !== undefined &&
+            (typeof max !== 'number' || max > DRY_RUN_MAX_LIMIT)
+        ) {
+            res.status(400).json({
+                error: `max doit être un nombre ≤ ${DRY_RUN_MAX_LIMIT}`,
+            });
+            return;
+        }
+        try {
+            res.json(await h.mailDryRun(query, max));
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    r.post('/mail/triage/classify', requireAuth, async (req: any, res: any) => {
+        if (!h?.mailClassify) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        const mailIds = req.body?.mailIds;
+        if (
+            !Array.isArray(mailIds) ||
+            mailIds.length < 1 ||
+            mailIds.length > CLASSIFY_MAX_IDS ||
+            !mailIds.every((id: unknown) => typeof id === 'string')
+        ) {
+            res.status(400).json({
+                error: `mailIds doit contenir de 1 à ${CLASSIFY_MAX_IDS} identifiants`,
+            });
+            return;
+        }
+        try {
+            res.json(await h.mailClassify(mailIds));
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    r.get('/mail/rules/raw', requireAuth, (_req: any, res: any) => {
+        if (!h?.mailRulesRaw) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        try {
+            res.json(h.mailRulesRaw());
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    r.put('/mail/rules', requireAuth, (req: any, res: any) => {
+        if (!h?.mailRulesReplace) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        try {
+            const result = h.mailRulesReplace(req.body) as
+                | { ok: true; count: number }
+                | { ok: false; errors: unknown };
+            if (!result.ok) {
+                res.status(400).json({ errors: result.errors });
+                return;
+            }
+            res.json(result);
         } catch (e: any) {
             res.status(500).json({ error: e.message });
         }

@@ -145,6 +145,14 @@ export interface ProactiveHandler {
     mailMarkRead?: (id: string) => Promise<void>;
     /** Journal des décisions de tri (page /mail). */
     mailJournal?: (limit?: number) => unknown;
+    /** Essai à blanc des règles déterministes, sans aucune écriture (page /mail, onglet Règles). */
+    mailDryRun?: (query?: string, max?: number) => Promise<unknown>;
+    /** Classement à la demande d'un lot d'ids issus du dernier `mailDryRun` (bouton « Classer par l'IA »). */
+    mailClassify?: (mailIds: string[]) => Promise<unknown>;
+    /** Fichier de règles complet, y compris les signaux non confirmés (édition JSON brut). */
+    mailRulesRaw?: () => unknown;
+    /** Remplace le fichier de règles en bloc (édition JSON brut, tout-ou-rien). */
+    mailRulesReplace?: (raw: unknown) => unknown;
     /** `POST /events` : le bus reçoit, filtre (péremption/dédup/cooldown) et compte. */
     ingest?: (
         events: import('../orchestrator/proactive/events').Event[],

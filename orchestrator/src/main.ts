@@ -279,6 +279,13 @@ async function main() {
                 mailMarkRead: (id: string) => proactive.concierge.markRead(id),
                 mailJournal: (limit?: number) =>
                     proactive.concierge.listJournal(limit),
+                mailDryRun: (query?: string, max?: number) =>
+                    proactive.concierge.dryRun(query, max),
+                mailClassify: (mailIds: string[]) =>
+                    proactive.concierge.classifyMails(mailIds),
+                mailRulesRaw: () => proactive.concierge.rulesFile(),
+                mailRulesReplace: (raw: unknown) =>
+                    proactive.concierge.replaceRules(raw),
                 ingest: (events) => proactive.ingestAll(events),
                 brief: (scope?: string) =>
                     proactive.brief(
