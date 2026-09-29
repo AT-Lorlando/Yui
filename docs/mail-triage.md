@@ -115,6 +115,10 @@ En-têtes retournés : `From`, `To`, `Reply-To`, `Subject`, `Date`, `List-Unsubs
 | `/mail/reading` | GET | Pile « à lire » (≤ 50, label `Yui/A lire is:unread`) |
 | `/mail/reading/:mailId/read` | POST | Marquer comme lu |
 | `/mail/journal?limit=50` | GET | Décisions (défaut 50, max 200) |
+| `/mail/rules/dry-run` | POST | Essai à blanc `{query?, max? ≤ 200}` : verdict déterministe par mail (`rule` / `signal` / `none` → IA), résumé par règle — **aucune écriture** |
+| `/mail/triage/classify` | POST | `{mailIds}` (1..24, ids du dernier essai à blanc) : classement IA à la demande (propositions, comme un scan) |
+| `/mail/rules/raw` | GET | Le fichier de règles complet (y compris les règles `signal` non confirmées) |
+| `/mail/rules` | PUT | Remplace tout le fichier, tout-ou-rien ; 400 `{errors:[{index, id?, error}]}` |
 
 Authentification Bearer sur toutes les routes.
 
@@ -125,3 +129,8 @@ Au premier chargement, `concierge.rules` depuis `proactive.json` est migré vers
 - Fichier `mail-rules.json` créé une fois ; `concierge.rules` est ensuite ignoré
 
 Effectué dans `migrateMailRulesIfNeeded()`, appelé au boot du concierge — idempotent.
+
+## Tester et éditer les règles
+
+Sur `/mail`, onglet **Règles** : « Tester les règles » lance un essai à blanc sur une requête Gmail (défaut `newer_than:30d`) et montre, sans rien toucher, ce que chaque règle attraperait, ce qui partirait en quarantaine et ce qui irait à l'IA ; « Classer par l'IA les N restants » envoie les mails restants au tri IA (propositions à valider). Chaque règle se modifie en place ; « JSON brut » édite le fichier entier avec validation tout-ou-rien.
+
