@@ -1966,6 +1966,58 @@ async function run(): Promise<void> {
         assert.strictEqual(s.reading, 0);
     }
 
+    // ── applyRule : filtre local et catégorie périmée ─────────────────────
+    {
+        const mk = (id: string, from: string) => ({
+            id,
+            threadId: `t${id}`,
+            from,
+            subject: 's',
+            snippet: '',
+            headers: {},
+            labelIds: ['INBOX'],
+            date: '',
+        });
+        const store = new RuleStore(tmp());
+        const edf = newRule({
+            when: { from: 'edf.fr' },
+            category: 'finance',
+            origin: 'user',
+            confirmed: true,
+            now: 1000,
+        });
+        const stale = newRule({
+            when: { from: 'old.fr' },
+            category: 'disparue',
+            origin: 'user',
+            confirmed: true,
+            now: 1000,
+        });
+        store.upsert(edf);
+        store.upsert(stale);
+        const t = makeConcierge({
+            inbox: () => [
+                mk('ok1', 'EDF <service@edf.fr>'),
+                mk('other1', 'Autre <a@autre.fr>'),
+            ],
+            complete: async () => '[]',
+            rules: store,
+        });
+        const res = await t.concierge.applyRule(edf.id);
+        const mods = t.calls.filter((c) => c.tool === 'modify_labels');
+        assert.strictEqual(mods.length, 1);
+        assert.strictEqual(mods[0]!.args.messageId, 'ok1');
+        assert.strictEqual(res.applied, 1);
+        assert.ok(!t.concierge.getState().processedIds.includes('other1'));
+        const before = t.calls.length;
+        assert.deepStrictEqual(await t.concierge.applyRule(stale.id), {
+            applied: 0,
+            archived: 0,
+            refused: 'not-applicable',
+        });
+        assert.strictEqual(t.calls.length, before, 'aucun appel Gmail');
+    }
+
     console.log('All concierge tests passed');
 }
 
