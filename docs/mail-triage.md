@@ -119,6 +119,9 @@ En-têtes retournés : `From`, `To`, `Reply-To`, `Subject`, `Date`, `List-Unsubs
 | `/mail/triage/classify` | POST | `{mailIds}` (1..24, ids du dernier essai à blanc) : classement IA à la demande (propositions, comme un scan) |
 | `/mail/rules/raw` | GET | Le fichier de règles complet (y compris les règles `signal` non confirmées) |
 | `/mail/rules` | PUT | Remplace tout le fichier, tout-ou-rien ; 400 `{errors:[{index, id?, error}]}` |
+| `/mail/senders?days=30&max=200` | GET | Expéditeurs récents agrégés par adresse (compteur, dernier sujet, verdict déterministe, `domainRuleAllowed`) — aucune écriture |
+| `/mail/rules/:id/apply` | POST | `{max? ≤ 100}` : application rétroactive d'une règle `from` confirmée (label + archivage si la catégorie archive, filtrage local `matchRule`) → `{applied, archived}` ; 400 si non applicable |
+| `/mail/stats?days=7` | GET | Compteurs du journal par étage et catégorie, quarantaine, pile à lire |
 
 Authentification Bearer sur toutes les routes.
 
@@ -133,4 +136,8 @@ Effectué dans `migrateMailRulesIfNeeded()`, appelé au boot du concierge — id
 ## Tester et éditer les règles
 
 Sur `/mail`, onglet **Règles** : « Tester les règles » lance un essai à blanc sur une requête Gmail (défaut `newer_than:30d`) et montre, sans rien toucher, ce que chaque règle attraperait, ce qui partirait en quarantaine et ce qui irait à l'IA ; « Classer par l'IA les N restants » envoie les mails restants au tri IA (propositions à valider). Chaque règle se modifie en place ; « JSON brut » édite le fichier entier avec validation tout-ou-rien.
+
+## Page d'accueil courrier et page IA
+
+`/mail` montre d'abord ce que les règles font : bandeau 7 jours, **expéditeurs récents** à dégrossir (un geste par ligne — osef, promo, newsletter, notification, perso, pas du bruit — crée la règle sur le domaine ou l'adresse puis l'applique rétroactivement ; les domaines grand public comme gmail.com sont refusés en règle de domaine), quarantaine, règles groupées par catégorie, pile à lire. `/mail/ia` regroupe ce qui reste à l'IA : propositions, doutes, « Classer par l'IA », dernières décisions de l'IA.
 
