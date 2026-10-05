@@ -10,8 +10,10 @@ export interface LightEntity extends BaseEntity {
     state: {
         on: boolean;
         brightness: number;
-        hue?: number;
-        saturation?: number;
+        hue?: number; // 0–65535 (champ v1 du bridge)
+        saturation?: number; // 0–254 (HSV)
+        ct?: number; // blanc en kelvin — le bridge parle mirek, l'app kelvin
+        colormode?: 'hs' | 'xy' | 'ct';
         reachable: boolean;
     };
 }

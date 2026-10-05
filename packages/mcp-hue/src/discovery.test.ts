@@ -23,7 +23,20 @@ const fakeHue = {
         {
             id: 19,
             name: 'Plafond Salon',
-            state: { on: true, bri: 180, hue: 8000, sat: 120, reachable: true },
+            state: {
+                on: true,
+                bri: 180,
+                hue: 8000,
+                sat: 120,
+                ct: 370,
+                colormode: 'ct',
+                reachable: true,
+            },
+        },
+        {
+            id: 21,
+            name: 'Chevet',
+            state: { on: true, bri: 254, hue: 0, sat: 254, reachable: true },
         },
     ],
 } as any;
@@ -58,6 +71,21 @@ async function run(): Promise<void> {
         'bri 180/254 converti en pourcentage (le store est en 0–100)',
     );
     assert.strictEqual(hue.room, 'Salon');
+    // Le mode blanc est copié : le bridge garde hue/sat même en blanc, donc
+    // sans `colormode` une lampe en blanc chaud serait capturée comme une
+    // couleur. `ct` est en kelvin (l'app parle kelvin, cf. colorTemp).
+    assert.strictEqual(hue.state.hue, 8000);
+    assert.strictEqual(hue.state.saturation, 120);
+    assert.strictEqual(hue.state.ct, 2703, 'mirek 370 → kelvin');
+    assert.strictEqual(hue.state.colormode, 'ct');
+
+    const chevet = all.find((l: any) => l.id === 21);
+    assert.strictEqual(chevet.state.ct, undefined, 'pas de ct sans mirek');
+    assert.strictEqual(
+        chevet.state.colormode,
+        undefined,
+        'pas de colormode inventé',
+    );
 
     const govee = all.find((l: any) => l.id === 'g:1');
     assert.ok(govee, 'le device Govee doit survivre à la redécouverte');

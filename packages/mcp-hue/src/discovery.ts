@@ -1,6 +1,7 @@
 import type HueController from './HueController';
 import type { EntityStore, LightEntity } from '@yui/shared';
 import Logger from './logger';
+import { mirekToKelvin } from './colour';
 
 /**
  * Recharge les lampes Hue depuis le bridge.
@@ -39,6 +40,10 @@ export async function discoverLights(
             brightness: Math.round(((light.state.bri ?? 0) / 254) * 100),
             hue: light.state.hue,
             saturation: light.state.sat,
+            // Le bridge garde hue/sat même en blanc : sans `colormode`, une
+            // lampe en blanc chaud était capturée comme une couleur.
+            ct: mirekToKelvin(light.state.ct),
+            colormode: light.state.colormode,
             reachable: light.state.reachable ?? false,
         },
     }));

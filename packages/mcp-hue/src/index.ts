@@ -199,9 +199,15 @@ async function refreshHueState(force = false): Promise<void> {
 function applyStatePatches(patches: LightStatePatch[]): void {
     for (const p of patches) {
         if (!store.getById(p.id)) continue;
+        // Les champs absents du patch ne sont pas touchés (un event ne
+        // porte que ce qui a changé) — d'où les spreads conditionnels.
         store.updateState(p.id, {
             ...(p.on !== undefined && { on: p.on }),
             ...(p.brightness !== undefined && { brightness: p.brightness }),
+            ...(p.hue !== undefined && { hue: p.hue }),
+            ...(p.saturation !== undefined && { saturation: p.saturation }),
+            ...(p.ct !== undefined && { ct: p.ct }),
+            ...(p.colormode !== undefined && { colormode: p.colormode }),
         });
     }
     Logger.debug(`[hue-events] ${patches.length} lampe(s) mise(s) à jour`);

@@ -10,10 +10,16 @@
  * elle se teste sans bridge.
  */
 
+import { xyToHueSat, mirekToKelvin, type ColorMode } from './colour';
+
 export interface LightStatePatch {
     id: number;
     on?: boolean;
     brightness?: number; // 0–100, l'échelle du store
+    hue?: number; // 0–65535
+    saturation?: number; // 0–254
+    ct?: number; // kelvin
+    colormode?: ColorMode;
 }
 
 /** Ressource /clip/v2/resource/light, réduite à ce qui nous sert. */
@@ -30,6 +36,8 @@ export interface HueV2Event {
         type?: string;
         on?: { on?: boolean };
         dimming?: { brightness?: number };
+        color?: { xy?: { x: number; y: number } };
+        color_temperature?: { mirek?: number | null; mirek_valid?: boolean };
     }>;
 }
 
@@ -74,9 +82,30 @@ export function eventsToPatches(
             if (item.dimming?.brightness !== undefined) {
                 patch.brightness = Math.round(item.dimming.brightness);
             }
+            // Couleur : le bridge pousse du xy (jamais hue/sat) ; on le
+            // ramène au format du store. Un changement de couleur arrive
+            // avec un `color_temperature` invalidé dans le même item, un
+            // passage en blanc avec un mirek valide ET le xy du blanc : le
+            // blanc prime, le xy est relevé quand même (le bridge garde
+            // hue/sat en mode ct, comme la v1).
+            const xy = item.color?.xy;
+            if (xy && typeof xy.x === 'number' && typeof xy.y === 'number') {
+                const { hue, sat } = xyToHueSat(xy.x, xy.y);
+                patch.hue = hue;
+                patch.saturation = sat;
+                patch.colormode = 'xy';
+            }
+            const ctK =
+                item.color_temperature?.mirek_valid === true
+                    ? mirekToKelvin(item.color_temperature.mirek)
+                    : undefined;
+            if (ctK !== undefined) {
+                patch.ct = ctK;
+                patch.colormode = 'ct';
+            }
             // Un lot peut contenir plusieurs événements pour la même lampe
             // (on puis dimming) : ils se cumulent, le dernier gagne par champ.
-            if (patch.on !== undefined || patch.brightness !== undefined) {
+            if (Object.keys(patch).length > 1) {
                 patches.set(id, patch);
             }
         }

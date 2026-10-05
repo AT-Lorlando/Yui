@@ -119,6 +119,147 @@ function run(): void {
         assert.deepStrictEqual(patches, []);
     }
 
+    // ── Couleur ──────────────────────────────────────────────────────────
+    // Avant : seuls `on` et `dimming` étaient relevés ; la couleur du store
+    // restait celle du dernier redémarrage (en prod : 18 scènes sans qu'une
+    // seule couleur bouge dans l'app).
+    //
+    // Changement de couleur : le bridge envoie `color.xy` ET un
+    // `color_temperature` invalidé dans le même item.
+    {
+        const patches = eventsToPatches(
+            [
+                {
+                    type: 'update',
+                    data: [
+                        {
+                            id: 'uuid-19',
+                            type: 'light',
+                            color: { xy: { x: 0.64, y: 0.33 } },
+                            color_temperature: {
+                                mirek: null,
+                                mirek_valid: false,
+                            },
+                        },
+                    ],
+                },
+            ],
+            idMap,
+        );
+        assert.strictEqual(patches.length, 1);
+        const p = patches[0];
+        assert.strictEqual(p.id, 19);
+        assert.ok(
+            p.hue !== undefined && (p.hue < 400 || p.hue > 65135),
+            `xy rouge → teinte rouge (${p.hue})`,
+        );
+        assert.ok(p.saturation !== undefined && p.saturation >= 252);
+        assert.strictEqual(p.colormode, 'xy');
+        assert.ok(!('ct' in p), 'mirek invalide → pas de ct');
+        assert.ok(!('on' in p) && !('brightness' in p));
+    }
+    // Passage en blanc : mirek valide → ct en kelvin, colormode 'ct'. Le xy
+    // qui l'accompagne est tout de même relevé (le bridge garde hue/sat).
+    {
+        const patches = eventsToPatches(
+            [
+                {
+                    type: 'update',
+                    data: [
+                        {
+                            id: 'uuid-22',
+                            type: 'light',
+                            color: { xy: { x: 0.4599, y: 0.4106 } },
+                            color_temperature: {
+                                mirek: 370,
+                                mirek_valid: true,
+                            },
+                        },
+                    ],
+                },
+            ],
+            idMap,
+        );
+        assert.strictEqual(patches.length, 1);
+        assert.strictEqual(patches[0].ct, 2703);
+        assert.strictEqual(patches[0].colormode, 'ct');
+        assert.ok(patches[0].hue !== undefined);
+    }
+    // mirek seul (lampe blanche réglée depuis l'app Hue)
+    {
+        const patches = eventsToPatches(
+            [
+                {
+                    type: 'update',
+                    data: [
+                        {
+                            id: 'uuid-22',
+                            type: 'light',
+                            color_temperature: {
+                                mirek: 153,
+                                mirek_valid: true,
+                            },
+                        },
+                    ],
+                },
+            ],
+            idMap,
+        );
+        assert.deepStrictEqual(patches, [
+            { id: 22, ct: 6536, colormode: 'ct' },
+        ]);
+    }
+    // Lot mêlant on + couleur pour la même lampe : tout se cumule.
+    {
+        const patches = eventsToPatches(
+            [
+                {
+                    type: 'update',
+                    data: [{ id: 'uuid-19', type: 'light', on: { on: true } }],
+                },
+                {
+                    type: 'update',
+                    data: [
+                        {
+                            id: 'uuid-19',
+                            type: 'light',
+                            color: { xy: { x: 0.15, y: 0.06 } },
+                        },
+                    ],
+                },
+            ],
+            idMap,
+        );
+        assert.strictEqual(patches.length, 1);
+        assert.strictEqual(patches[0].on, true);
+        assert.strictEqual(patches[0].colormode, 'xy');
+        assert.ok(
+            patches[0].hue !== undefined &&
+                patches[0].hue > 42000 &&
+                patches[0].hue < 46000,
+            'bleu',
+        );
+    }
+    // `color` sans xy (ex. gamut seul) : rien à relever.
+    {
+        const patches = eventsToPatches(
+            [
+                {
+                    type: 'update',
+                    data: [
+                        {
+                            id: 'uuid-19',
+                            type: 'light',
+                            color: { gamut_type: 'C' } as any,
+                        },
+                    ],
+                },
+            ],
+            idMap,
+        );
+        assert.deepStrictEqual(patches, []);
+    }
+
     // Découpage SSE : trame complète + reliquat conservé
     {
         const chunk =
