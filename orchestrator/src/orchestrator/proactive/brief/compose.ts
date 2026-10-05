@@ -82,15 +82,45 @@ function extractTokens(text: string): string[] {
     return [...numbers, ...caps];
 }
 
+/** Parties d'un nombre composé (« 17:00 » → 17, 00) et leur forme sans zéro
+ *  de tête (« 00 » → 0, « 07 » → 7) : une heure se dit « 17 heures », « 17h »
+ *  ou « 7 heures 30 », une date ISO « le 5 octobre » — le LLM n'invente rien
+ *  en reformulant un chiffre qu'il a reçu. Le composé lui-même est gardé. */
+function numberForms(token: string): string[] {
+    const forms = [token];
+    const parts = token.split(/[.,:]/);
+    for (const p of parts) {
+        forms.push(p);
+        const bare = p.replace(/^0+(?=\d)/, '');
+        if (bare !== p) forms.push(bare);
+    }
+    return forms;
+}
+
 /** Jetons (chiffres, mots capitalisés) de libellés — pas de phrases — pour
  *  bâtir un lexique d'ancrage. Pur. */
 export function lexiconTokens(labels: string[]): Set<string> {
     const tokens = new Set<string>();
     for (const label of labels) {
-        for (const t of label.match(NUMBER_RE) ?? []) tokens.add(t);
+        for (const t of label.match(NUMBER_RE) ?? []) {
+            for (const form of numberForms(t)) tokens.add(form);
+        }
         for (const t of label.match(LABEL_CAPITALIZED_RE) ?? []) tokens.add(t);
     }
     return tokens;
+}
+
+/** Un jeton de sortie est connu s'il figure au lexique tel quel ou, pour un
+ *  nombre, si chacune de ses parties (sans zéro de tête) y figure : « 17h00 »
+ *  passe sur un fait « 17:00 », « 17:30 » non (la minute est inventée). */
+function tokenKnown(token: string, lexicon: Set<string>): boolean {
+    if (lexicon.has(token)) return true;
+    if (!/^\d/.test(token)) return false;
+    return token
+        .split(/[.,:]/)
+        .every(
+            (p) => lexicon.has(p) || lexicon.has(p.replace(/^0+(?=\d)/, '')),
+        );
 }
 
 function capitalize(word: string): string {
@@ -179,7 +209,7 @@ export function checkAgainstLexicon(
 ): { ok: true; text: string } | { ok: false; reason: string } {
     const truncated = truncateToLimit(text.trim());
     for (const token of extractTokens(truncated)) {
-        if (!lexicon.has(token)) {
+        if (!tokenKnown(token, lexicon)) {
             return {
                 ok: false,
                 reason: `jeton absent des faits : « ${token} »`,
@@ -198,12 +228,34 @@ export function checkComposed(
     return checkAgainstLexicon(text, allowedTokens(facts, extraAllowed));
 }
 
-/** Repli sans LLM : une phrase par fait, formulation fixe par nature. Pur. */
+/** Un fait devient une phrase : ponctuation finale ajoutée si absente. */
+function factSentence(text: string): string {
+    const t = text.trim();
+    return /[.!?…]$/.test(t) ? t : `${t}.`;
+}
+
+/** Repli sans LLM : le préfixe du moment puis UNE PHRASE PAR FAIT, dans
+ *  l'ordre (importance décroissante), autant de faits que la borne en
+ *  accepte — la coupe se fait à une frontière de fait, jamais au milieu.
+ *  Vécu : huit faits joints en une seule phrase de 480 caractères, puis
+ *  coupés « au dernier point » — qui était celui de « Bonjour. ». Si même le
+ *  premier fait déborde, il est coupé sec avec « … » plutôt que perdu. Pur. */
 export function templateBrief(momentKind: string, facts: BriefFact[]): string {
     if (facts.length === 0) {
         return MOMENT_EMPTY[momentKind] ?? 'Rien de nouveau.';
     }
     const prefix = MOMENT_PREFIX[momentKind] ?? 'Le point :';
-    const out = `${prefix} ${facts.map((f) => f.text).join(' ; ')}.`;
-    return truncateToLimit(out);
+    let out = prefix;
+    for (const f of facts) {
+        const next = `${out} ${factSentence(f.text)}`;
+        if (next.length > BRIEF_MAX_CHARS) break;
+        out = next;
+    }
+    if (out === prefix) {
+        return `${`${prefix} ${facts[0]!.text}`.slice(
+            0,
+            BRIEF_MAX_CHARS - 1,
+        )}…`;
+    }
+    return out;
 }
