@@ -18,6 +18,7 @@ import type { Importance } from '../types';
 import type { MomentKind } from '../moments';
 import type { SaidNature } from '../said';
 import { POSTIT_LINE_RE } from '../postits';
+import { POSTIT_VALUE_RE } from '../connectors/yoji';
 
 export interface BriefFact {
     subject: string; // clé mémoire : `source:key` pour un événement, sinon préfixée (`situation:`, `postit:`)
@@ -80,16 +81,24 @@ function sectionFacts(s: Situation, id: string, label: string): Fact[] {
     return (s.sections?.[id] ?? []).filter((f) => f.label === label);
 }
 
+/** « Post-it ouvert depuis N jours : <titre> » — l'âge est une attente, pas
+ *  une échéance (« (11 j) » a été lu « dans onze jours »). L'empreinte porte
+ *  sur l'identité du post-it, jamais sur le texte : l'âge change chaque jour
+ *  et re-déclencherait le rappel alors que la nature le dit pour 7 jours. */
 function stalePostitFacts(s: Situation): BriefFact[] {
     return sectionFacts(s, 'yoji', 'Post-it ancien').map((f) => {
-        const text = `Post-it qui traîne : ${f.value}`;
+        const m = POSTIT_VALUE_RE.exec(f.value);
+        const title = m ? m[1]! : f.value;
+        const text = m
+            ? `Post-it ouvert depuis ${m[2]} jours : ${title}`
+            : `Post-it ouvert : ${title}`;
         return {
             subject: `postit:${f.key ?? f.value}-stale`,
             text,
             importance: 'utile' as Importance,
             at: s.at,
             nature: 'postit-stale' as SaidNature,
-            fingerprint: fingerprintOf(text),
+            fingerprint: fingerprintOf(f.key ?? title),
         };
     });
 }

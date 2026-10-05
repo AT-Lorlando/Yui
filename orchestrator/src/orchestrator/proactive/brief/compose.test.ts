@@ -28,6 +28,12 @@ async function run(): Promise<void> {
         /n'invente rien/i.test(BRIEF_SYSTEM_PROMPT) ||
             /N'invente rien/.test(BRIEF_SYSTEM_PROMPT),
     );
+    // L'âge d'un post-it est une attente : la règle est dite au LLM (vécu :
+    // « (11 j) » devenu « arrivent dans onze jours »).
+    assert.ok(/ouvert depuis N jours/.test(BRIEF_SYSTEM_PROMPT));
+    assert.ok(
+        /jamais une échéance ni un compte à rebours/.test(BRIEF_SYSTEM_PROMPT),
+    );
     const user = buildBriefUser({
         momentKind: 'moment-wake',
         momentFacts: 'premières lumières',

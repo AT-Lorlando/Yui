@@ -123,11 +123,48 @@ async function run(): Promise<void> {
     const all = collectFacts(inputs(), T);
     const stale = all.find((f) => f.subject === 'postit:b-stale');
     assert.ok(stale, 'post-it ancien → fait de brief');
-    assert.strictEqual(stale!.text, 'Post-it qui traîne : Vieux truc (12 j)');
+    // L'âge est une attente, formulée sans ambiguïté (jamais « (12 j) », lu
+    // comme une échéance) et le titre vient après.
+    assert.strictEqual(
+        stale!.text,
+        'Post-it ouvert depuis 12 jours : Vieux truc',
+    );
     assert.strictEqual(stale!.nature, 'postit-stale');
     assert.strictEqual(stale!.importance, 'utile');
     assert.strictEqual(stale!.at, T);
     assert.strictEqual(stale!.heldKey, undefined);
+    // L'empreinte ne bouge pas d'un jour à l'autre : le même post-it un jour
+    // plus tard reste « déjà dit » pendant les 7 jours de sa nature.
+    const staleAt = (value: string, key = 'b') =>
+        collectFacts(
+            inputs({
+                situation: {
+                    ...situation,
+                    sections: {
+                        yoji: [{ label: 'Post-it ancien', value, key }],
+                    },
+                },
+            }),
+            T,
+        )[0]!;
+    const day11 = staleAt('Attestation assurance habitation (11 j)');
+    const day12 = staleAt('Attestation assurance habitation (12 j)');
+    assert.strictEqual(
+        day11.text,
+        'Post-it ouvert depuis 11 jours : Attestation assurance habitation',
+    );
+    assert.strictEqual(day11.subject, day12.subject);
+    assert.strictEqual(day11.fingerprint, day12.fingerprint);
+    assert.notStrictEqual(
+        day11.fingerprint,
+        staleAt('Autre (11 j)', 'z').fingerprint,
+        'deux post-its distincts ont deux empreintes',
+    );
+    // Valeur sans âge reconnaissable : rappel brut, jamais d'exception.
+    assert.strictEqual(
+        staleAt('Sans forme').text,
+        'Post-it ouvert : Sans forme',
+    );
     const early = all.find(
         (f) => f.subject === 'situation:agenda-early-« Train » à 07:30',
     );

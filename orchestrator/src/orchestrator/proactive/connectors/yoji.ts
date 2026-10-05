@@ -7,6 +7,9 @@ import type { ConnectorDef } from '../connector';
 
 /** Au-delà, un post-it « traîne » et mérite un rappel au point. */
 export const STALE_DAYS = 7;
+/** Forme de la valeur d'un fait post-it : `<titre> (<âge> j)` — la collecte
+ *  du brief la décompose (titre, âge) pour formuler un rappel sans ambiguïté. */
+export const POSTIT_VALUE_RE = /^(.+) \((\d+) j\)$/;
 const MAX_FACTS = 8;
 /** Tag posé par Yui sur ce qu'elle crée — ces post-its passent devant. */
 const OWN_TAG = 'yui';
