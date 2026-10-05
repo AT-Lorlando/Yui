@@ -5,7 +5,8 @@ import * as path from 'path';
 // Le concierge persiste son état via dataPath() : isoler YUI_DATA_DIR AVANT de
 // résoudre ./mail (même contrainte que connectors.test.ts).
 process.env.YUI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-mailc-'));
-const { mailConnector } = require('./mail') as typeof import('./mail');
+const { mailConnector, capLegacyImportance } =
+    require('./mail') as typeof import('./mail');
 const { MailConcierge } =
     require('../mail/concierge') as typeof import('../mail/concierge');
 const { ConnectorState } =
@@ -67,13 +68,16 @@ async function run(): Promise<void> {
     };
 
     const state = new ConnectorState();
+    const toolCalls: string[] = [];
     const ctx = (settings: Record<string, unknown>): ConnectorContext => ({
-        callTool: async (t) =>
-            t === 'search_emails'
+        callTool: async (t) => {
+            toolCalls.push(t);
+            return t === 'search_emails'
                 ? SEARCH
                 : t === 'list_messages_meta'
                 ? META
-                : null,
+                : null;
+        },
         settings,
         state,
         presence: () => 'home',
@@ -82,15 +86,35 @@ async function run(): Promise<void> {
     });
     const c = mailConnector({ concierge });
 
-    // Tri inactif : seulement les mails importants (evaluateMail).
+    // Tri inactif : seulement les mails importants (evaluateMail), jamais
+    // au-dessus de « utile » — ils sont retenus, pas jugés.
     const off = await c.events!(ctx({ triage: false, query: 'is:important' }));
     assert.strictEqual(scans, 0);
     assert.strictEqual(off.length, 1);
     assert.strictEqual(off[0]!.key, 'important-mail');
+    assert.ok(
+        off[0]!.importance === 'utile' || off[0]!.importance === 'info',
+        'le veilleur historique ne dépasse jamais utile',
+    );
+    assert.strictEqual(capLegacyImportance('urgent'), 'utile');
+    assert.strictEqual(capLegacyImportance('critique'), 'utile');
+    assert.strictEqual(capLegacyImportance('utile'), 'utile');
+    assert.strictEqual(capLegacyImportance('info'), 'info');
 
-    // Tri actif : scan + un événement par action, jamais répété.
+    // Tri actif : le concierge est seul maître — le veilleur historique ne
+    // tourne pas (pas de search_emails, aucun événement « important-mail »),
+    // scan + un événement par action, jamais répété.
+    toolCalls.length = 0;
     const on = await c.events!(ctx({ triage: true }));
     assert.strictEqual(scans, 1);
+    assert.ok(
+        !toolCalls.includes('search_emails'),
+        'tri actif → evaluateMail ne tourne pas',
+    );
+    assert.ok(
+        !on.some((e) => e.key === 'important-mail'),
+        'tri actif → aucun événement du veilleur historique',
+    );
     const action = on.find((e) => e.key === 'mail-action-m1');
     assert.ok(action && action.kind === 'request');
     // L'intention todo porte le sujet et l'id Gmail (retrouvable depuis Yoji).

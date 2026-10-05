@@ -231,6 +231,14 @@ async function run(): Promise<void> {
         buildClassifySystem(cats).includes('"now" est RARE'),
         'le prompt met en garde contre le surclassement en urgence',
     );
+    // Vécu (01/10) : des alertes de sécurité automatiques classées "now" →
+    // « piratage en cours » parlé par le juge. Le prompt les range en notifications.
+    assert.ok(
+        /alertes de sécurité automatiques[^.]*jamais "now"/.test(
+            buildClassifySystem(cats),
+        ),
+        'les alertes de sécurité automatiques ne sont jamais "now"',
+    );
 
     // ── list_messages_meta : tableau, JSON texte, ou rien ────────────────
     assert.strictEqual(parseMetaList(META).length, 3);

@@ -1,7 +1,10 @@
-// Courrier : les mails « importants » Gmail (evaluateMail) et, si le réglage
-// `triage` est actif, le concierge (règles → LLM → labels) dont les
-// propositions « action » et les doutes deviennent des événements. Le tri
-// n'a plus de timer à part : c'est le poll de ce connecteur.
+// Courrier : si le réglage `triage` est actif, le concierge (règles → LLM →
+// labels) est SEUL maître du courrier — ses propositions « action » et ses
+// doutes deviennent des événements. Sinon, le veilleur historique des mails
+// « importants » Gmail (evaluateMail), plafonné à `utile` : il n'a ni urgence
+// ni classement, donc jamais le juge — ce qu'il remonte est retenu et dit au
+// prochain point, sous la garde du lexique. Le tri n'a plus de timer à part :
+// c'est le poll de ce connecteur.
 import { evaluateMail } from '../watchers/mail';
 import {
     fromCandidate,
@@ -25,6 +28,23 @@ const MAX_SNAPSHOT_ACTIONS = 5;
 /** Mails "now" traités en urgent par jour — au-delà, importance rabattue en
  *  "utile" (le juge/budget quotidien reste la dernière digue). */
 export const MAIL_URGENT_PER_DAY = 2;
+/** Plafond d'importance du veilleur historique — jamais `urgent`. */
+export const LEGACY_MAIL_MAX_IMPORTANCE: Importance = 'utile';
+
+const IMPORTANCE_RANK: Record<Importance, number> = {
+    info: 0,
+    utile: 1,
+    urgent: 2,
+    critique: 3,
+};
+
+/** Rabat une importance au plafond du veilleur historique. Pur. */
+export function capLegacyImportance(importance: Importance): Importance {
+    return IMPORTANCE_RANK[importance] >
+        IMPORTANCE_RANK[LEGACY_MAIL_MAX_IMPORTANCE]
+        ? LEGACY_MAIL_MAX_IMPORTANCE
+        : importance;
+}
 
 const VIA_LABEL: Record<TriageProposal['via'], string> = {
     rule: 'par une règle',
@@ -79,15 +99,21 @@ export function mailConnector(services: {
         async events(ctx): Promise<Event[]> {
             const now = ctx.now();
             const out: Event[] = [];
-            const query = String(ctx.settings.query ?? DEFAULT_MAIL_QUERY);
-            const pollMinutes = Number(ctx.settings.pollMinutes ?? 15);
-            for (const c of await evaluateMail(ctx.callTool, {
-                pollMinutes,
-                query,
-            })) {
-                out.push(fromCandidate(c, now));
+            if (ctx.settings.triage !== true) {
+                const query = String(ctx.settings.query ?? DEFAULT_MAIL_QUERY);
+                const pollMinutes = Number(ctx.settings.pollMinutes ?? 15);
+                for (const c of await evaluateMail(ctx.callTool, {
+                    pollMinutes,
+                    query,
+                })) {
+                    const e = fromCandidate(c, now);
+                    out.push({
+                        ...e,
+                        importance: capLegacyImportance(e.importance),
+                    });
+                }
+                return out;
             }
-            if (ctx.settings.triage !== true) return out;
 
             const { concierge } = services;
             await concierge.scan();

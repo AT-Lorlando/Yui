@@ -447,8 +447,8 @@ En cas d'hésitation entre "action" et autre chose : ce n'est pas une action.
 Pour chaque mail, indique aussi "urgency" :
 - "none" (défaut) : rien n'est attendu de lui, ou pas de date.
 - "soon" : quelque chose est attendu de lui sous quelques jours (échéance, relance, document à fournir).
-- "now" : à traiter aujourd'hui — échéance dans les 48 h, accès ou sécurité d'un compte, une personne qui attend sa réponse aujourd'hui, un incident en cours.
-"now" est RARE. Une newsletter, une promo, une notification ou un message marketing n'est JAMAIS "soon" ni "now", quel que soit son vocabulaire (« urgent », « dernière chance »). Donne "reason" : une ligne factuelle (la date ou la demande), vide si "none".
+- "now" : à traiter aujourd'hui — échéance dans les 48 h, une personne qui attend sa réponse aujourd'hui, un incident en cours qui lui demande un geste précis.
+"now" est RARE. Une newsletter, une promo, une notification ou un message marketing n'est JAMAIS "soon" ni "now", quel que soit son vocabulaire (« urgent », « dernière chance »). Les alertes de sécurité automatiques (nouvelle connexion, code de vérification, activité inhabituelle, incident détecté) sont des notifications : jamais "now". Donne "reason" : une ligne factuelle (la date ou la demande), vide si "none".
 
 Si tu HÉSITES vraiment sur un mail (deux catégories plausibles, ou aucune ne colle), dis-le : "doubt":true, "reason" en une phrase, "alternatives" (les catégories envisagées), et propose dans "suggestions" ce qui te permettrait de trancher la prochaine fois — soit une règle en français à ajouter au prompt ({"kind":"rule","text":"Les alertes immobilières sont osef"}), soit une nouvelle catégorie ({"kind":"category","id":"immo","label":"Yui/Immobilier","text":"Annonces et alertes immobilières","archive":true}). Ne propose rien pour un mail sûr.
 
