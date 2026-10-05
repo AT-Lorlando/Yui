@@ -235,7 +235,11 @@ export function validateRuleInput(
             error: 'au moins une condition (expéditeur, sujet ou en-tête) est requise',
         };
     }
-    if (from && !from.includes('@') && PUBLIC_DOMAINS.has(from.toLowerCase())) {
+    if (
+        from &&
+        PUBLIC_DOMAINS.has(from.toLowerCase().replace(/^@/, '')) &&
+        !/.@/.test(from)
+    ) {
         return {
             ok: false,
             error: "domaine grand public : précise l'adresse complète",

@@ -37,6 +37,7 @@ import {
     senderAddress,
     senderDomain,
     firstMatch,
+    matchRule,
     PUBLIC_DOMAINS,
     sortRules,
     validateRuleInput,
@@ -715,7 +716,13 @@ export class MailConcierge {
     async recentSenders(days = 30, max = 200): Promise<SenderSummary[]> {
         const now = this.deps.now?.() ?? Date.now();
         const maxResults = Math.min(max, 200);
-        const key = `${days}:${maxResults}`;
+        // le cache suit les règles par empreinte (hors hits) : tout chemin qui
+        // les modifie l'invalide sans qu'il faille y penser à chaque site
+        const key = `${days}:${maxResults}:${JSON.stringify(
+            this.deps.rules
+                .all()
+                .map((r) => [r.id, r.when, r.then, r.origin, r.confirmed]),
+        )}`;
         if (
             this.sendersCache &&
             this.sendersCache.key === key &&
@@ -737,6 +744,7 @@ export class MailConcierge {
         >();
         for (const m of mails) {
             const address = senderAddress(m.from);
+            if (!address) continue;
             const t = Date.parse(m.date);
             const time = Number.isNaN(t) ? -Infinity : t;
             const known = byAddress.get(address);
@@ -827,7 +835,8 @@ export class MailConcierge {
             !from ||
             rule.when.subject ||
             rule.when.header ||
-            category === null
+            category === null ||
+            !this.validIds().has(category)
         ) {
             return { applied: 0, archived: 0, refused: 'not-applicable' };
         }
@@ -835,13 +844,16 @@ export class MailConcierge {
         const label = this.labelOf(category);
         const mails = parseMetaList(
             await this.deps.deviceHandler('list_messages_meta', {
-                query: `from:${from} newer_than:90d`,
+                query: `from:"${from.replace(/"/g, '')}" newer_than:90d`,
                 maxResults: Math.min(max, 100),
             }),
         );
         let applied = 0;
         let archived = 0;
         for (const m of mails) {
+            // la requête Gmail est large (opérateurs, espaces) : seule la
+            // règle elle-même décide quels mails sont touchés
+            if (!matchRule(rule, m)) continue;
             try {
                 // idempotent : on ne sait pas lire les labels par nom ici
                 await this.deps.deviceHandler('modify_labels', {

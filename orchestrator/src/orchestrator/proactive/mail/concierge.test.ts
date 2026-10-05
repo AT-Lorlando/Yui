@@ -1774,6 +1774,41 @@ async function run(): Promise<void> {
     }
 
     {
+        const store = new RuleStore(tmp());
+        const t = makeConcierge({
+            inbox: () => [
+                {
+                    id: 'k1',
+                    threadId: 't',
+                    from: 'K <k@k.fr>',
+                    subject: 's',
+                    snippet: '',
+                    headers: {},
+                    labelIds: [],
+                    date: '',
+                },
+                { id: 'k2', from: '', subject: '', labelIds: [] },
+            ],
+            complete: async () => '[]',
+            rules: store,
+        });
+        const before = await t.concierge.recentSenders(30, 200);
+        assert.strictEqual(before.length, 1, 'adresse vide ignorée');
+        assert.strictEqual(before[0]!.verdict.stage, 'none');
+        store.upsert(
+            newRule({
+                when: { from: 'k.fr' },
+                category: 'osef',
+                origin: 'user',
+                confirmed: true,
+                now: 1000,
+            }),
+        );
+        const after = await t.concierge.recentSenders(30, 200);
+        assert.strictEqual(after[0]!.verdict.stage, 'rule');
+    }
+
+    {
         let clock = 1000;
         const t = makeConcierge({
             inbox: () => [],
@@ -1850,7 +1885,7 @@ async function run(): Promise<void> {
         );
         const res = await failing.applyRule(rule.id, 500);
         const list = t.calls.find((c) => c.tool === 'list_messages_meta')!;
-        assert.strictEqual(list.args.query, 'from:zalando.fr newer_than:90d');
+        assert.strictEqual(list.args.query, 'from:"zalando.fr" newer_than:90d');
         assert.strictEqual(list.args.maxResults, 100);
         const mods = t.calls.filter((c) => c.tool === 'modify_labels');
         assert.strictEqual(

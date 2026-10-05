@@ -118,6 +118,12 @@ async function run(): Promise<void> {
             valid,
         ).ok,
     );
+    assert.ok(
+        !R.validateRuleInput(
+            { when: { from: '@gmail.com' }, then: { category: 'osef' } },
+            valid,
+        ).ok,
+    );
     const okNeg = R.validateRuleInput(
         { when: { from: 'x@y.z' }, then: { category: null } },
         valid,
