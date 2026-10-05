@@ -28,6 +28,17 @@ const MAX_SNAPSHOT_ACTIONS = 5;
 /** Mails "now" traités en urgent par jour — au-delà, importance rabattue en
  *  "utile" (le juge/budget quotidien reste la dernière digue). */
 export const MAIL_URGENT_PER_DAY = 2;
+/** Seule une « action » (un geste attendu de Jérémy) peut être urgente :
+ *  `category === 'action' && urgency === 'now'`, sous le plafond quotidien.
+ *  Toute autre catégorie classée "now" (securite, lire, notification…) est
+ *  traitée comme "soon" — événement `utile`, raison dans les faits, retenu
+ *  pour le prochain point — le juge ne brode donc jamais sur une alerte de
+ *  sécurité (vécu 01/10 : « piratage en cours »). Pur. */
+export function isUrgentMail(
+    p: Pick<TriageProposal, 'category' | 'urgency'>,
+): boolean {
+    return p.category === 'action' && p.urgency === 'now';
+}
 /** Plafond d'importance du veilleur historique — jamais `urgent`. */
 export const LEGACY_MAIL_MAX_IMPORTANCE: Importance = 'utile';
 
@@ -138,7 +149,7 @@ export function mailConnector(services: {
                         VIA_LABEL[p.via] ?? VIA_LABEL.llm
                     }.`,
                 ];
-                if (p.urgency === 'now') {
+                if (isUrgentMail(p)) {
                     if (urgentCount < MAIL_URGENT_PER_DAY) {
                         importance = 'urgent';
                         urgentCount++;

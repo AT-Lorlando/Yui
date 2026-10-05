@@ -5,7 +5,7 @@ import * as path from 'path';
 // Le concierge persiste son état via dataPath() : isoler YUI_DATA_DIR AVANT de
 // résoudre ./mail (même contrainte que connectors.test.ts).
 process.env.YUI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-mailc-'));
-const { mailConnector, capLegacyImportance } =
+const { mailConnector, capLegacyImportance, isUrgentMail } =
     require('./mail') as typeof import('./mail');
 const { MailConcierge } =
     require('../mail/concierge') as typeof import('../mail/concierge');
@@ -172,11 +172,11 @@ async function run(): Promise<void> {
         });
         const cUrgent = mailConnector({ concierge: urgentConcierge });
 
-        // Une proposition "lire" (jamais une action) mais urgency "now" :
-        // devient quand même un événement, urgent, avec la raison en fait.
+        // Seule une action peut être urgente : "action" + "now" → urgent,
+        // avec la raison en fait.
         push({
             mailId: 'u1',
-            category: 'lire',
+            category: 'action',
             urgency: 'now',
             reason: 'Réponse attendue aujourd’hui',
         });
@@ -184,6 +184,46 @@ async function run(): Promise<void> {
         const e1 = r1.find((e) => e.key === 'mail-action-u1')!;
         assert.strictEqual(e1.importance, 'urgent');
         assert.ok(e1.facts.some((f) => f.includes('Réponse attendue')));
+        assert.strictEqual(
+            isUrgentMail({ category: 'action', urgency: 'now' }),
+            true,
+        );
+        assert.strictEqual(
+            isUrgentMail({ category: 'action', urgency: 'soon' }),
+            false,
+        );
+        assert.strictEqual(
+            isUrgentMail({ category: 'securite', urgency: 'now' }),
+            false,
+        );
+
+        // "lire" ou "securite" + "now" (vécu : alertes de connexion → « piratage
+        // en cours » parlé par le juge) : un événement comme un "soon" — utile,
+        // raison dans les faits, retenu pour le prochain point — jamais urgent,
+        // et il ne consomme pas le plafond quotidien.
+        push({
+            mailId: 'u1b',
+            category: 'lire',
+            urgency: 'now',
+            reason: 'Code d’accès requis',
+        });
+        push({
+            mailId: 'u1c',
+            category: 'securite',
+            urgency: 'now',
+            reason: 'Nouvelle connexion détectée',
+        });
+        const r1b = await cUrgent.events!(urgentCtx({ triage: true }));
+        const e1b = r1b.find((e) => e.key === 'mail-action-u1b')!;
+        const e1c = r1b.find((e) => e.key === 'mail-action-u1c')!;
+        assert.strictEqual(e1b.importance, 'utile');
+        assert.strictEqual(e1c.importance, 'utile');
+        assert.ok(e1b.facts.some((f) => f.includes('Code d’accès requis')));
+        assert.ok(e1c.facts.some((f) => f.includes('Nouvelle connexion')));
+        assert.ok(
+            !e1c.facts.some((f) => f.includes('Urgence plafonnée')),
+            'pas une urgence rabattue : une non-action n’est jamais candidate',
+        );
 
         // Une proposition "lire" avec urgency "none" (ni action ni urgente) :
         // aucun événement.
@@ -194,8 +234,8 @@ async function run(): Promise<void> {
         // Trois nouvelles propositions "now" le même jour : le plafond (2/jour,
         // u1 a déjà pris le premier) laisse passer une seule "urgent", la
         // suivante retombe en "utile" avec le fait de plafond.
-        push({ mailId: 'u3', category: 'lire', urgency: 'now' });
-        push({ mailId: 'u4', category: 'lire', urgency: 'now' });
+        push({ mailId: 'u3', category: 'action', urgency: 'now' });
+        push({ mailId: 'u4', category: 'action', urgency: 'now' });
         const r3 = await cUrgent.events!(urgentCtx({ triage: true }));
         const e3 = r3.find((e) => e.key === 'mail-action-u3')!;
         const e4 = r3.find((e) => e.key === 'mail-action-u4')!;
@@ -209,7 +249,7 @@ async function run(): Promise<void> {
         // Jour suivant : le plafond est réinitialisé, une nouvelle urgence
         // repasse "urgent".
         urgentNow = NOW + 24 * 3600_000;
-        push({ mailId: 'u5', category: 'lire', urgency: 'now' });
+        push({ mailId: 'u5', category: 'action', urgency: 'now' });
         const r4 = await cUrgent.events!(urgentCtx({ triage: true }));
         const e5 = r4.find((e) => e.key === 'mail-action-u5')!;
         assert.strictEqual(e5.importance, 'urgent', 'plafond réinitialisé');
