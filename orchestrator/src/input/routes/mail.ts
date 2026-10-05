@@ -22,6 +22,9 @@ export type MailHandler = Pick<
     | 'mailClassify'
     | 'mailRulesRaw'
     | 'mailRulesReplace'
+    | 'mailSenders'
+    | 'mailRuleApply'
+    | 'mailStats'
 >;
 
 const UNAVAILABLE = { error: 'proactivité indisponible' };
@@ -283,6 +286,85 @@ export function mailRoutes(
                 return;
             }
             res.json(result);
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    r.get('/mail/senders', requireAuth, async (req: any, res: any) => {
+        if (!h?.mailSenders) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        const days = Number(req.query?.days ?? 30);
+        const max = Number(req.query?.max ?? 200);
+        if (!Number.isInteger(days) || days < 1 || days > 90) {
+            res.status(400).json({
+                error: 'days doit être compris entre 1 et 90',
+            });
+            return;
+        }
+        if (!Number.isInteger(max) || max < 1 || max > 200) {
+            res.status(400).json({
+                error: 'max doit être compris entre 1 et 200',
+            });
+            return;
+        }
+        try {
+            res.json(await h.mailSenders(days, max));
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    r.post('/mail/rules/:id/apply', requireAuth, async (req: any, res: any) => {
+        if (!h?.mailRuleApply) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        const max = req.body?.max;
+        if (
+            max !== undefined &&
+            (!Number.isInteger(max) || max < 1 || max > 100)
+        ) {
+            res.status(400).json({
+                error: 'max doit être compris entre 1 et 100',
+            });
+            return;
+        }
+        try {
+            const result = (await h.mailRuleApply(
+                String(req.params.id),
+                max,
+            )) as { applied: number; archived: number; refused?: string };
+            if (result.refused === 'unknown') {
+                res.status(404).json({ error: 'règle inconnue' });
+                return;
+            }
+            if (result.refused) {
+                res.status(400).json({ error: 'règle non applicable' });
+                return;
+            }
+            res.json({ applied: result.applied, archived: result.archived });
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    r.get('/mail/stats', requireAuth, (req: any, res: any) => {
+        if (!h?.mailStats) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        const days = Number(req.query?.days ?? 7);
+        if (!Number.isInteger(days) || days < 1 || days > 90) {
+            res.status(400).json({
+                error: 'days doit être compris entre 1 et 90',
+            });
+            return;
+        }
+        try {
+            res.json(h.mailStats(days));
         } catch (e: any) {
             res.status(500).json({ error: e.message });
         }

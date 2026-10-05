@@ -1668,6 +1668,269 @@ async function run(): Promise<void> {
         assert.strictEqual(t.concierge.listJournal(0).length, 0);
     }
 
+    // ── recentSenders / applyRule / stats (Courrier v2) ───────────────────
+    {
+        const now = Date.parse('2026-10-05T12:00:00Z');
+        const store = new RuleStore(tmp());
+        const edf = newRule({
+            when: { from: 'edf.fr' },
+            category: 'finance',
+            origin: 'user',
+            confirmed: true,
+            now,
+        });
+        const neg = newRule({
+            when: { from: 'ami@gmail.com' },
+            category: null,
+            origin: 'user',
+            confirmed: true,
+            now,
+        });
+        store.upsert(edf);
+        store.upsert(neg);
+        const mk = (
+            id: string,
+            from: string,
+            subject: string,
+            date: string,
+        ) => ({
+            id,
+            threadId: `t${id}`,
+            from,
+            subject,
+            snippet: '',
+            headers: {} as Record<string, string>,
+            labelIds: ['INBOX'],
+            date,
+        });
+        const inbox = [
+            mk(
+                'a1',
+                'EDF <service@edf.fr>',
+                'Facture mars',
+                'Mon, 02 Mar 2026 10:00:00 +0000',
+            ),
+            mk(
+                'a2',
+                'EDF <service@edf.fr>',
+                'Facture avril',
+                'Wed, 01 Apr 2026 10:00:00 +0000',
+            ),
+            mk(
+                'b1',
+                'Ami <ami@gmail.com>',
+                'Salut',
+                'Tue, 31 Mar 2026 10:00:00 +0000',
+            ),
+            mk(
+                'c1',
+                'Inconnu <x@inconnu.fr>',
+                'Hello',
+                'Tue, 31 Mar 2026 09:00:00 +0000',
+            ),
+        ];
+        const t = makeConcierge({
+            inbox: () => inbox,
+            complete: async () => {
+                throw new Error('jamais de LLM');
+            },
+            rules: store,
+            now: () => now,
+        });
+        const senders = await t.concierge.recentSenders(30, 500);
+        assert.strictEqual(t.calls.length, 1);
+        assert.strictEqual(t.calls[0]!.args.query, 'newer_than:30d');
+        assert.strictEqual(t.calls[0]!.args.maxResults, 200, 'max borné à 200');
+        assert.ok(
+            t.calls.every((c) => c.tool === 'list_messages_meta'),
+            'aucune écriture',
+        );
+        assert.strictEqual(senders.length, 3);
+        const e = senders[0]!;
+        assert.strictEqual(e.address, 'service@edf.fr');
+        assert.strictEqual(e.domain, 'edf.fr');
+        assert.strictEqual(e.name, 'EDF');
+        assert.strictEqual(e.count, 2);
+        assert.strictEqual(e.lastSubject, 'Facture avril');
+        assert.deepStrictEqual(e.verdict, {
+            stage: 'rule',
+            ruleId: edf.id,
+            category: 'finance',
+        });
+        assert.strictEqual(e.domainRuleAllowed, true);
+        const ami = senders.find((s) => s.address === 'ami@gmail.com')!;
+        assert.strictEqual(ami.domainRuleAllowed, false);
+        assert.deepStrictEqual(ami.verdict, {
+            stage: 'rule',
+            ruleId: neg.id,
+            category: null,
+        });
+        assert.deepStrictEqual(
+            senders.find((s) => s.address === 'x@inconnu.fr')!.verdict,
+            { stage: 'none' },
+        );
+        await t.concierge.recentSenders(30, 500);
+        assert.strictEqual(t.calls.length, 1, 'cache 60 s');
+    }
+
+    {
+        let clock = 1000;
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            now: () => clock,
+        });
+        await t.concierge.recentSenders(30, 200);
+        clock += 61_000;
+        await t.concierge.recentSenders(30, 200);
+        assert.strictEqual(t.calls.length, 2, 'cache expiré après 60 s');
+    }
+
+    {
+        const store = new RuleStore(tmp());
+        const rule = newRule({
+            when: { from: 'zalando.fr' },
+            category: 'promo',
+            origin: 'user',
+            confirmed: true,
+            now: 1000,
+        });
+        const negRule = newRule({
+            when: { from: 'neg.fr' },
+            category: null,
+            origin: 'user',
+            confirmed: true,
+            now: 1000,
+        });
+        const subjRule = newRule({
+            when: { from: 'z.fr', subject: 'x' },
+            category: 'promo',
+            origin: 'user',
+            confirmed: true,
+            now: 1000,
+        });
+        const unconf = newRule({
+            when: { from: 'u.fr' },
+            category: 'promo',
+            origin: 'signal',
+            confirmed: false,
+            now: 1000,
+        });
+        for (const r of [rule, negRule, subjRule, unconf]) store.upsert(r);
+        const inbox = [1, 2, 3].map((i) => ({
+            id: `z${i}`,
+            threadId: `t${i}`,
+            from: 'Z <a@zalando.fr>',
+            subject: 's',
+            snippet: '',
+            headers: {},
+            labelIds: ['INBOX'],
+            date: '',
+        }));
+        const t = makeConcierge({
+            inbox: () => inbox,
+            complete: async () => '[]',
+            rules: store,
+        });
+        const failing = new MailConcierge(
+            {
+                deviceHandler: async (tool, args) => {
+                    t.calls.push({ tool, args });
+                    if (tool === 'list_messages_meta') return inbox;
+                    if (args?.messageId === 'z2') throw new Error('boom');
+                    return 'ok';
+                },
+                complete: async () => '[]',
+                rules: store,
+                journal: t.journal,
+                getAutoCategories: () => [],
+                now: () => 1000,
+            },
+            tmp(),
+        );
+        const res = await failing.applyRule(rule.id, 500);
+        const list = t.calls.find((c) => c.tool === 'list_messages_meta')!;
+        assert.strictEqual(list.args.query, 'from:zalando.fr newer_than:90d');
+        assert.strictEqual(list.args.maxResults, 100);
+        const mods = t.calls.filter((c) => c.tool === 'modify_labels');
+        assert.strictEqual(
+            mods.length,
+            3,
+            "un échec n'interrompt pas les autres",
+        );
+        assert.strictEqual(mods[0]!.args.archive, true, 'promo archive');
+        assert.deepStrictEqual(mods[0]!.args.add, ['Yui/Promos']);
+        assert.strictEqual(res.applied, 2);
+        assert.strictEqual(res.archived, 2);
+        assert.deepStrictEqual(failing.getState().processedIds.sort(), [
+            'z1',
+            'z3',
+        ]);
+        const entries = t.journal.list(10);
+        assert.strictEqual(entries.length, 1);
+        assert.strictEqual(entries[0]!.reason, 'application rétroactive');
+        assert.strictEqual(entries[0]!.ruleId, rule.id);
+        assert.strictEqual(
+            store.all().find((r) => r.id === rule.id)!.hits,
+            0,
+            'recordHit non appelé',
+        );
+        const before = t.calls.length;
+        for (const id of [negRule.id, subjRule.id, unconf.id]) {
+            const r = await failing.applyRule(id);
+            assert.strictEqual(r.applied, 0);
+            assert.strictEqual(r.archived, 0);
+            assert.strictEqual(r.refused, 'not-applicable');
+        }
+        assert.strictEqual(
+            (await failing.applyRule('nope')).refused,
+            'unknown',
+        );
+        assert.strictEqual(t.calls.length, before, 'refus sans appel Gmail');
+    }
+
+    {
+        const now = Date.parse('2026-10-05T12:00:00Z');
+        const jr = new MailJournal(tmp());
+        const add = (stage: any, category: string, ageDays: number) =>
+            jr.add({
+                at: now - ageDays * 86_400_000,
+                mailId: 'x',
+                from: 'a',
+                subject: 'b',
+                category,
+                stage,
+                applied: true,
+            });
+        add('rule', 'finance', 20);
+        add('rule', 'finance', 2);
+        add('signal', 'newsletter', 1);
+        add('llm', 'lire', 0);
+        add('rule', 'promo', 0);
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            journal: jr,
+            now: () => now,
+        });
+        const s = t.concierge.stats(7);
+        assert.strictEqual(s.days, 7);
+        assert.deepStrictEqual(s.byStage, {
+            rule: 2,
+            signal: 1,
+            llm: 1,
+            fallback: 0,
+        });
+        assert.deepStrictEqual(s.byCategory, {
+            finance: 1,
+            newsletter: 1,
+            lire: 1,
+            promo: 1,
+        });
+        assert.strictEqual(s.quarantine, 0);
+        assert.strictEqual(s.reading, 0);
+    }
+
     console.log('All concierge tests passed');
 }
 

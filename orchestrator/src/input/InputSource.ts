@@ -153,6 +153,12 @@ export interface ProactiveHandler {
     mailRulesRaw?: () => unknown;
     /** Remplace le fichier de règles en bloc (édition JSON brut, tout-ou-rien). */
     mailRulesReplace?: (raw: unknown) => unknown;
+    /** Expéditeurs récents agrégés + verdict actuel (page /mail), sans écriture. */
+    mailSenders?: (days?: number, max?: number) => Promise<unknown>;
+    /** Rattrapage rétroactif d'une règle ; `refused` = règle inconnue / non applicable. */
+    mailRuleApply?: (id: string, max?: number) => Promise<unknown>;
+    /** Bilan du tri sur les N derniers jours. */
+    mailStats?: (days?: number) => unknown;
     /** `POST /events` : le bus reçoit, filtre (péremption/dédup/cooldown) et compte. */
     ingest?: (
         events: import('../orchestrator/proactive/events').Event[],

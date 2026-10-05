@@ -30,6 +30,32 @@ export interface RulesFile {
     rules: MailRule[];
 }
 
+/** Domaines grand public : une règle « tout ce domaine » y classerait le courrier de n'importe qui — l'adresse complète est exigée. */
+export const PUBLIC_DOMAINS: ReadonlySet<string> = new Set([
+    'gmail.com',
+    'googlemail.com',
+    'outlook.com',
+    'outlook.fr',
+    'hotmail.com',
+    'hotmail.fr',
+    'live.com',
+    'live.fr',
+    'msn.com',
+    'yahoo.com',
+    'yahoo.fr',
+    'icloud.com',
+    'me.com',
+    'mac.com',
+    'orange.fr',
+    'wanadoo.fr',
+    'free.fr',
+    'sfr.fr',
+    'laposte.net',
+    'bbox.fr',
+    'protonmail.com',
+    'proton.me',
+]);
+
 /** Adresse de l'expéditeur ("Nom <a@b.c>" → "a@b.c") ; le nom affiché ne compte jamais. */
 export function senderAddress(from: string): string {
     const m = /<([^>]+)>/.exec(from);
@@ -207,6 +233,12 @@ export function validateRuleInput(
         return {
             ok: false,
             error: 'au moins une condition (expéditeur, sujet ou en-tête) est requise',
+        };
+    }
+    if (from && !from.includes('@') && PUBLIC_DOMAINS.has(from.toLowerCase())) {
+        return {
+            ok: false,
+            error: "domaine grand public : précise l'adresse complète",
         };
     }
     if (subject) {

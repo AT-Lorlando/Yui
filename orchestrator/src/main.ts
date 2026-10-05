@@ -286,6 +286,11 @@ async function main() {
                 mailRulesRaw: () => proactive.concierge.rulesFile(),
                 mailRulesReplace: (raw: unknown) =>
                     proactive.concierge.replaceRules(raw),
+                mailSenders: (days?: number, max?: number) =>
+                    proactive.concierge.recentSenders(days, max),
+                mailRuleApply: (id: string, max?: number) =>
+                    proactive.concierge.applyRule(id, max),
+                mailStats: (days?: number) => proactive.concierge.stats(days),
                 ingest: (events) => proactive.ingestAll(events),
                 brief: (scope?: string) =>
                     proactive.brief(

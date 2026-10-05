@@ -36,6 +36,8 @@ import {
     ruleFromSignal,
     senderAddress,
     senderDomain,
+    firstMatch,
+    PUBLIC_DOMAINS,
     sortRules,
     validateRuleInput,
 } from './rules';
@@ -223,6 +225,31 @@ export interface TriageDoubt {
     at: number;
     resolvedAt?: number;
 }
+
+export interface SenderSummary {
+    address: string;
+    domain: string;
+    name: string;
+    count: number;
+    lastSubject: string;
+    lastAt: string;
+    verdict:
+        | { stage: 'rule'; ruleId: string; category: string | null }
+        | { stage: 'signal'; category: string; ruleId?: string }
+        | { stage: 'none' };
+    /** false pour un domaine grand public : la règle doit viser l'adresse. */
+    domainRuleAllowed: boolean;
+}
+
+export interface MailStats {
+    days: number;
+    byStage: Record<'rule' | 'signal' | 'llm' | 'fallback', number>;
+    byCategory: Record<string, number>;
+    quarantine: number;
+    reading: number;
+}
+
+const SENDERS_CACHE_MS = 60_000;
 
 export interface TriageState {
     proposals: TriageProposal[];
@@ -586,6 +613,7 @@ export class MailConcierge {
      *  `classifyMails` de retrouver un mail sans relire la boîte (l'app
      *  n'envoie que des ids). Remplacé entier à chaque `dryRun`. */
     private lastDryRun: Map<string, LlmMail> = new Map();
+    private sendersCache?: { key: string; at: number; value: SenderSummary[] };
 
     constructor(private deps: ConciergeDeps, stateFile?: string) {
         this.stateFile = stateFile ?? STATE_FILE;
@@ -677,6 +705,198 @@ export class MailConcierge {
                     ...(lastSubject !== undefined ? { lastSubject } : {}),
                 };
             });
+    }
+
+    /**
+     * Expéditeurs récents agrégés par adresse, avec le verdict déterministe
+     * du mail le plus récent. Lecture seule : aucune étiquette, aucun
+     * journal, aucun `processedIds` (comme `dryRun`).
+     */
+    async recentSenders(days = 30, max = 200): Promise<SenderSummary[]> {
+        const now = this.deps.now?.() ?? Date.now();
+        const maxResults = Math.min(max, 200);
+        const key = `${days}:${maxResults}`;
+        if (
+            this.sendersCache &&
+            this.sendersCache.key === key &&
+            now - this.sendersCache.at < SENDERS_CACHE_MS
+        ) {
+            return this.sendersCache.value;
+        }
+        const mails = parseMetaList(
+            await this.deps.deviceHandler('list_messages_meta', {
+                query: `newer_than:${days}d`,
+                maxResults,
+            }),
+        );
+        const valid = this.validIds();
+        const rules = this.deps.rules.all();
+        const byAddress = new Map<
+            string,
+            { summary: SenderSummary; time: number }
+        >();
+        for (const m of mails) {
+            const address = senderAddress(m.from);
+            const t = Date.parse(m.date);
+            const time = Number.isNaN(t) ? -Infinity : t;
+            const known = byAddress.get(address);
+            if (known) {
+                known.summary.count++;
+                // les dates illisibles ne détrônent jamais un mail daté ;
+                // sans date, le premier vu (Gmail trie du plus récent) gagne
+                if (time <= known.time) continue;
+                known.time = time;
+                known.summary.lastSubject = m.subject;
+                known.summary.lastAt = m.date;
+                known.summary.verdict = this.senderVerdict(m, rules, valid);
+                continue;
+            }
+            const domain = senderDomain(m.from);
+            const name = (
+                /^\s*"?([^"<]*?)"?\s*</.exec(m.from)?.[1] ?? ''
+            ).trim();
+            byAddress.set(address, {
+                time,
+                summary: {
+                    address,
+                    domain,
+                    name,
+                    count: 1,
+                    lastSubject: m.subject,
+                    lastAt: m.date,
+                    verdict: this.senderVerdict(m, rules, valid),
+                    domainRuleAllowed: !PUBLIC_DOMAINS.has(domain),
+                },
+            });
+        }
+        const value = [...byAddress.values()]
+            .map((e) => e.summary)
+            .sort(
+                (a, b) =>
+                    b.count - a.count ||
+                    (Date.parse(b.lastAt) || 0) - (Date.parse(a.lastAt) || 0),
+            );
+        this.sendersCache = { key, at: now, value };
+        return value;
+    }
+
+    private senderVerdict(
+        m: ConciergeMail,
+        rules: MailRule[],
+        valid: Set<string>,
+    ): SenderSummary['verdict'] {
+        const v = deterministicVerdict(m, rules, valid);
+        if (v?.stage === 'rule' && v.ruleId) {
+            return { stage: 'rule', ruleId: v.ruleId, category: v.category };
+        }
+        if (v?.stage === 'signal') {
+            return {
+                stage: 'signal',
+                category: v.category,
+                ...(v.ruleId ? { ruleId: v.ruleId } : {}),
+            };
+        }
+        // règle négative confirmée : deterministicVerdict la masque en null
+        const hit = firstMatch(rules, m);
+        if (hit?.confirmed && hit.then.category === null) {
+            return { stage: 'rule', ruleId: hit.id, category: null };
+        }
+        return { stage: 'none' };
+    }
+
+    /**
+     * Rattrapage rétroactif d'une règle posée depuis l'écran des expéditeurs :
+     * seule une règle confirmée à condition `from` unique et catégorie non
+     * nulle s'applique. Best-effort par mail ; ce n'est pas un tri, donc
+     * `recordHit` n'est pas appelé.
+     */
+    async applyRule(
+        ruleId: string,
+        max = 100,
+    ): Promise<{
+        applied: number;
+        archived: number;
+        refused?: 'unknown' | 'not-applicable';
+    }> {
+        const rule = this.deps.rules.all().find((r) => r.id === ruleId);
+        if (!rule) return { applied: 0, archived: 0, refused: 'unknown' };
+        const from = rule.when.from;
+        const category = rule.then.category;
+        if (
+            !rule.confirmed ||
+            !from ||
+            rule.when.subject ||
+            rule.when.header ||
+            category === null
+        ) {
+            return { applied: 0, archived: 0, refused: 'not-applicable' };
+        }
+        const archive = this.archives(category);
+        const label = this.labelOf(category);
+        const mails = parseMetaList(
+            await this.deps.deviceHandler('list_messages_meta', {
+                query: `from:${from} newer_than:90d`,
+                maxResults: Math.min(max, 100),
+            }),
+        );
+        let applied = 0;
+        let archived = 0;
+        for (const m of mails) {
+            try {
+                // idempotent : on ne sait pas lire les labels par nom ici
+                await this.deps.deviceHandler('modify_labels', {
+                    messageId: m.id,
+                    add: [label],
+                    archive,
+                });
+                applied++;
+                if (archive) archived++;
+                this.state.processedIds.push(m.id);
+            } catch (err) {
+                Logger.warn(`concierge: application règle ${m.id} — ${err}`);
+            }
+        }
+        try {
+            this.deps.journal.add({
+                at: this.deps.now?.() ?? Date.now(),
+                mailId: '',
+                from,
+                subject: '',
+                category,
+                stage: 'rule',
+                ruleId: rule.id,
+                reason: 'application rétroactive',
+                applied: true,
+            });
+        } catch (err) {
+            Logger.warn(`concierge: journal application ${from} — ${err}`);
+        }
+        saveTriage(this.state, this.stateFile);
+        return { applied, archived };
+    }
+
+    /** Bilan des `days` derniers jours — l'anneau du journal (200) en est la borne. */
+    stats(days = 7): MailStats {
+        const since = (this.deps.now?.() ?? Date.now()) - days * 86_400_000;
+        const byStage: MailStats['byStage'] = {
+            rule: 0,
+            signal: 0,
+            llm: 0,
+            fallback: 0,
+        };
+        const byCategory: Record<string, number> = {};
+        for (const d of this.deps.journal.list(200)) {
+            if (d.at < since) continue;
+            byStage[d.stage]++;
+            byCategory[d.category] = (byCategory[d.category] ?? 0) + 1;
+        }
+        return {
+            days,
+            byStage,
+            byCategory,
+            quarantine: this.quarantine().length,
+            reading: this.readingCount(),
+        };
     }
 
     /** Décisions déjà journalisées (page /mail) — même anneau que `deps.journal`. */

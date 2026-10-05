@@ -67,6 +67,9 @@ async function run(): Promise<void> {
         ],
     };
     let replacedRules: unknown;
+    const sendersSeen: Array<{ days?: number; max?: number }> = [];
+    const applySeen: Array<{ id: string; max?: number }> = [];
+    const statsSeen: Array<number | undefined> = [];
 
     const handler: MailHandler = {
         mailDryRun: async (query, max) => {
@@ -83,6 +86,28 @@ async function run(): Promise<void> {
             return { classified: mailIds.length, skipped: [] };
         },
         mailRulesRaw: () => rulesFile,
+        mailSenders: async (days, max) => {
+            sendersSeen.push({ days, max });
+            return [{ address: 'a@b.fr', count: 1 }];
+        },
+        mailRuleApply: async (id, max) => {
+            applySeen.push({ id, max });
+            if (id === 'gone')
+                return { applied: 0, archived: 0, refused: 'unknown' };
+            if (id === 'neg')
+                return { applied: 0, archived: 0, refused: 'not-applicable' };
+            return { applied: 3, archived: 2 };
+        },
+        mailStats: (days) => {
+            statsSeen.push(days);
+            return {
+                days,
+                byStage: {},
+                byCategory: {},
+                quarantine: 0,
+                reading: 0,
+            };
+        },
         mailRulesReplace: (raw) => {
             replacedRules = raw;
             if ((raw as any)?.rules?.[0]?.id === 'bad') {
@@ -351,6 +376,45 @@ async function run(): Promise<void> {
         errors: [{ index: 0, id: 'bad', error: 'catégorie inconnue' }],
     });
 
+    // ── GET /mail/senders ─────────────────────────────────────────────────
+    assert.strictEqual((await get('/mail/senders', 'Bearer nope')).status, 401);
+    assert.deepStrictEqual(await (await get('/mail/senders')).json(), [
+        { address: 'a@b.fr', count: 1 },
+    ]);
+    assert.deepStrictEqual(sendersSeen[0], { days: 30, max: 200 });
+    await get('/mail/senders?days=7&max=50');
+    assert.deepStrictEqual(sendersSeen[1], { days: 7, max: 50 });
+    for (const q of ['days=0', 'days=91', 'days=x', 'max=0', 'max=201']) {
+        assert.strictEqual((await get(`/mail/senders?${q}`)).status, 400, q);
+    }
+    assert.strictEqual(sendersSeen.length, 2);
+
+    // ── POST /mail/rules/:id/apply ────────────────────────────────────────
+    assert.strictEqual(
+        (await post('/mail/rules/r-user/apply', {}, 'Bearer nope')).status,
+        401,
+    );
+    const applyRes = await post('/mail/rules/r-user/apply', { max: 20 });
+    assert.strictEqual(applyRes.status, 200);
+    assert.deepStrictEqual(await applyRes.json(), { applied: 3, archived: 2 });
+    assert.deepStrictEqual(applySeen[0], { id: 'r-user', max: 20 });
+    assert.strictEqual((await post('/mail/rules/gone/apply')).status, 404);
+    const notApplicable = await post('/mail/rules/neg/apply');
+    assert.strictEqual(notApplicable.status, 400);
+    assert.ok((await notApplicable.json()).error);
+    assert.strictEqual(
+        (await post('/mail/rules/r-user/apply', { max: 500 })).status,
+        400,
+    );
+
+    // ── GET /mail/stats ───────────────────────────────────────────────────
+    assert.strictEqual((await get('/mail/stats', 'Bearer nope')).status, 401);
+    assert.strictEqual((await get('/mail/stats')).status, 200);
+    assert.strictEqual(statsSeen[0], 7);
+    await get('/mail/stats?days=30');
+    assert.strictEqual(statsSeen[1], 30);
+    assert.strictEqual((await get('/mail/stats?days=100')).status, 400);
+
     main.close();
 
     // ── 503 : proactivité non câblée (handler absent) ─────────────────────
@@ -368,6 +432,9 @@ async function run(): Promise<void> {
         ['POST', '/mail/triage/classify'],
         ['GET', '/mail/rules/raw'],
         ['PUT', '/mail/rules'],
+        ['GET', '/mail/senders'],
+        ['POST', '/mail/rules/x/apply'],
+        ['GET', '/mail/stats'],
     ] as const) {
         const res = await fetch(`${bareBase}${path}`, {
             method,
@@ -419,6 +486,15 @@ async function run(): Promise<void> {
         },
         mailRulesReplace: () => {
             throw new Error('boom replace');
+        },
+        mailSenders: async () => {
+            throw new Error('boom senders');
+        },
+        mailRuleApply: async () => {
+            throw new Error('boom apply');
+        },
+        mailStats: () => {
+            throw new Error('boom stats');
         },
     };
     const throwingApp = express();
@@ -477,6 +553,12 @@ async function run(): Promise<void> {
                 body: JSON.stringify({ version: 1, rules: [] }),
             })
         ).status,
+        500,
+    );
+    assert.strictEqual((await authed('/mail/senders')).status, 500);
+    assert.strictEqual((await authed('/mail/stats')).status, 500);
+    assert.strictEqual(
+        (await authed('/mail/rules/x/apply', { method: 'POST' })).status,
         500,
     );
     throwing.close();

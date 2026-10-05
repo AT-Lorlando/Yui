@@ -97,6 +97,27 @@ async function run(): Promise<void> {
         ).ok,
         false,
     );
+    const publicDomain = R.validateRuleInput(
+        { when: { from: 'gmail.com' }, then: { category: 'osef' } },
+        valid,
+    );
+    assert.ok(
+        !publicDomain.ok &&
+            publicDomain.error ===
+                "domaine grand public : précise l'adresse complète",
+    );
+    assert.ok(
+        R.validateRuleInput(
+            { when: { from: 'x@gmail.com' }, then: { category: 'osef' } },
+            valid,
+        ).ok,
+    );
+    assert.ok(
+        R.validateRuleInput(
+            { when: { from: 'zalando.fr' }, then: { category: 'osef' } },
+            valid,
+        ).ok,
+    );
     const okNeg = R.validateRuleInput(
         { when: { from: 'x@y.z' }, then: { category: null } },
         valid,
