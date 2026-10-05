@@ -82,7 +82,12 @@ export function configRoutes(
         res.json(proactiveHandler?.bricks?.() ?? []);
     });
     r.get('/proactive/journal', requireAuth, (req: any, res: any) => {
-        const limit = Number(req.query?.limit ?? 50) || 50;
+        // Borné : un `limit` négatif ferait `slice(-limit)` → presque tout le ring.
+        const rawLimit = Number(req.query?.limit);
+        const limit =
+            Number.isFinite(rawLimit) && rawLimit >= 1
+                ? Math.min(300, Math.max(1, Math.trunc(rawLimit)))
+                : 60;
         let before: number | undefined;
         if (req.query?.before !== undefined) {
             before = Number(req.query.before);
@@ -126,6 +131,7 @@ export function configRoutes(
             res.status(503).json(UNAVAILABLE);
             return;
         }
+        // Express décode `req.params` : le sujet doit arriver encodé, un `/` littéral n'est pas adressable ici.
         if (proactiveHandler.saidForget(String(req.params.subject)))
             res.json({ ok: true });
         else res.status(404).json({ error: 'sujet inconnu' });

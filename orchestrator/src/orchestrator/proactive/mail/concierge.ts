@@ -912,8 +912,8 @@ export class MailConcierge {
         };
     }
 
-    /** Décisions déjà journalisées (page /mail) — même anneau que `deps.journal`. */
-    /** `actions` : mails à traiter ou urgents — filtre AVANT la limite. */
+    /** Décisions déjà journalisées (page /mail) — même anneau que `deps.journal`.
+     *  `actions` : mails à traiter ou urgents — filtre AVANT la limite. */
     listJournal(limit?: number, scope?: 'actions'): MailDecision[] {
         if (scope !== 'actions') return this.deps.journal.list(limit);
         const all = this.deps.journal.list(MAIL_JOURNAL_MAX);

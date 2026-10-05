@@ -63,6 +63,13 @@ async function run(): Promise<void> {
     assert.strictEqual(r.status, 200);
     assert.deepStrictEqual(seen.journal, { limit: 10, before: 500 });
     await call('GET', '/proactive/journal');
+    assert.strictEqual(seen.journal.limit, 60, 'défaut 60');
+    await call('GET', '/proactive/journal?limit=-5');
+    assert.strictEqual(seen.journal.limit, 60, 'négatif → défaut');
+    await call('GET', '/proactive/journal?limit=abc');
+    assert.strictEqual(seen.journal.limit, 60, 'non numérique → défaut');
+    await call('GET', '/proactive/journal?limit=9999');
+    assert.strictEqual(seen.journal.limit, 300, 'plafonné à 300');
     assert.strictEqual(seen.journal.before, undefined);
     assert.strictEqual(
         (await call('GET', '/proactive/journal?before=abc')).status,
