@@ -59,10 +59,31 @@ export default class HueController {
         );
     }
 
+    /**
+     * Ids (v1) des lampes d'une pièce, résolue comme `setRoomLights` ; null si
+     * la cible n'est pas une pièce. Sert au store à refléter une écriture de
+     * groupe lampe par lampe — le bridge, lui, ne renvoie rien sur un PUT
+     * /groups.
+     */
+    public getRoomLightIds(roomName: string): number[] | null {
+        return this.findGroup(roomName)?.lightIds ?? null;
+    }
+
     // ── Colour helpers ─────────────────────────────────────────────────────────
 
     private hexToHueSat(hex: string): { hue: number; sat: number } {
         return hexToHueSat(hex);
+    }
+
+    /** Couleur de chaque lampe d'une palette : cyclique, `colors[i % n]`. Pur. */
+    public static assignPalette(
+        lightIds: number[],
+        colors: string[],
+    ): Array<{ lightId: number; color: string }> {
+        return lightIds.map((lightId, i) => ({
+            lightId,
+            color: colors[i % colors.length],
+        }));
     }
 
     // ── High-level room control (uses Hue Groups API — single API call) ────────
@@ -190,19 +211,19 @@ export default class HueController {
         const bri = brightness;
 
         await Promise.all(
-            group.lightIds.map((lightId, i) => {
-                const { hue: h, sat: s } = this.hexToHueSat(
-                    colors[i % colors.length],
-                );
-                const state = new v3.lightStates.LightState()
-                    .on()
-                    .hue(h)
-                    .sat(s);
-                if (bri !== undefined) state.brightness(bri);
-                if (transitionMs !== undefined)
-                    state.transitiontime(Math.round(transitionMs / 100));
-                return this.api.lights.setLightState(lightId, state);
-            }),
+            HueController.assignPalette(group.lightIds, colors).map(
+                ({ lightId, color }) => {
+                    const { hue: h, sat: s } = this.hexToHueSat(color);
+                    const state = new v3.lightStates.LightState()
+                        .on()
+                        .hue(h)
+                        .sat(s);
+                    if (bri !== undefined) state.brightness(bri);
+                    if (transitionMs !== undefined)
+                        state.transitiontime(Math.round(transitionMs / 100));
+                    return this.api.lights.setLightState(lightId, state);
+                },
+            ),
         );
 
         const parts = [`palette [${colors.join(', ')}]`];

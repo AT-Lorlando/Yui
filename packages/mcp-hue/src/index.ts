@@ -31,6 +31,8 @@ import { coveredIds, othersToTurnOff, type BulkEntry } from './bulkStates';
 import { discoverLights } from './discovery';
 import { HueEventStream } from './HueEventStream';
 import type { LightStatePatch } from './stateEvents';
+import { patchForWrite } from './storePatch';
+import { colourStatePatch } from './colour';
 import Logger from './logger';
 
 let hue: HueController;
@@ -268,14 +270,26 @@ async function applyGoveeById(id: string, opts: GoveeOps): Promise<void> {
         resolved = { ...opts, brightness: next, brightnessDelta: undefined };
     }
 
-    await applyGovee(g, resolved, goveeChannel.get(id) ?? 'rgb');
+    const channel = goveeChannel.get(id) ?? 'rgb';
+    await applyGovee(g, resolved, channel);
     const deltaOnly =
         opts.brightnessDelta !== undefined && opts.on === undefined;
+    const turnedOn = opts.on !== false;
+    // Couleur telle qu'envoyée : un canal CCT ne reçoit qu'un blanc (le hex
+    // y est traduit en kelvin, cf. applyGovee), un canal RGB la couleur.
+    const colour = !turnedOn
+        ? {}
+        : channel === 'cct' &&
+          opts.color !== undefined &&
+          opts.colorTempK === undefined
+        ? { ct: hexToKelvin(opts.color), colormode: 'ct' as const }
+        : colourStatePatch(opts);
     store.updateState(id, {
-        ...(!deltaOnly && { on: opts.on !== false }),
+        ...(!deltaOnly && { on: turnedOn }),
         ...(resolved.brightness !== undefined && {
             brightness: resolved.brightness,
         }),
+        ...colour,
     });
 }
 
@@ -364,6 +378,13 @@ async function applyLightTarget(
             colorTempK,
             transitionMs,
         });
+        // Un PUT /groups ne renvoie rien : on reflète nous-mêmes l'écriture
+        // sur chaque lampe de la pièce, couleur comprise (le SSE corrigera
+        // les arrondis du bridge).
+        const roomPatch = patchForWrite(opts);
+        for (const id of hue.getRoomLightIds(target) ?? []) {
+            if (store.getById(id)) store.updateState(id, roomPatch);
+        }
         // Then the Govee devices anchored to that room. Ambiance ones are only
         // in this list when the room is being switched off.
         for (const gl of goveeTargetsForRoom(
@@ -445,10 +466,7 @@ async function applyLightTarget(
             }
             // Delta : l'état exact revient par le flux SSE du bridge.
             if (brightnessDelta === undefined) {
-                store.updateState(lightId, {
-                    on: true,
-                    ...(brightness !== undefined && { brightness }),
-                });
+                store.updateState(lightId, patchForWrite(opts));
             }
         }
     }
@@ -560,6 +578,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     await applyGoveeById(id, { color });
                 } else {
                     await hue.setLightColor(id, color);
+                    store.updateState(id, patchForWrite({ color }));
                 }
                 return {
                     content: [
@@ -649,6 +668,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     brightness,
                     transitionMs,
                 );
+                // Même distribution que l'écriture (cyclique), lampe par lampe.
+                for (const { lightId, color } of HueController.assignPalette(
+                    hue.getRoomLightIds(room) ?? [],
+                    colors,
+                )) {
+                    if (!store.getById(lightId)) continue;
+                    store.updateState(
+                        lightId,
+                        patchForWrite({ brightness, color }),
+                    );
+                }
                 return { content: [{ type: 'text', text: msg }] };
             }
 
