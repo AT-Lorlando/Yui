@@ -107,6 +107,63 @@ async function run(): Promise<void> {
     // Fichier corrompu → vide, sans lever.
     fs.writeFileSync(file, '{nope');
     assert.strictEqual(new SaidMemory(file).size(), 0);
+
+    // list / clear / nature / downvoted (page Secrétaire).
+    {
+        const f = path.join(
+            fs.mkdtempSync(path.join(os.tmpdir(), 'yui-said2-')),
+            'said.json',
+        );
+        const n = new SaidMemory(f);
+        n.markSaid(
+            [{ subject: 'a:1', fingerprint: 'x', nature: 'alert' }],
+            'speak',
+            T,
+        );
+        n.markSaid(
+            [{ subject: 'b:2', fingerprint: 'y', nature: 'agenda-far' }],
+            'brief',
+            T + 10,
+        );
+        n.downvote(['a:1'], T + 20);
+        const l = n.list();
+        assert.deepStrictEqual(
+            l.map((e) => e.subject),
+            ['b:2', 'a:1'],
+            "plus récent d'abord",
+        );
+        assert.strictEqual(l[0].nature, 'agenda-far');
+        assert.strictEqual(l[0].until, null);
+        assert.strictEqual(l[0].downvoted, false);
+        assert.strictEqual(l[1].nature, 'alert');
+        assert.strictEqual(l[1].downvoted, true);
+        assert.strictEqual(
+            new SaidMemory(f).list()[1].downvoted,
+            true,
+            'persisté',
+        );
+        // close renvoie l'existence.
+        assert.strictEqual(n.close('zzz'), false);
+        assert.strictEqual(n.close('b:2'), true);
+        n.clear();
+        assert.strictEqual(n.size(), 0);
+        assert.strictEqual(new SaidMemory(f).size(), 0, 'clear persisté');
+        // Ancien fichier sans nature.
+        fs.writeFileSync(
+            f,
+            JSON.stringify({
+                'old:1': {
+                    at: 5,
+                    channel: 'speak',
+                    fingerprint: 'f',
+                    until: null,
+                },
+            }),
+        );
+        const old = new SaidMemory(f).list();
+        assert.strictEqual(old[0].nature, null);
+        assert.strictEqual(old[0].downvoted, false);
+    }
     console.log('All said tests passed');
 }
 run().catch((e) => {

@@ -292,8 +292,32 @@ export class ProactiveEngine {
         return bricksView(this.cfg);
     }
 
-    getJournal(limit = 50): JournalEntry[] {
-        return this.journal.list(limit);
+    getJournal(limit = 50, before?: number): JournalEntry[] {
+        return this.journal.list(limit, before);
+    }
+
+    heldList(): Event[] {
+        return this.held.peek(this.now());
+    }
+
+    /** `key` = `source:key` complet ; ne marque rien comme dit. */
+    heldRemove(key: string): boolean {
+        return this.held.remove([key]) > 0;
+    }
+
+    saidList() {
+        return this.said.list();
+    }
+
+    saidForget(subject: string): boolean {
+        return this.said.close(subject);
+    }
+
+    /** Nombre d'entrées oubliées. */
+    saidForgetAll(): number {
+        const n = this.said.size();
+        this.said.clear();
+        return n;
     }
 
     /** Un 👎 sur un point (moment/brief) fait taire ses sujets 30 jours dans

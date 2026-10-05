@@ -52,6 +52,7 @@ import {
     LLM_PER_POLL,
 } from './triage';
 import type { Stage, Urgency } from './triage';
+import { MAIL_JOURNAL_MAX } from './journal';
 import type { MailDecision, MailJournal } from './journal';
 
 // senderDomain vit désormais dans rules.ts (partagé avec le modèle de règles) ; ré-exporté pour ne pas casser les imports existants (concierge.test.ts).
@@ -912,8 +913,18 @@ export class MailConcierge {
     }
 
     /** Décisions déjà journalisées (page /mail) — même anneau que `deps.journal`. */
-    listJournal(limit?: number): MailDecision[] {
-        return this.deps.journal.list(limit);
+    /** `actions` : mails à traiter ou urgents — filtre AVANT la limite. */
+    listJournal(limit?: number, scope?: 'actions'): MailDecision[] {
+        if (scope !== 'actions') return this.deps.journal.list(limit);
+        const all = this.deps.journal.list(MAIL_JOURNAL_MAX);
+        return all
+            .filter(
+                (d) =>
+                    d.category === 'action' ||
+                    d.urgency === 'soon' ||
+                    d.urgency === 'now',
+            )
+            .slice(0, limit ?? 50);
     }
 
     /**

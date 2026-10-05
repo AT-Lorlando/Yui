@@ -114,7 +114,14 @@ export interface ProactiveHandler {
     /** Briques (défs + état effectif) pour la page /proactive. */
     bricks?: () => unknown;
     /** Journal des interventions (récval du juge) + feedback 👍/👎. */
-    journal?: (limit?: number) => unknown;
+    journal?: (limit?: number, before?: number) => unknown;
+    /** Réserve : événements retenus ; retrait par `source:key`, sans marquer dit. */
+    held?: () => unknown;
+    heldRemove?: (key: string) => boolean;
+    /** Mémoire « dit » ; oubli par sujet (false si absent) ou total (nombre retiré). */
+    said?: () => unknown;
+    saidForget?: (subject: string) => boolean;
+    saidForgetAll?: () => number;
     feedback?: (id: string, value: 'up' | 'down') => boolean;
     situation?: () => unknown;
     /** Concierge courrier : état, scan, application, correction. */
@@ -144,7 +151,7 @@ export interface ProactiveHandler {
     mailReading?: () => Promise<unknown>;
     mailMarkRead?: (id: string) => Promise<void>;
     /** Journal des décisions de tri (page /mail). */
-    mailJournal?: (limit?: number) => unknown;
+    mailJournal?: (limit?: number, scope?: 'actions') => unknown;
     /** Essai à blanc des règles déterministes, sans aucune écriture (page /mail, onglet Règles). */
     mailDryRun?: (query?: string, max?: number) => Promise<unknown>;
     /** Classement à la demande d'un lot d'ids issus du dernier `mailDryRun` (bouton « Classer par l'IA »). */

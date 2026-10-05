@@ -83,7 +83,59 @@ export function configRoutes(
     });
     r.get('/proactive/journal', requireAuth, (req: any, res: any) => {
         const limit = Number(req.query?.limit ?? 50) || 50;
-        res.json(proactiveHandler?.journal?.(limit) ?? []);
+        let before: number | undefined;
+        if (req.query?.before !== undefined) {
+            before = Number(req.query.before);
+            if (!Number.isFinite(before)) {
+                res.status(400).json({ error: 'before doit être numérique' });
+                return;
+            }
+        }
+        res.json(proactiveHandler?.journal?.(limit, before) ?? []);
+    });
+
+    // ── Réserve (retenus) et mémoire « dit » — page Secrétaire ───────
+    const UNAVAILABLE = { error: 'proactivité indisponible' };
+    r.get('/proactive/held', requireAuth, (_req: any, res: any) => {
+        if (!proactiveHandler?.held) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        res.json(proactiveHandler.held());
+    });
+    r.delete('/proactive/held/:key', requireAuth, (req: any, res: any) => {
+        if (!proactiveHandler?.heldRemove) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        // Express décode déjà `:key` ; `source:key` contient des « : » et
+        // parfois « / » encodé.
+        if (proactiveHandler.heldRemove(String(req.params.key)))
+            res.json({ ok: true });
+        else res.status(404).json({ error: 'retenu inconnu' });
+    });
+    r.get('/proactive/said', requireAuth, (_req: any, res: any) => {
+        if (!proactiveHandler?.said) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        res.json(proactiveHandler.said());
+    });
+    r.delete('/proactive/said/:subject', requireAuth, (req: any, res: any) => {
+        if (!proactiveHandler?.saidForget) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        if (proactiveHandler.saidForget(String(req.params.subject)))
+            res.json({ ok: true });
+        else res.status(404).json({ error: 'sujet inconnu' });
+    });
+    r.delete('/proactive/said', requireAuth, (_req: any, res: any) => {
+        if (!proactiveHandler?.saidForgetAll) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        res.json({ ok: true, removed: proactiveHandler.saidForgetAll() });
     });
     r.post(
         '/proactive/journal/:id/feedback',

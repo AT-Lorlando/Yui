@@ -239,7 +239,13 @@ async function main() {
             {
                 reload: () => proactive.reload(),
                 bricks: () => proactive.getBricks(),
-                journal: (limit?: number) => proactive.getJournal(limit),
+                journal: (limit?: number, before?: number) =>
+                    proactive.getJournal(limit, before),
+                held: () => proactive.heldList(),
+                heldRemove: (key: string) => proactive.heldRemove(key),
+                said: () => proactive.saidList(),
+                saidForget: (subject: string) => proactive.saidForget(subject),
+                saidForgetAll: () => proactive.saidForgetAll(),
                 feedback: (id: string, value: 'up' | 'down') =>
                     proactive.setFeedback(id, value),
                 situation: () => proactive.getSituation(),
@@ -277,8 +283,8 @@ async function main() {
                     ),
                 mailReading: () => proactive.concierge.reading(),
                 mailMarkRead: (id: string) => proactive.concierge.markRead(id),
-                mailJournal: (limit?: number) =>
-                    proactive.concierge.listJournal(limit),
+                mailJournal: (limit?: number, scope?: 'actions') =>
+                    proactive.concierge.listJournal(limit, scope),
                 mailDryRun: (query?: string, max?: number) =>
                     proactive.concierge.dryRun(query, max),
                 mailClassify: (mailIds: string[]) =>

@@ -1668,6 +1668,64 @@ async function run(): Promise<void> {
         assert.strictEqual(t.concierge.listJournal(0).length, 0);
     }
 
+    // ── listJournal(scope: 'actions') ─────────────────────────────────────
+    {
+        const jr = new MailJournal(tmp());
+        const base = {
+            from: 'a',
+            subject: 'b',
+            stage: 'llm' as const,
+            applied: false,
+        };
+        jr.add({
+            ...base,
+            at: 1,
+            mailId: 'newsletter',
+            category: 'newsletter',
+        });
+        jr.add({ ...base, at: 2, mailId: 'act', category: 'action' });
+        jr.add({
+            ...base,
+            at: 3,
+            mailId: 'soon',
+            category: 'lire',
+            urgency: 'soon',
+        });
+        jr.add({
+            ...base,
+            at: 4,
+            mailId: 'now',
+            category: 'securite',
+            urgency: 'now',
+        });
+        jr.add({
+            ...base,
+            at: 5,
+            mailId: 'none',
+            category: 'lire',
+            urgency: 'none',
+        });
+        const t = makeConcierge({
+            inbox: () => [],
+            complete: async () => '[]',
+            journal: jr,
+        });
+        assert.deepStrictEqual(
+            t.concierge.listJournal(50, 'actions').map((d) => d.mailId),
+            ['now', 'soon', 'act'],
+        );
+        assert.strictEqual(
+            t.concierge.listJournal(50).length,
+            5,
+            'sans scope = tout',
+        );
+        assert.strictEqual(
+            t.concierge.listJournal(2, 'actions').length,
+            2,
+            'limite après filtre',
+        );
+    }
+
     // ── recentSenders / applyRule / stats (Courrier v2) ───────────────────
     {
         const now = Date.parse('2026-10-05T12:00:00Z');

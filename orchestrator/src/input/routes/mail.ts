@@ -204,7 +204,9 @@ export function mailRoutes(
             Math.max(1, Number.isFinite(raw) ? raw : JOURNAL_DEFAULT_LIMIT),
         );
         try {
-            res.json(h.mailJournal(limit));
+            const scope =
+                req.query?.scope === 'actions' ? 'actions' : undefined;
+            res.json(h.mailJournal(limit, scope));
         } catch (e: any) {
             res.status(500).json({ error: e.message });
         }

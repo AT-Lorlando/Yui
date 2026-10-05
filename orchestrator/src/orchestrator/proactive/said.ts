@@ -21,6 +21,9 @@ export interface SaidEntry {
     fingerprint: string;
     /** Fin de validité (epoch ms) ; null = définitif. */
     until: number | null;
+    /** Absents des anciens fichiers : lecture tolérante. */
+    nature?: SaidNature;
+    downvoted?: boolean;
 }
 
 export const DAY_MS = 24 * 3600_000;
@@ -113,6 +116,7 @@ export class SaidMemory {
             const d = saidDurationMs(it.nature, now);
             this.entries.set(it.subject, {
                 at: now,
+                nature: it.nature,
                 channel,
                 fingerprint: it.fingerprint,
                 until: d === null ? null : now + d,
@@ -121,14 +125,46 @@ export class SaidMemory {
         this.save();
     }
 
-    close(subject: string): void {
-        if (this.entries.delete(subject)) this.save();
+    /** true si le sujet existait. */
+    close(subject: string): boolean {
+        const had = this.entries.delete(subject);
+        if (had) this.save();
+        return had;
+    }
+
+    /** Lecture pour l'app (le fingerprint reste interne), plus récent d'abord. */
+    list(): Array<{
+        subject: string;
+        nature: SaidNature | null;
+        at: number;
+        until: number | null;
+        downvoted: boolean;
+    }> {
+        return [...this.entries.entries()]
+            .map(([subject, e]) => ({
+                subject,
+                nature: e.nature ?? null,
+                at: e.at,
+                until: e.until,
+                downvoted: e.downvoted === true,
+            }))
+            .sort((a, b) => b.at - a.at);
+    }
+
+    clear(): void {
+        this.entries.clear();
+        this.save();
     }
 
     downvote(subjects: string[], now: number): void {
         for (const s of subjects) {
             const e = this.entries.get(s);
-            if (e) this.entries.set(s, { ...e, until: now + DOWNVOTE_MS });
+            if (e)
+                this.entries.set(s, {
+                    ...e,
+                    until: now + DOWNVOTE_MS,
+                    downvoted: true,
+                });
         }
         this.save();
     }

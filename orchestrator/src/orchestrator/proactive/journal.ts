@@ -97,8 +97,13 @@ export class ProactiveJournal {
         return true;
     }
 
-    list(limit = 50): JournalEntry[] {
-        return this.entries.slice(-limit).reverse();
+    /** Plus récentes d'abord ; `before` (epoch ms) = strictement plus anciennes. */
+    list(limit = 50, before?: number): JournalEntry[] {
+        const src =
+            before === undefined
+                ? this.entries
+                : this.entries.filter((e) => e.at < before);
+        return src.slice(-limit).reverse();
     }
 
     /** Interruptions déjà émises aujourd'hui (speak = 1, notify = 0.5). Le
