@@ -1,5 +1,6 @@
 import { v3 } from 'node-hue-api';
 import Logger from './logger';
+import { hexToHueSat } from './colour';
 
 interface RoomGroup {
     id: number;
@@ -61,33 +62,7 @@ export default class HueController {
     // ── Colour helpers ─────────────────────────────────────────────────────────
 
     private hexToHueSat(hex: string): { hue: number; sat: number } {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        if (!result) throw new Error(`Invalid hex color: ${hex}`);
-        const r = parseInt(result[1], 16) / 255;
-        const g = parseInt(result[2], 16) / 255;
-        const b = parseInt(result[3], 16) / 255;
-        const max = Math.max(r, g, b);
-        const min = Math.min(r, g, b);
-        const l = (max + min) / 2;
-        let h = 0;
-        let s = 0;
-        if (max !== min) {
-            const d = max - min;
-            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-            switch (max) {
-                case r:
-                    h = (g - b) / d + (g < b ? 6 : 0);
-                    break;
-                case g:
-                    h = (b - r) / d + 2;
-                    break;
-                case b:
-                    h = (r - g) / d + 4;
-                    break;
-            }
-            h /= 6;
-        }
-        return { hue: Math.round(h * 65535), sat: Math.round(s * 254) };
+        return hexToHueSat(hex);
     }
 
     // ── High-level room control (uses Hue Groups API — single API call) ────────
