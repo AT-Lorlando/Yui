@@ -1,5 +1,9 @@
 import assert from 'assert';
-import { geofenceTransition, evaluateNetworkPresence } from './presence';
+import {
+    geofenceTransition,
+    evaluateNetworkPresence,
+    networkPresenceSignals,
+} from './presence';
 
 const MAC = '2e:9d:2b:bc:a7:1c';
 
@@ -115,6 +119,86 @@ function run(): void {
         }),
         false,
         'aucune donnée → absent',
+    );
+
+    // ── Garde de départ : fraîcheur DHCP RELATIVE à l'exit ──────────────────
+    // Le bail est statique et renouvelé toutes les 15 min : à la 1re vérif
+    // (exit + 60 s) `last-seen` est presque toujours < 15 min même si le
+    // téléphone est parti. Seul un `last-seen` postérieur à l'exit prouve
+    // quelque chose → la fenêtre est `now - exitAt`, pas 15 min.
+    const sinceExit = 60_000; // 1re vérif, 60 s après l'exit
+
+    // Exit à T, bail vu T − 11,5 min, ARP stale → ABSENT (départ réel)
+    assert.strictEqual(
+        evaluateNetworkPresence({
+            phoneMac: MAC,
+            arp: { 'mac-address': MAC, status: 'stale' },
+            lease: {
+                'mac-address': MAC,
+                status: 'bound',
+                'last-seen': '11m30s',
+            },
+            dhcpFreshnessMs: sinceExit,
+        }),
+        false,
+        "bail vu AVANT l'exit ne doit pas compter comme présent",
+    );
+
+    // Exit à T, bail vu T + 20 s (last-seen 40 s à la vérif) → PRÉSENT
+    assert.strictEqual(
+        evaluateNetworkPresence({
+            phoneMac: MAC,
+            arp: { 'mac-address': MAC, status: 'stale' },
+            lease: {
+                'mac-address': MAC,
+                status: 'bound',
+                'last-seen': '40s',
+            },
+            dhcpFreshnessMs: sinceExit,
+        }),
+        true,
+        "bail vu APRÈS l'exit = téléphone toujours là",
+    );
+
+    // Les signaux détaillés : lequel a conclu « présent »
+    assert.deepStrictEqual(
+        networkPresenceSignals({
+            phoneMac: MAC,
+            arp: { 'mac-address': MAC, status: 'reachable' },
+            lease: {
+                'mac-address': MAC,
+                status: 'bound',
+                'last-seen': '11m30s',
+            },
+            dhcpFreshnessMs: sinceExit,
+        }),
+        { present: true, signal: 'arp', lastSeenMs: 690_000 },
+    );
+    assert.deepStrictEqual(
+        networkPresenceSignals({
+            phoneMac: MAC,
+            arp: { 'mac-address': MAC, status: 'stale' },
+            lease: {
+                'mac-address': MAC,
+                status: 'bound',
+                'last-seen': '40s',
+            },
+            dhcpFreshnessMs: sinceExit,
+        }),
+        { present: true, signal: 'dhcp', lastSeenMs: 40_000 },
+    );
+    assert.deepStrictEqual(
+        networkPresenceSignals({
+            phoneMac: MAC,
+            arp: { 'mac-address': MAC, status: 'failed' },
+            lease: {
+                'mac-address': MAC,
+                status: 'bound',
+                'last-seen': '11m30s',
+            },
+            dhcpFreshnessMs: sinceExit,
+        }),
+        { present: false, signal: null, lastSeenMs: 690_000 },
     );
 
     console.log('All presence tests passed');

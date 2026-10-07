@@ -10,8 +10,11 @@
 
 import Logger from '../logger';
 import { createMacBurst, type MacBurst } from './macBurst';
-import { loadPresenceConfig } from './presenceConfig';
-import { confirmDeparture } from './departureGuard';
+import {
+    loadPresenceConfig,
+    type DepartureConfirmConfig,
+} from './presenceConfig';
+import { confirmDeparture, pingHost } from './departureGuard';
 import { logActivity } from './activityLog';
 
 // ── Env ───────────────────────────────────────────────────────────────────────
@@ -67,12 +70,19 @@ export function parseMikrotikDuration(s: string): number {
     return ms;
 }
 
-interface NetworkCheckResult {
+/** Signal qui a conclu « présent » : ARP temps réel ou bail DHCP frais. */
+export type PresenceSignal = 'arp' | 'dhcp';
+
+export interface NetworkCheckResult {
     /** true = phone seen, false = phone absent, null = router unreachable */
     present: boolean | null;
+    /** Signal gagnant quand `present` (pour le journal de la garde). */
+    signal?: PresenceSignal | null;
+    /** Résumé lisible `ARP=… DHCP=…/last-seen=…` (journal). */
+    detail?: string;
 }
 
-interface MikrotikEntry {
+export interface MikrotikEntry {
     'mac-address'?: string;
     status?: string;
     'last-seen'?: string;
@@ -89,12 +99,31 @@ interface MikrotikEntry {
  * après le départ du téléphone (d'où le faux positif "toujours home"). On exige
  * donc un `last-seen` dans la fenêtre `dhcpFreshnessMs`.
  */
-export function evaluateNetworkPresence(args: {
+export function evaluateNetworkPresence(args: NetworkPresenceArgs): boolean {
+    return networkPresenceSignals(args).present;
+}
+
+export interface NetworkPresenceArgs {
     phoneMac: string;
     arp?: MikrotikEntry | null;
     lease?: MikrotikEntry | null;
+    /**
+     * Fenêtre de fraîcheur du bail. 15 min pour le seed au boot et le burst
+     * d'arrivée ; pendant la garde de départ c'est `now - exitAt` — seul un
+     * bail vu APRÈS l'exit prouve que le téléphone est encore là.
+     */
     dhcpFreshnessMs: number;
-}): boolean {
+}
+
+/**
+ * Pure : même règle que `evaluateNetworkPresence`, mais dit QUEL signal a
+ * conclu (ARP d'abord, puis DHCP) et l'âge du bail — pour le journal.
+ */
+export function networkPresenceSignals(args: NetworkPresenceArgs): {
+    present: boolean;
+    signal: PresenceSignal | null;
+    lastSeenMs: number | null;
+} {
     const mac = args.phoneMac.toLowerCase();
     const macMatches = (e?: MikrotikEntry | null): boolean =>
         e?.['mac-address']?.toLowerCase() === mac;
@@ -103,13 +132,20 @@ export function evaluateNetworkPresence(args: {
         macMatches(args.arp) && args.arp?.status === 'reachable';
 
     const lastSeen = args.lease?.['last-seen'];
+    const lastSeenMs =
+        typeof lastSeen === 'string' ? parseMikrotikDuration(lastSeen) : null;
     const dhcpFresh =
         macMatches(args.lease) &&
         args.lease?.status === 'bound' &&
-        typeof lastSeen === 'string' &&
-        parseMikrotikDuration(lastSeen) <= args.dhcpFreshnessMs;
+        lastSeenMs !== null &&
+        lastSeenMs <= args.dhcpFreshnessMs;
 
-    return arpReachable || dhcpFresh;
+    const signal: PresenceSignal | null = arpReachable
+        ? 'arp'
+        : dhcpFresh
+        ? 'dhcp'
+        : null;
+    return { present: signal !== null, signal, lastSeenMs };
 }
 
 /**
@@ -162,21 +198,22 @@ export async function checkPhoneOnNetwork(
                 ? ((await arpRes.json()) as MikrotikEntry[])[0] ?? null
                 : null;
 
-            const present = evaluateNetworkPresence({
+            const { present, signal } = networkPresenceSignals({
                 phoneMac: PHONE_MAC,
                 arp,
                 lease,
                 dhcpFreshnessMs,
             });
 
+            const detail = `ARP=${arp?.status ?? 'none'} DHCP=${
+                lease?.status ?? 'none'
+            }/last-seen=${lease?.['last-seen'] ?? '-'}`;
             Logger.debug(
-                `[presence] ARP=${arp?.status ?? 'none'} DHCP=${
-                    lease?.status ?? 'none'
-                }/last-seen=${lease?.['last-seen'] ?? '-'} → ${
-                    present ? 'present' : 'absent'
-                }`,
+                `[presence] ${detail} (seuil DHCP ${Math.round(
+                    dhcpFreshnessMs / 1000,
+                )}s) → ${present ? 'present' : 'absent'}`,
             );
-            return { present };
+            return { present, signal, detail };
         } else {
             // Fallback: full ARP table scan
             const res = await fetch(`http://${MIKROTIK_IP}/rest/ip/arp`, {
@@ -196,7 +233,11 @@ export async function checkPhoneOnNetwork(
                     e['mac-address']?.toLowerCase() === PHONE_MAC &&
                     e.status === 'reachable',
             );
-            return { present: found };
+            return {
+                present: found,
+                signal: found ? 'arp' : null,
+                detail: `ARP=${found ? 'reachable' : 'absent'}`,
+            };
         }
     } catch (e) {
         Logger.warn(`[presence] Mikrotik unreachable — ${e}`);
@@ -309,9 +350,14 @@ export class PresenceManager {
             Logger.debug('[presence] departure already pending — exit ignored');
             return;
         }
-        const cfg = loadPresenceConfig().departureConfirm;
+        const cfg = this.departureConfig();
         const token = ++this.departureToken;
         this.departurePending = true;
+        // Instant de l'exit : la fraîcheur DHCP exigée pendant la garde est
+        // mesurée depuis ici (cf. en-tête de departureGuard.ts).
+        const exitAt = this.now();
+        let checkNo = 0;
+        let vetoReason = '';
         Logger.info(
             `[presence] geofence exit → confirmation réseau (${
                 cfg.checks
@@ -323,19 +369,47 @@ export class PresenceManager {
             delayMs: cfg.delayMs,
             checks: cfg.checks,
             intervalMs: cfg.intervalMs,
-            isPhoneHome: async () => (await this.checkNetwork()).present,
+            isPhoneHome: async () => {
+                checkNo++;
+                // Bornée ≥ 0 : une horloge qui recule ne doit pas donner
+                // une fenêtre négative (= jamais frais) ni immense.
+                const sinceExitMs = Math.max(0, this.now() - exitAt);
+                // Sonde d'abord (réveille l'ARP d'un téléphone endormi),
+                // best-effort : un échec ne change rien au verdict réseau.
+                let pinged = false;
+                try {
+                    pinged = await this.probePhone();
+                } catch (e) {
+                    Logger.debug(`[presence] sonde ping KO: ${e}`);
+                }
+                const r = await this.checkNetwork(sinceExitMs);
+                if (r.present === true) {
+                    const why =
+                        r.signal === 'dhcp'
+                            ? `bail DHCP vu après l'exit (seuil ${Math.round(
+                                  sinceExitMs / 1000,
+                              )}s depuis l'exit)`
+                            : `ARP reachable (ping ${
+                                  pinged ? 'répond' : 'muet'
+                              })`;
+                    vetoReason = `vérif ${checkNo}/${cfg.checks} : ${why}${
+                        r.detail ? ` — ${r.detail}` : ''
+                    }`;
+                }
+                return r.present;
+            },
             isCancelled: () => token !== this.departureToken,
         }).then((verdict) => {
             if (token !== this.departureToken) return;
             this.departurePending = false;
             if (verdict === 'vetoed') {
                 Logger.info(
-                    '[presence] departure VETOED — phone still on the network (phantom geofence exit)',
+                    `[presence] départ ANNULÉ — téléphone encore sur le réseau, ${vetoReason}`,
                 );
                 logActivity(
                     'presence',
                     'Départ annulé',
-                    'exit geofence reçu mais téléphone vu sur le réseau (faux départ)',
+                    `exit geofence reçu mais téléphone vu sur le réseau (${vetoReason})`,
                 );
                 return;
             }
@@ -353,9 +427,29 @@ export class PresenceManager {
         });
     }
 
-    /** Injectable pour les tests. */
-    protected checkNetwork(): Promise<{ present: boolean | null }> {
-        return checkPhoneOnNetwork();
+    /**
+     * Injectable pour les tests. `dhcpFreshnessMs` par défaut = 15 min
+     * (seed / burst) ; la garde de départ passe le temps écoulé depuis l'exit.
+     */
+    protected checkNetwork(
+        dhcpFreshnessMs?: number,
+    ): Promise<NetworkCheckResult> {
+        return checkPhoneOnNetwork(dhcpFreshnessMs);
+    }
+
+    /** Injectable pour les tests : ping du téléphone (`PHONE_IP`), best-effort. */
+    protected probePhone(): Promise<boolean> {
+        return pingHost(PHONE_IP);
+    }
+
+    /** Injectable pour les tests (horloge simulée). */
+    protected now(): number {
+        return Date.now();
+    }
+
+    /** Injectable pour les tests (la vraie config a 60 s de délai). */
+    protected departureConfig(): DepartureConfirmConfig {
+        return loadPresenceConfig().departureConfirm;
     }
 
     private armBurst(): void {

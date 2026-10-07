@@ -1,3 +1,4 @@
+import { execFile } from 'child_process';
 import Logger from '../logger';
 
 /**
@@ -14,6 +15,15 @@ import Logger from '../logger';
  * Jamais vu → départ confirmé. Un vrai départ n'est retardé que de ~1-2 min
  * (le temps que le wifi du téléphone décroche vraiment), un EXIT fantôme
  * nocturne est neutralisé à la première vérification.
+ *
+ * Ce que « vu sur le réseau » veut dire PENDANT la garde (fix du 07/10,
+ * YUI-79) : le bail DHCP est statique et renouvelé toutes les 15 min, donc un
+ * `last-seen` < 15 min ne prouve rien à exit + 60 s — c'est ce qui a mis au
+ * veto tous les vrais départs du 19/09 au 07/10. Ne comptent plus que :
+ *   - un bail DHCP vu APRÈS l'exit (fraîcheur = `now - exitAt`) ;
+ *   - un ARP `reachable` juste après un ping actif (`pingHost`) — un
+ *     téléphone endormi mais associé au wifi répond au ping, ce qui garde la
+ *     protection du 17/08 ; un téléphone parti ne répond pas.
  */
 export interface DepartureGuardOpts {
     /** Attente avant la première vérification (le wifi met ~1 min à décrocher). */
@@ -60,4 +70,49 @@ export async function confirmDeparture(
     }
     // Jamais vu sur le réseau pendant toute la fenêtre → départ réel.
     return 'confirmed';
+}
+
+// ── Sonde active ──────────────────────────────────────────────────────────────
+
+type ExecLike = (
+    cmd: string,
+    args: string[],
+    opts: { timeout: number },
+    cb: (error: Error | null) => void,
+) => unknown;
+
+export interface PingOpts {
+    /** Délai d'attente de la réponse, en secondes (`ping -W`). */
+    timeoutS?: number;
+    /** Injectable pour les tests (jamais de réseau en test). */
+    exec?: ExecLike;
+}
+
+/**
+ * Ping unitaire, best-effort : true si l'hôte répond, false sinon — binaire
+ * absent, délai dépassé, IP vide, exception : toujours false, ne throw JAMAIS
+ * (la garde ne doit pas dépendre de la présence de `ping` sur la machine).
+ *
+ * Pourquoi un ping avant de lire l'ARP : un téléphone en veille laisse son
+ * entrée ARP passer `stale`/`failed` sans avoir quitté le wifi ; l'ICMP le
+ * réveille et le bridge repasse l'entrée en `reachable`. On distingue ainsi
+ * « endormi à la maison » de « parti » sans faire confiance au bail DHCP.
+ */
+export function pingHost(ip: string, opts: PingOpts = {}): Promise<boolean> {
+    const timeoutS = Math.max(1, Math.round(opts.timeoutS ?? 1));
+    const exec: ExecLike = opts.exec ?? (execFile as unknown as ExecLike);
+    if (!ip) return Promise.resolve(false);
+    return new Promise((resolve) => {
+        try {
+            exec(
+                'ping',
+                ['-c', '1', '-W', String(timeoutS), ip],
+                { timeout: (timeoutS + 2) * 1_000 },
+                (error) => resolve(!error),
+            );
+        } catch (e) {
+            Logger.debug(`[presence] ping ${ip} impossible: ${e}`);
+            resolve(false);
+        }
+    });
 }

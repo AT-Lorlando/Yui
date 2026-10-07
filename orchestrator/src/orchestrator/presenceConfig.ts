@@ -32,7 +32,9 @@ export interface PresenceConfig {
 const DEFAULTS: PresenceConfig = {
     geofence: { enabled: true, radiusM: 150 },
     mac: { burstIntervalMs: 15000, burstWindowMs: 300000 },
-    departureConfirm: { delayMs: 60000, checks: 3, intervalMs: 20000 },
+    // 60 s + 4 × 30 s ≈ 2,5 min : laisse au wifi le temps de décrocher
+    // vraiment, pour que le ping et l'ARP ne voient plus le téléphone.
+    departureConfirm: { delayMs: 60000, checks: 4, intervalMs: 30000 },
 };
 
 function clampNum(

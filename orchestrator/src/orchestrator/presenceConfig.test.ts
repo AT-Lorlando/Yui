@@ -9,6 +9,12 @@ function run(): void {
         assert.strictEqual(c.geofence.radiusM, 150);
         assert.strictEqual(c.mac.burstIntervalMs, 15000);
         assert.strictEqual(c.mac.burstWindowMs, 300000);
+        // garde de départ : 60 s puis 4 vérifs × 30 s (YUI-79)
+        assert.deepStrictEqual(c.departureConfirm, {
+            delayMs: 60000,
+            checks: 4,
+            intervalMs: 30000,
+        });
     }
     // provided values
     {
