@@ -194,8 +194,12 @@ export function getScene(id: string): Scene | null {
 }
 
 export function createScene(data: CreateSceneInput): Scene {
+    // Un client peut envoyer null pour « pas d'effet » : on n'écrit pas la clé.
+    const clean = Object.fromEntries(
+        Object.entries(data).filter(([, v]) => v !== null && v !== undefined),
+    ) as CreateSceneInput;
     const scene: Scene = {
-        ...data,
+        ...clean,
         id: crypto.randomUUID().slice(0, 8),
         createdAt: Date.now(),
         builtIn: false,
@@ -230,10 +234,18 @@ export function updateScene(
     // tels quels les effacerait (le spread écrase, puis JSON.stringify les
     // supprime du fichier). C'est ce qui cassait le toggle favori de l'app —
     // et toute mise à jour partielle.
+    // `null` = effacer le champ (retirer une intro ou une dérive : JSON ne
+    // sait pas envoyer « absent », et undefined est ignoré ci-dessus — c'est
+    // ce qui rendait un effet de lancement impossible à retirer, 09/10/2026).
     const defined = Object.fromEntries(
-        Object.entries(input).filter(([, v]) => v !== undefined),
+        Object.entries(input).filter(([, v]) => v !== undefined && v !== null),
     );
-    scenes[idx] = { ...scenes[idx], ...defined };
+    const merged: Scene = { ...scenes[idx], ...defined };
+    for (const [k, v] of Object.entries(input)) {
+        if (v === null)
+            delete (merged as unknown as Record<string, unknown>)[k];
+    }
+    scenes[idx] = merged;
     saveScenes(scenes);
     Logger.info(`Scene updated: "${scenes[idx].name}" (${id})`);
     return scenes[idx];
