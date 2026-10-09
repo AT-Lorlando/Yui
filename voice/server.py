@@ -517,7 +517,9 @@ class VoicePipeline:
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Yui Voice Server (server-side pipeline)")
-    parser.add_argument("--whisper-model", default=os.getenv("WHISPER_MODEL", "distil-large-v3-fr"))
+    # Défaut aligné sur config.WHISPER_MODEL : « distil-large-v3-fr » n'a jamais
+    # été un alias faster-whisper (prod plantait au démarrage, 09/10/2026).
+    parser.add_argument("--whisper-model", default=os.getenv("WHISPER_MODEL", "large-v3-turbo"))
     parser.add_argument("--whisper-device", default=os.getenv("WHISPER_DEVICE", "cuda"))
     parser.add_argument("--whisper-compute", default=os.getenv("WHISPER_COMPUTE_TYPE", "float16"))
     args = parser.parse_args()
