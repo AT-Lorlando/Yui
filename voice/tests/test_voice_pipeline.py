@@ -328,6 +328,54 @@ def test_speak_shares_state():
     ok(server._stop_event is speech_state.stop, "speak: état partagé (stop)")
 
 
+def test_transcribe_endpoint():
+    import json as _json
+    import urllib.request
+    import urllib.error
+    import tts
+
+    url = f"http://127.0.0.1:{os.environ['SPEAK_PORT']}/transcribe"
+
+    def post(body: bytes):
+        req = urllib.request.Request(url, data=body, method="POST",
+                                     headers={"Content-Type": "application/octet-stream"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, _json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            return e.code, _json.loads(e.read() or b"{}")
+
+    pcm = np.zeros(8000, dtype=np.int16).tobytes()      # 0,5 s
+    tts.set_transcriber(None)
+    st, _ = post(pcm)
+    ok(st == 503, "transcribe: 503 tant que Whisper n'est pas posé")
+
+    seen = []
+    tts.set_transcriber(lambda a: seen.append(len(a)) or "  allume le salon ")
+    st, body = post(pcm)
+    ok(st == 200 and body["text"] == "allume le salon", "transcribe: texte trimé")
+    ok(seen == [8000] and body["seconds"] == 0.5, "transcribe: int16 → échantillons + durée")
+
+    st, _ = post(b"\x00" * 3)
+    ok(st == 400, "transcribe: nombre d'octets impair → 400")
+    st, _ = post(b"")
+    ok(st == 400, "transcribe: corps vide → 400")
+    st, _ = post(b"\x00" * (tts.TRANSCRIBE_MAX_S * 16000 * 2 + 2))
+    ok(st == 413, "transcribe: au-delà de 30 s → 413")
+
+    def boom(_a):
+        raise RuntimeError("gpu")
+    tts.set_transcriber(boom)
+    st, body = post(pcm)
+    ok(st == 500 and "gpu" in body["error"], "transcribe: erreur Whisper → 500")
+
+    # /speak reste servi par le même port (contrat historique)
+    req = urllib.request.Request(f"http://127.0.0.1:{os.environ['SPEAK_PORT']}/speak",
+                                 data=b'{"text": ""}', method="POST")
+    with urllib.request.urlopen(req, timeout=5) as r:
+        ok(r.status == 200, "transcribe: /speak toujours là")
+
+
 if __name__ == "__main__":
     print("vocab:")
     test_vocab()
@@ -342,4 +390,6 @@ if __name__ == "__main__":
     test_wake_corpus()
     print("speak partagé:")
     test_speak_shares_state()
+    print("endpoint /transcribe:")
+    test_transcribe_endpoint()
     print(f"\nAll voice pipeline tests passed ({PASS} checks)")

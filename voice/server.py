@@ -45,6 +45,7 @@ from config import (
 )
 import speech_state
 from text_utils import contains_trigger, find_sentence_end, strip_trigger
+import tts as tts_mod
 from tts import generate_tts, play_audio_blocking, play_chime
 
 log = logging.getLogger("yui-voice-server")
@@ -78,6 +79,7 @@ class WhisperSTT:
         from faster_whisper import WhisperModel
         log.info(f"Loading Whisper model: {model_name} ({device}/{compute_type})…")
         self.model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        self._lock = threading.Lock()
         log.info("Whisper model ready.")
 
     # Vocabulary hint — biases Whisper decoder toward home automation terms
@@ -89,7 +91,15 @@ class WhisperSTT:
     )
 
     def transcribe(self, audio_int16: np.ndarray, initial_prompt: str | None = None) -> str:
-        """Transcribe 16kHz int16 PCM. Returns text or '' if silent/hallucination."""
+        """Transcribe 16kHz int16 PCM. Returns text or '' if silent/hallucination.
+
+        Sérialisé : le pipeline du Pi et le /transcribe de l'app partagent le
+        même modèle GPU.
+        """
+        with self._lock:
+            return self._transcribe(audio_int16, initial_prompt)
+
+    def _transcribe(self, audio_int16: np.ndarray, initial_prompt: str | None) -> str:
         audio_float = audio_int16.astype(np.float32) / 32768.0
 
         # RMS gate — skip Whisper entirely on near-silence
@@ -535,6 +545,11 @@ def main() -> None:
         corpus_counts=corpus_counts,
     )
     stt = WhisperSTT(args.whisper_model, args.whisper_device, args.whisper_compute)
+    # Dictée / mode appel de l'app : POST /transcribe (tts.py) → même Whisper,
+    # même vocabulaire du foyer que le micro du Pi.
+    tts_mod.set_transcriber(
+        lambda audio: stt.transcribe(audio, initial_prompt=vocab.get_prompt())
+    )
     pipeline = VoicePipeline(stt, hub, tuning)
 
     t = threading.Thread(target=pipeline.run, daemon=True)

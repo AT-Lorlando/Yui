@@ -480,10 +480,28 @@ def play_chime() -> None:
     ).start()
 
 
-# ── /speak HTTP endpoint (for Node.js scheduler) ─────────────────────────────
+# ── /speak + /transcribe HTTP endpoints (orchestrateur Node.js) ──────────────
+#
+# /speak : lit un texte sur l'enceinte (scheduler, proactivité).
+# /transcribe : PCM int16 16 kHz mono brut (dictée et mode appel de l'app,
+# relayé par l'orchestrateur) → {"text": …} avec le MÊME Whisper et le même
+# vocabulaire du foyer que le micro du Pi. Le transcripteur est posé par
+# server.py (`set_transcriber`) une fois le modèle chargé ; avant, 503.
+
+TRANSCRIBE_MAX_S = 30
+_transcriber = None            # Callable[[np.ndarray], str] | None
+_transcriber_lock = threading.Lock()
+
+
+def set_transcriber(fn) -> None:
+    global _transcriber
+    _transcriber = fn
+
 
 class _SpeakHandler(BaseHTTPRequestHandler):
     def do_POST(self):
+        if self.path.split("?")[0] == "/transcribe":
+            return self._transcribe()
         try:
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length))
@@ -498,6 +516,37 @@ class _SpeakHandler(BaseHTTPRequestHandler):
 
         if text:
             threading.Thread(target=speak, args=(text,), daemon=True).start()
+
+    def _reply_json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _transcribe(self) -> None:
+        if _transcriber is None:
+            return self._reply_json(503, {"error": "transcriber not ready"})
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            return self._reply_json(400, {"error": "bad Content-Length"})
+        if length <= 0 or length % 2:
+            return self._reply_json(400, {"error": "body must be int16 PCM, 16 kHz mono"})
+        if length > TRANSCRIBE_MAX_S * 16000 * 2:
+            return self._reply_json(413, {"error": f"audio longer than {TRANSCRIBE_MAX_S}s"})
+        raw = self.rfile.read(length)
+        audio = np.frombuffer(raw, dtype=np.int16)
+        t0 = time.time()
+        try:
+            with _transcriber_lock:
+                text = _transcriber(audio)
+        except Exception as e:                      # noqa: BLE001
+            log.warning(f"/transcribe failed: {e}")
+            return self._reply_json(500, {"error": str(e)})
+        log.info(f"[timing] /transcribe {time.time() - t0:.2f}s ({len(audio)/16000:.1f}s d'audio)")
+        self._reply_json(200, {"text": (text or "").strip(), "seconds": round(len(audio) / 16000, 2)})
 
     def log_message(self, *_):
         pass
