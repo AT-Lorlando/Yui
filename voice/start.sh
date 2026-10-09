@@ -3,6 +3,8 @@
 set -e
 cd "$(dirname "$0")"            # voice/
 source ./env.sh && load_env ./.env   # CUDA_VISIBLE_DEVICES posé avant torch
+source ./pyenv.sh
+PY="$(voice_python "${VOICE_VENV:-$PWD/.venv}" python3)"
 
 wait_for() {
     local name="$1"
@@ -18,4 +20,4 @@ wait_for "XTTS server"  "http://localhost:${XTTS_PORT:-18770}/health"
 wait_for "Orchestrator" "http://localhost:${ORCHESTRATOR_PORT:-4000}/health"
 
 echo "[voice] Starting voice server (satellite mode)..."
-exec python3 server.py
+exec "$PY" server.py

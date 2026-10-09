@@ -19,3 +19,7 @@ prompts/*
 # Nuxt build artifacts
 **/.nuxt/
 **/.output/
+
+# venvs Python de la voix (voice/setup-venv.sh)
+voice/.venv
+voice/.venv-xtts

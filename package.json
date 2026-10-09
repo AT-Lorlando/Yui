@@ -25,6 +25,7 @@
     "pm2:status": "pm2 status",
     "pm2:save": "pm2 save",
     "pm2:startup": "pm2 startup",
+    "setup:voice": "bash voice/setup-venv.sh",
     "setup:hue": "npm run setup -w packages/mcp-hue",
     "dev:hue": "npx ts-node packages/mcp-hue/src/index.ts",
     "setup:nuki": "npm run setup -w packages/mcp-nuki --",

@@ -1,0 +1,17 @@
+# Serveur voix (yui-voice : voice/server.py) — Python 3.12, venv voice/.venv
+# Installer : voice/setup-venv.sh (ou `npm run setup:voice`). Versions = celles
+# validées en prod le 09/10/2026.
+numpy==2.2.5
+requests==2.32.3
+websockets==15.0.1            # DebugHub (/debug)
+webrtcvad==2.0.10             # VAD
+openwakeword==0.4.0           # wake word (yui.onnx + backbones bundlés)
+onnxruntime==1.24.1
+speexdsp-ns==0.1.2            # suppression de bruit du wake (optionnel, repli sans)
+faster-whisper==1.2.1         # STT (GPU via ctranslate2 + cuDNN 9 / CUDA 12)
+ctranslate2==4.7.1
+nvidia-cublas-cu12==12.8.4.1
+nvidia-cudnn-cu12==9.10.2.21
+pychromecast==14.0.9          # lecture TTS sur le Google Home
+soundfile==0.12.1
+scipy==1.15.2                 # scripts/record_voice.py, openwakeword

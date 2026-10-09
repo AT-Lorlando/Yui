@@ -1,0 +1,10 @@
+# Serveur XTTS v2 (yui-tts : voice/tts_engine.py) — Python 3.11 (TTS 0.22 ne
+# supporte pas 3.12), venv voice/.venv-xtts. Installer : voice/setup-venv.sh.
+# Versions = celles du venv validé en prod le 09/10/2026.
+TTS==0.22.0
+torch==2.10.0
+torchaudio==2.10.0
+transformers==4.46.0
+numpy==1.26.4
+soundfile==0.13.1
+librosa==0.11.0
