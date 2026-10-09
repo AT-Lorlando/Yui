@@ -36,37 +36,8 @@ import { configRoutes } from './routes/config';
 import { mailRoutes } from './routes/mail';
 import { miscRoutes } from './routes/misc';
 
-// ── TTS helper ────────────────────────────────────────────────────────────────
-// Calls the XTTS server to synthesise text and returns WAV audio as base64.
-// Returns null if the server is not available — caller degrades gracefully.
-
-const TTS_SERVER_URL =
-    process.env.TTS_SERVER_URL ?? 'http://localhost:18770/tts';
-const TTS_SPEAKER = process.env.XTTS_SPEAKER ?? 'Lilya Stainthorpe';
-const TTS_SPEED = parseFloat(process.env.XTTS_SPEED ?? '1.0');
-
-async function generateTtsAudio(
-    text: string,
-): Promise<{ base64: string; mime: string } | null> {
-    try {
-        const res = await fetch(TTS_SERVER_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                text,
-                language: 'fr',
-                speaker: TTS_SPEAKER,
-                speed: TTS_SPEED,
-            }),
-            signal: AbortSignal.timeout(20_000),
-        });
-        if (!res.ok) return null;
-        const buf = Buffer.from(await res.arrayBuffer());
-        return { base64: buf.toString('base64'), mime: 'audio/wav' };
-    } catch {
-        return null;
-    }
-}
+import { generateTtsAudio } from './ttsClient';
+import { voiceRoutes } from './routes/voice';
 
 /**
  * API HTTP de l'orchestrateur (port 4000).
@@ -458,6 +429,7 @@ export class HttpSource implements InputSource {
             '/',
             configRoutes(requireAuth, integrationsHandler, proactiveHandler),
         );
+        app.use('/voice', voiceRoutes(requireAuth));
         app.use('/', miscRoutes(requireAuth, deviceHandler));
 
         return new Promise((resolve, reject) => {

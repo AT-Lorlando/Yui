@@ -7,9 +7,11 @@ import { dataPath } from '@yui/shared';
 const TOKEN_FILE = dataPath('fcm-token.json');
 const SERVICE_ACCOUNT_FILE = dataPath('firebase-service-account.json');
 
-// voice/tts.py exposes a /speak endpoint on this port
-const SPEAK_PIPELINE_URL =
-    process.env.SPEAK_PIPELINE_URL ?? 'http://localhost:3001/speak';
+// voice/tts.py expose /speak (et /transcribe) sur SPEAK_PORT — le même .env
+// que le serveur voix, donc le port suit (prod = 10002) sans URL explicite.
+export const SPEAK_PIPELINE_URL =
+    process.env.SPEAK_PIPELINE_URL ??
+    `http://localhost:${process.env.SPEAK_PORT ?? '3001'}/speak`;
 
 export function saveFcmToken(token: string): void {
     writeFileSync(TOKEN_FILE, JSON.stringify({ token }));
