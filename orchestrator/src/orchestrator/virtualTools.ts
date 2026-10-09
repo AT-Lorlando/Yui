@@ -310,11 +310,12 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
             function: {
                 name: 'secretary_brief',
                 description:
-                    "Fait le point avec la secrétaire : ce qui est en attente, l'agenda du jour, les post-its. " +
-                    'À appeler quand Jérémy demande « fais le point », « quoi de neuf », ' +
-                    "« qu'est-ce que j'ai à faire ». scope : today (agenda du jour), " +
-                    'pending (ce qui attend une action), défaut = depuis le dernier point. ' +
-                    'Réponds avec ce texte tel quel.',
+                    'Fait le point avec la secrétaire : un résumé PARLÉ de ce qui est arrivé ' +
+                    '(mails importants, agenda, alertes). À appeler quand Jérémy demande « fais le point », ' +
+                    '« quoi de neuf ». PAS pour lister ses post-its ni ses tâches : « liste mes post-its », ' +
+                    "« qu'est-ce que j'ai à faire » → list_postits (liste exacte). " +
+                    'scope : today (agenda du jour), pending (ce qui attend une action), ' +
+                    'défaut = depuis le dernier point. Réponds avec ce texte tel quel.',
                 parameters: {
                     type: 'object',
                     properties: {

@@ -244,7 +244,9 @@ export const YOJI_TOOLS = [
     {
         name: 'list_postits',
         description:
-            'Post-its Yoji : la liste des petites choses à penser (courses, papier à envoyer, rappel) — pas des tâches de projet.',
+            'Post-its Yoji : la liste EXACTE des petites choses à penser de Jérémy (rappels, papiers, courses) — pas des tâches de projet. ' +
+            "À appeler pour « liste mes post-its », « qu'est-ce que j'ai à faire », « mes rappels ». " +
+            "Énumère-les tels quels (un par ligne, texte complet), n'invente ni contexte ni détail absent.",
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {
