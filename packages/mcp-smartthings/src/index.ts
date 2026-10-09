@@ -16,9 +16,13 @@ import {
     SmartThingsBackend,
     loadSmartThingsCreds,
     loadTvConfig,
+    saveTvConfig,
+    inputCatalog,
+    mergeKnownInputs,
     TvOfflineError,
+    type TvStatus,
 } from '@yui/shared';
-import { SMARTTHINGS_TOOLS } from './tools';
+import { currentTools } from './tools';
 import Logger from './logger';
 
 // Backend construit paresseusement : si les creds manquent, on ne crashe pas au boot.
@@ -38,8 +42,29 @@ const server = new Server(
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: SMARTTHINGS_TOOLS };
+    return { tools: currentTools() };
 });
+
+/**
+ * Retient les entrées annoncées par la TV (supportedInputSources) dans
+ * smartthings-tv.json : l'enum de `tv_set_input` les propose dès le prochain
+ * démarrage de l'orchestrateur, même TV éteinte. Best-effort.
+ */
+function rememberInputs(s: TvStatus): Record<string, string> {
+    const cfg = loadTvConfig();
+    const live = s.supportedInputs ?? [];
+    try {
+        const merged = mergeKnownInputs(cfg, live);
+        if (merged) {
+            saveTvConfig({ ...cfg, knownInputs: merged });
+            Logger.info(`TV : entrées découvertes ${merged.join(', ')}`);
+            cfg.knownInputs = merged;
+        }
+    } catch (e) {
+        Logger.warn(`TV : impossible de retenir les entrées (${e})`);
+    }
+    return inputCatalog(cfg, live);
+}
 
 function text(t: string) {
     return { content: [{ type: 'text', text: t }] };
@@ -73,6 +98,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'tv_status': {
                 const s = await tv.status();
                 if (s.power === 'off') return text('La télé est éteinte.');
+                rememberInputs(s);
                 const parts = ['La télé est allumée'];
                 if (s.input) parts.push(`sur ${s.input}`);
                 if (typeof s.volume === 'number')
@@ -83,9 +109,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'tv_get_status': {
                 // Statut structuré pour le dashboard (parsé en objet par callToolInner).
                 const s = await tv.status();
-                return text(
-                    JSON.stringify({ ...s, inputs: loadTvConfig().inputs }),
-                );
+                const inputs =
+                    s.power === 'on'
+                        ? rememberInputs(s)
+                        : inputCatalog(loadTvConfig());
+                const { supportedInputs: _sup, ...rest } = s;
+                return text(JSON.stringify({ ...rest, inputs }));
             }
             default:
                 throw new McpError(

@@ -50,6 +50,36 @@ async function run() {
             input: 'HDMI3',
         });
     }
+    // supportedInputSources → supportedInputs (chaînes non vides seulement)
+    {
+        const raw = {
+            main: {
+                switch: { switch: { value: 'on' } },
+                'samsungvd.mediaInputSource': {
+                    inputSource: { value: 'HDMI4' },
+                    supportedInputSources: {
+                        value: [
+                            'dtv',
+                            'HDMI1',
+                            'HDMI2',
+                            'HDMI3',
+                            'HDMI4',
+                            '',
+                            7,
+                        ],
+                    },
+                },
+            },
+        };
+        assert.deepStrictEqual(parseStatus(raw).supportedInputs, [
+            'dtv',
+            'HDMI1',
+            'HDMI2',
+            'HDMI3',
+            'HDMI4',
+        ]);
+        assert.strictEqual(parseStatus(raw).input, 'HDMI4');
+    }
     // setVolume → commande audioVolume.setVolume clampée
     {
         const { cmds, client } = fakeClient();

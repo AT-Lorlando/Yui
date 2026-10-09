@@ -3,6 +3,8 @@ export interface TvStatus {
     volume?: number;
     muted?: boolean;
     input?: string;
+    /** Entrées annoncées par la TV (mediaInputSource.supportedInputSources). */
+    supportedInputs?: string[];
 }
 
 export interface TvBackend {

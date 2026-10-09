@@ -1,5 +1,5 @@
 // packages/mcp-smartthings/src/tools.ts
-import { loadTvConfig } from '@yui/shared';
+import { inputCatalog, loadTvConfig } from '@yui/shared';
 
 export function buildSmartThingsTools(inputs: string[]) {
     return [
@@ -94,6 +94,10 @@ export function buildSmartThingsTools(inputs: string[]) {
     ];
 }
 
-export const SMARTTHINGS_TOOLS = buildSmartThingsTools(
-    Object.keys(loadTvConfig().inputs),
-);
+// Enum = catalogue complet (entrées nommées + découvertes sur la TV et
+// persistées) — relu à chaque tools/list.
+export function currentTools() {
+    return buildSmartThingsTools(Object.keys(inputCatalog(loadTvConfig())));
+}
+
+export const SMARTTHINGS_TOOLS = currentTools();

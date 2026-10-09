@@ -47,3 +47,26 @@ run().catch((e) => {
     console.error(e);
     process.exit(1);
 });
+
+// ── inputCatalog / mergeKnownInputs (09/10/2026 : HDMI4 du Shield) ──
+{
+    const { inputCatalog, mergeKnownInputs } = require('./smartThingsConfig');
+    const cfg = {
+        inputs: { HDMI3: 'Chromecast', dtv: 'TV' },
+        knownInputs: ['HDMI1'],
+    };
+    assert.deepStrictEqual(inputCatalog(cfg, ['HDMI4', 'HDMI3', 'dtv', '']), {
+        HDMI3: 'Chromecast',
+        dtv: 'TV',
+        HDMI1: 'HDMI1',
+        HDMI4: 'HDMI4',
+    });
+    assert.deepStrictEqual(inputCatalog({ inputs: {} }), {});
+    assert.deepStrictEqual(mergeKnownInputs(cfg, ['HDMI3', 'HDMI1']), null);
+    assert.deepStrictEqual(mergeKnownInputs(cfg, ['HDMI4', 'HDMI2', 'HDMI4']), [
+        'HDMI1',
+        'HDMI4',
+        'HDMI2',
+    ]);
+    console.log('inputCatalog: ok');
+}

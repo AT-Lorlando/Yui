@@ -17,11 +17,23 @@ export function parseStatus(raw: any): TvStatus {
         main?.['samsungvd.mediaInputSource']?.inputSource?.value ??
         main?.mediaInputSource?.inputSource?.value ??
         undefined;
+    // La TV annonce ses entrées (HDMI1…4, dtv…) : c'est la seule source
+    // complète — la config ne connaît que celles qu'on a nommées.
+    const supportedRaw =
+        main?.['samsungvd.mediaInputSource']?.supportedInputSources?.value ??
+        main?.mediaInputSource?.supportedInputSources?.value;
+    const supportedInputs = Array.isArray(supportedRaw)
+        ? supportedRaw.filter(
+              (v: unknown): v is string =>
+                  typeof v === 'string' && v.length > 0,
+          )
+        : undefined;
     return {
         power,
         volume: typeof volume === 'number' ? volume : undefined,
         muted: muteVal === undefined ? undefined : muteVal === 'muted',
         input: input ?? undefined,
+        ...(supportedInputs?.length ? { supportedInputs } : {}),
     };
 }
 
