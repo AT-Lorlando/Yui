@@ -1,3 +1,4 @@
+import { fetchAllUserPlaylists } from './resolvePlaylist';
 import SpotifyWebApi from 'spotify-web-api-node';
 import Logger from './logger';
 
@@ -192,13 +193,27 @@ export class SpotifyController {
     }
 
     /** Get the user's saved playlists */
-    async getUserPlaylists(limit = 50): Promise<any[]> {
-        const result = await this.api.getUserPlaylists({ limit });
-        return result.body.items.filter(Boolean).map((p) => ({
-            name: p!.name,
-            owner: p!.owner.display_name,
-            uri: p!.uri,
-            tracks: p!.tracks.total,
+    /**
+     * Toutes les playlists du compte (créées + suivies), paginées : une seule
+     * page de 50 laissait les playlists au-delà hors de l'enum de
+     * `play_playlist` (« Radio Montée » invisible, 09/10/2026).
+     */
+    async getUserPlaylists(): Promise<
+        {
+            id: string;
+            name: string;
+            owner: string;
+            uri: string;
+            tracks: number;
+        }[]
+    > {
+        const items = await fetchAllUserPlaylists(this.api);
+        return items.filter(Boolean).map((p) => ({
+            id: p.id,
+            name: p.name,
+            owner: p.owner.display_name ?? p.owner.id,
+            uri: p.uri,
+            tracks: p.tracks?.total ?? 0,
         }));
     }
 

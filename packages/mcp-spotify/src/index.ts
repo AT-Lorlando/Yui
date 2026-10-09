@@ -1,3 +1,4 @@
+import { matchPlaylistByName } from './resolvePlaylist';
 import dotenv from 'dotenv';
 import { resolve } from 'path';
 dotenv.config({ path: resolve(__dirname, '../../../.env') });
@@ -370,12 +371,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
                 return await playOnSpeaker(speaker, async (deviceId) => {
                     const suffix = shuffle ? ' (aléatoire)' : '';
+                    // Nom exact d'abord, puis partiel unique (une playlist
+                    // « Radio Montée » ne doit pas céder à « Radio … »).
                     const myPlaylists = await spotify.getUserPlaylists();
-                    const match = myPlaylists.find((p) =>
-                        p.name.toLowerCase().includes(query.toLowerCase()),
-                    );
-
-                    if (match) {
+                    const matched = matchPlaylistByName(myPlaylists, query);
+                    if (matched.ok) {
+                        const match = matched.playlist;
                         await play(match.uri, deviceId, match.tracks);
                         return `Playing your playlist "${match.name}"${suffix}.`;
                     }
