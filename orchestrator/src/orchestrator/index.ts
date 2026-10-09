@@ -55,42 +55,9 @@ const HISTORY_MAX = 10;
  * calls n'aient commencé ; au-delà, on considère la réponse comme finale et
  * les tokens partent au TTS au fil de l'eau.
  */
-const STREAM_HOLD_CHARS = Number(process.env.STREAM_HOLD_CHARS ?? 48);
+import { StreamCleaner, stripMarkdownForTts } from './streamClean';
 
-/**
- * Strips markdown syntax and emojis from a TTS-bound response.
- * The LLM is instructed not to use markdown, but this is a safety net
- * in case it ignores the rule (e.g. after a model update).
- */
-function stripMarkdownForTts(text: string): string {
-    return (
-        text
-            // Bold / italic: **text**, *text*, __text__, _text_
-            .replace(/\*\*(.+?)\*\*/gs, '$1')
-            .replace(/\*(.+?)\*/gs, '$1')
-            .replace(/__(.+?)__/gs, '$1')
-            .replace(/_(.+?)_/gs, '$1')
-            // Headings: # ## ###
-            .replace(/^#{1,6}\s+/gm, '')
-            // Bullet lists: - item, * item (start of line)
-            .replace(/^[\s]*[-*]\s+/gm, '')
-            // Numbered lists: 1. 2. etc
-            .replace(/^\s*\d+\.\s+/gm, '')
-            // Backticks: `code` and ```blocks```
-            .replace(/```[\s\S]*?```/g, '')
-            .replace(/`(.+?)`/g, '$1')
-            // Hex color codes like #2E8B57 (not useful orally)
-            .replace(/#[0-9A-Fa-f]{6}\b/g, '')
-            // Emojis (broad unicode range)
-            .replace(
-                /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27FF}\u{FE00}-\u{FEFF}]/gu,
-                '',
-            )
-            // Collapse multiple blank lines to one
-            .replace(/\n{3,}/g, '\n\n')
-            .trim()
-    );
-}
+const STREAM_HOLD_CHARS = Number(process.env.STREAM_HOLD_CHARS ?? 48);
 
 export class Orchestrator {
     private openai: OpenAI;
@@ -609,7 +576,9 @@ export class Orchestrator {
             // caractères ; passé ce seuil sans le moindre tool call, c'est
             // une vraie réponse → les tokens partent au fil de l'eau.
             let contentAcc = '';
-            let streamedUpTo = 0; // longueur déjà émise (post-hold)
+            // Nettoyage markdown appliqué sur le préfixe stable seulement
+            // (streamClean.ts) : plus de caractères perdus sur « 1. … ».
+            const cleaner = new StreamCleaner();
             const toolCallsAcc = new Map<
                 number,
                 { id: string; name: string; arguments: string }
@@ -625,11 +594,8 @@ export class Orchestrator {
                         turn < MAX_TURNS &&
                         contentAcc.length >= STREAM_HOLD_CHARS
                     ) {
-                        const clean = stripMarkdownForTts(contentAcc);
-                        if (clean.length > streamedUpTo) {
-                            yield clean.slice(streamedUpTo);
-                            streamedUpTo = clean.length;
-                        }
+                        const out = cleaner.push(contentAcc);
+                        if (out) yield out;
                     }
                 }
 
@@ -697,9 +663,8 @@ export class Orchestrator {
             } else {
                 // Final text response — émettre le reliquat non streamé.
                 finalResponse = stripMarkdownForTts(contentAcc);
-                if (finalResponse.length > streamedUpTo) {
-                    yield finalResponse.slice(streamedUpTo);
-                }
+                const rest = cleaner.finish(contentAcc);
+                if (rest) yield rest;
                 timing.push(`turn${turn + 1}=${Date.now() - tTurn}ms(final)`);
                 story.add({ role: 'assistant', content: finalResponse });
                 break;
