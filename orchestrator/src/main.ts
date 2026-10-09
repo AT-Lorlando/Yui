@@ -35,7 +35,7 @@ import {
     runScene,
     toggleFavorite,
 } from './orchestrator/scenes';
-import Logger from './logger';
+import Logger, { enableJsonConsole } from './logger';
 import {
     listConversations,
     readStoryEntries,
@@ -46,6 +46,11 @@ import {
 import type { ConversationsHandler } from './input/InputSource';
 import { createDashboardProvider } from './orchestrator/dashboard';
 import { setSecretaryBriefProvider } from './orchestrator/virtualTools';
+
+// JSON console (Vector → ClickHouse côté Koya) : avant tout log, et seulement
+// pour ce process — les MCP spawné héritent de l'env mais pas de cet appel,
+// donc leur stdout MCP n'est jamais basculé en JSON.
+enableJsonConsole({ app: 'yui', service: 'orchestrator' });
 
 // Parole hors conversation (automations, proactivité) : voir notify.ts.
 const speakViaPipeline = (text: string): Promise<void> =>

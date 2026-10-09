@@ -8,7 +8,6 @@ module.exports = {
             autorestart: true,
             max_restarts: 10,
             restart_delay: 5000,
-            log_date_format: 'YYYY-MM-DD HH:mm:ss',
             // Logs rotatifs + par sous-système dans <cwd>/logs (cf packages/shared/src/logger.ts).
             // Seul l'orchestrateur définit LOG_DIR → les MCP spawné restent console-only.
             env: {
@@ -28,7 +27,6 @@ module.exports = {
             autorestart: true,
             max_restarts: 5,
             restart_delay: 15000,
-            log_date_format: 'YYYY-MM-DD HH:mm:ss',
         },
 
         // ── Voice server (WebSocket STT — attend TTS + orchestrator) ───────────
@@ -40,7 +38,6 @@ module.exports = {
             autorestart: true,
             max_restarts: 5,
             restart_delay: 10000,
-            log_date_format: 'YYYY-MM-DD HH:mm:ss',
         },
     ],
 };
