@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Source voice/.env puis lance le serveur XTTS dans le venv xtts.
+# Charge voice/.env (env.sh, sans évaluation shell) puis lance le serveur XTTS dans le venv xtts.
 set -e
 cd "$(dirname "$0")"            # voice/
-set -a; source ./.env; set +a
+source ./env.sh && load_env ./.env
 exec /home/chuya/.venvs/xtts/bin/python tts_engine.py

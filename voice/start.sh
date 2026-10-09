@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Source voice/.env, attend XTTS + orchestrateur, puis lance le pipeline voix.
+# Charge voice/.env (env.sh, sans évaluation shell), attend XTTS + orchestrateur, puis lance le pipeline voix.
 set -e
 cd "$(dirname "$0")"            # voice/
-set -a; source ./.env; set +a  # CUDA_VISIBLE_DEVICES posé avant torch
+source ./env.sh && load_env ./.env   # CUDA_VISIBLE_DEVICES posé avant torch
 
 wait_for() {
     local name="$1"
