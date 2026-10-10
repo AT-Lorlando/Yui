@@ -48,6 +48,11 @@ export interface ScenesHandler {
 }
 
 export interface ToolsHandler {
+    /** Appel direct avec le drapeau d'erreur du MCP (route /tools/:name). */
+    callWithStatus: (
+        name: string,
+        args: Record<string, unknown>,
+    ) => Promise<{ result: unknown; isError: boolean }>;
     list: () => {
         serverName: string;
         name: string;

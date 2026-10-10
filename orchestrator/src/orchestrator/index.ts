@@ -731,6 +731,21 @@ export class Orchestrator {
         return this.callToolInner(toolName, args);
     }
 
+    /**
+     * Comme callTool, mais rend le drapeau `isError` du MCP : les appels
+     * directs (/tools/:name) le traduisent en HTTP 502 au lieu d'un texte
+     * « Erreur : … » en 200 que l'app ne voyait pas.
+     */
+    async callToolWithStatus(
+        toolName: string,
+        args: Record<string, unknown> = {},
+    ): Promise<{ result: unknown; isError: boolean }> {
+        this.lastToolError = false;
+        const result = await this.callTool(toolName, args);
+        return { result, isError: this.lastToolError };
+    }
+    private lastToolError = false;
+
     /** Guard-free path for AnimationManager loops (avoids self-cancel). */
     async callToolRaw(
         toolName: string,
@@ -794,6 +809,7 @@ export class Orchestrator {
             name: toolName,
             arguments: args,
         });
+        if (result.isError) this.lastToolError = true;
 
         const textContent = (result.content as { type: string; text: string }[])
             .filter((c) => c.type === 'text')

@@ -35,6 +35,7 @@ const REGISTRY: Record<string, DataCategory> = {
     'timer-presets.json': 'config',
     'broadlink-codes.json': 'config',
     'smartthings-tv.json': 'config',
+    'spotify-playlists.json': 'config',
     // state — runtime, disposable
     'amp-state.json': 'state',
     'timers.json': 'state',

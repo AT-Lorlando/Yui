@@ -38,6 +38,7 @@ import { miscRoutes } from './routes/misc';
 
 import { generateTtsAudio } from './ttsClient';
 import { voiceRoutes } from './routes/voice';
+import { musicRoutes } from './routes/music';
 
 /**
  * API HTTP de l'orchestrateur (port 4000).
@@ -267,10 +268,19 @@ export class HttpSource implements InputSource {
                 requireAuth,
                 async (req: any, res: any) => {
                     try {
-                        const result = await toolsHandler.call(
-                            req.params.name,
-                            req.body || {},
-                        );
+                        // Un MCP qui signale `isError` renvoyait son texte en
+                        // 200 : l'app n'affichait rien (« Titres likés ne
+                        // marche pas », 10/10/2026). Désormais 502 + message.
+                        const { result, isError } =
+                            await toolsHandler.callWithStatus(
+                                req.params.name,
+                                req.body || {},
+                            );
+                        if (isError) {
+                            return res
+                                .status(502)
+                                .json({ error: String(result), result });
+                        }
                         return res.json({ result });
                     } catch (e: any) {
                         return res.status(500).json({ error: e.message });
@@ -404,6 +414,7 @@ export class HttpSource implements InputSource {
             );
         }
         app.use('/', paletteRoutes(requireAuth));
+        app.use('/', musicRoutes(requireAuth));
         app.use('/', notifyRoutes(requireAuth));
         app.use('/', eventRoutes(requireAuth, proactiveHandler));
         app.use('/', mailRoutes(requireAuth, proactiveHandler));

@@ -108,6 +108,8 @@ async function main() {
         list: () => orchestrator.getTools(),
         call: (name: string, args: Record<string, unknown>) =>
             orchestrator.callTool(name, args),
+        callWithStatus: (name: string, args: Record<string, unknown>) =>
+            orchestrator.callToolWithStatus(name, args),
         callRaw: (name: string, args: Record<string, unknown>) =>
             orchestrator.callToolRaw(name, args),
     };
