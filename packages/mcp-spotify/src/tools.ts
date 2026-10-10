@@ -145,7 +145,7 @@ export const SPOTIFY_TOOLS = [
     {
         name: 'play_playlist',
         description:
-            "Search the user's saved playlists first, then Spotify's catalog, and play the best match on the default speaker. " +
+            "Play a playlist on the default speaker: Jérémy's favourites (« Mes playlists », listed first in the enum) and saved playlists by name first, then Spotify's catalog. " +
             'A Spotify playlist link, URI or id is played directly.',
         inputSchema: {
             type: 'object' as const,
@@ -287,7 +287,7 @@ export const SPOTIFY_TOOLS = [
     {
         name: 'get_my_playlists',
         description:
-            "List the user's saved Spotify playlists (all of them: name, owner, uri, tracks, image)",
+            "List Jérémy's playlists: favourites first (pinned: true, « Mes playlists » incl. pasted links), then all saved playlists (name, owner, uri, tracks, image)",
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {

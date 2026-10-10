@@ -1,4 +1,5 @@
 import { matchPlaylistByName, parsePlaylistRef } from './resolvePlaylist';
+import { mergePlaylists, readLinkedPlaylists } from './linkedPlaylists';
 import dotenv from 'dotenv';
 import { resolve } from 'path';
 dotenv.config({ path: resolve(__dirname, '../../../.env') });
@@ -390,6 +391,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         );
                         return `Playing playlist "${label}"${suffix}.`;
                     }
+                    // « Mes playlists » (favoris + liens collés) d'abord :
+                    // c'est là que vivent les playlists hors API.
+                    const linked = matchPlaylistByName(
+                        readLinkedPlaylists(),
+                        query,
+                    );
+                    if (linked.ok) {
+                        const fav = linked.playlist;
+                        await play(fav.uri, deviceId, fav.tracks || undefined);
+                        return `Playing your playlist "${fav.name}"${suffix}.`;
+                    }
                     // Nom exact d'abord, puis partiel unique (une playlist
                     // « Radio Montée » ne doit pas céder à « Radio … »).
                     const myPlaylists = await spotify.getUserPlaylists();
@@ -600,7 +612,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'get_my_playlists': {
-                const playlists = await spotify.getUserPlaylists();
+                // Favoris (registre) en tête avec `pinned: true`, puis le compte.
+                const playlists = mergePlaylists(
+                    readLinkedPlaylists(),
+                    await spotify.getUserPlaylists(),
+                );
                 return {
                     content: [
                         {
@@ -767,11 +783,12 @@ async function main() {
             ].filter(
                 (n: any): n is string => !!n && !/^[0-9a-f]{16,}$/.test(n),
             );
+            const names = mergePlaylists(readLinkedPlaylists(), playlists)
+                .map((p: any) => p.name)
+                .filter((n: any): n is string => !!n);
             SPOTIFY_TOOL_LIST = buildSpotifyTools(
                 [...new Set(speakerNames)],
-                playlists
-                    .map((p: any) => p.name)
-                    .filter((n: any): n is string => !!n),
+                [...new Set(names)],
             );
         } catch {
             /* keep previous enums */
