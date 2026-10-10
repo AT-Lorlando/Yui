@@ -145,14 +145,15 @@ export const SPOTIFY_TOOLS = [
     {
         name: 'play_playlist',
         description:
-            "Search the user's saved playlists first, then Spotify's catalog, and play the best match on the default speaker.",
+            "Search the user's saved playlists first, then Spotify's catalog, and play the best match on the default speaker. " +
+            'A Spotify playlist link, URI or id is played directly.',
         inputSchema: {
             type: 'object' as const,
             properties: {
                 query: {
                     type: 'string',
                     description:
-                        'Playlist name or search query (e.g. "chill", "workout", "indie")',
+                        'Playlist name, search query (e.g. "chill", "workout") or a Spotify playlist link/URI/id',
                 },
             },
             required: ['query'],
@@ -285,8 +286,27 @@ export const SPOTIFY_TOOLS = [
     },
     {
         name: 'get_my_playlists',
-        description: "List the user's saved Spotify playlists (up to 50)",
+        description:
+            "List the user's saved Spotify playlists (all of them: name, owner, uri, tracks, image)",
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
+    },
+    {
+        // App-only : fiche d'une playlist depuis un lien collé (sélecteur de
+        // playlist de l'éditeur de scènes).
+        name: 'playlist_info',
+        description:
+            'Playlist details (name, owner, image, tracks) from a Spotify link, URI or id.',
+        inputSchema: {
+            type: 'object' as const,
+            'x-audience': ['app'],
+            properties: {
+                ref: {
+                    type: 'string',
+                    description: 'Playlist link, URI or id',
+                },
+            },
+            required: ['ref'],
+        },
     },
     {
         name: 'refresh_speakers',

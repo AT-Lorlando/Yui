@@ -1,4 +1,4 @@
-import { matchPlaylistByName } from './resolvePlaylist';
+import { matchPlaylistByName, parsePlaylistRef } from './resolvePlaylist';
 import dotenv from 'dotenv';
 import { resolve } from 'path';
 dotenv.config({ path: resolve(__dirname, '../../../.env') });
@@ -371,6 +371,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
                 return await playOnSpeaker(speaker, async (deviceId) => {
                     const suffix = shuffle ? ' (aléatoire)' : '';
+                    // Lien / URI / id collé (app) : lecture directe — c'est le
+                    // seul chemin pour une playlist générée par Spotify
+                    // (« Radio Montée »), absente de /me/playlists et de la
+                    // recherche catalogue.
+                    const ref = parsePlaylistRef(query);
+                    if (ref.kind === 'id') {
+                        const info = await spotify.getPlaylistInfo(ref.id);
+                        const label =
+                            info?.name ??
+                            (typeof (args as any).label === 'string'
+                                ? (args as any).label
+                                : 'Spotify');
+                        await play(
+                            `spotify:playlist:${ref.id}`,
+                            deviceId,
+                            info?.tracks || undefined,
+                        );
+                        return `Playing playlist "${label}"${suffix}.`;
+                    }
                     // Nom exact d'abord, puis partiel unique (une playlist
                     // « Radio Montée » ne doit pas céder à « Radio … »).
                     const myPlaylists = await spotify.getUserPlaylists();
@@ -552,6 +571,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         {
                             type: 'text',
                             text: JSON.stringify(results, null, 2),
+                        },
+                    ],
+                };
+            }
+
+            case 'playlist_info': {
+                const ref = parsePlaylistRef(String((args as any).ref ?? ''));
+                if (ref.kind !== 'id')
+                    throw new Error(
+                        'ref must be a Spotify playlist link, URI or id',
+                    );
+                const info = await spotify.getPlaylistInfo(ref.id);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(
+                                info ?? {
+                                    id: ref.id,
+                                    uri: `spotify:playlist:${ref.id}`,
+                                    unavailable: true,
+                                },
+                            ),
                         },
                     ],
                 };

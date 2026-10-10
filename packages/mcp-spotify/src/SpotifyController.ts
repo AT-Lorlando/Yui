@@ -1,4 +1,13 @@
 import { fetchAllUserPlaylists } from './resolvePlaylist';
+
+export interface PlaylistSummary {
+    id: string;
+    name: string;
+    owner: string;
+    uri: string;
+    tracks: number;
+    image?: string;
+}
 import SpotifyWebApi from 'spotify-web-api-node';
 import Logger from './logger';
 
@@ -96,6 +105,30 @@ export class SpotifyController {
             return res.body.tracks?.total;
         } catch {
             return undefined;
+        }
+    }
+
+    /**
+     * Fiche d'une playlist par id — pour un lien collé dans l'app (les
+     * playlists générées par Spotify, « Radio … », n'apparaissent pas dans
+     * /me/playlists). Null si Spotify refuse (playlists algorithmiques).
+     */
+    async getPlaylistInfo(id: string): Promise<PlaylistSummary | null> {
+        try {
+            const res = await this.api.getPlaylist(id, {
+                fields: 'id,name,uri,owner(display_name,id),tracks.total,images',
+            });
+            const p = res.body;
+            return {
+                id: p.id,
+                name: p.name,
+                owner: p.owner?.display_name ?? p.owner?.id ?? '',
+                uri: p.uri,
+                image: p.images?.[0]?.url,
+                tracks: p.tracks?.total ?? 0,
+            };
+        } catch {
+            return null;
         }
     }
 
@@ -198,21 +231,14 @@ export class SpotifyController {
      * page de 50 laissait les playlists au-delà hors de l'enum de
      * `play_playlist` (« Radio Montée » invisible, 09/10/2026).
      */
-    async getUserPlaylists(): Promise<
-        {
-            id: string;
-            name: string;
-            owner: string;
-            uri: string;
-            tracks: number;
-        }[]
-    > {
+    async getUserPlaylists(): Promise<PlaylistSummary[]> {
         const items = await fetchAllUserPlaylists(this.api);
         return items.filter(Boolean).map((p) => ({
             id: p.id,
             name: p.name,
             owner: p.owner.display_name ?? p.owner.id,
             uri: p.uri,
+            image: p.images?.[0]?.url,
             tracks: p.tracks?.total ?? 0,
         }));
     }
