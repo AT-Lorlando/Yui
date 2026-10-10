@@ -492,7 +492,9 @@ export class Orchestrator {
         reset?: boolean,
         outputChannel: import('./automations').OutputChannel = 'cast',
     ): AsyncGenerator<
-        string | { tool: string; args?: Record<string, unknown> },
+        | string
+        | { tool: string; args?: Record<string, unknown> }
+        | { thinking: string },
         void,
         unknown
     > {
@@ -586,6 +588,14 @@ export class Orchestrator {
 
             for await (const chunk of stream) {
                 const delta = chunk.choices[0]?.delta;
+
+                // Raisonnement (llama-server / DeepSeek : `reasoning_content`) :
+                // jamais parlé ni mémorisé, mais montré en direct à l'app
+                // (mode appel, bulle du chat) pour voir ce que Yui fait.
+                const reasoning = (delta as any)?.reasoning_content;
+                if (typeof reasoning === 'string' && reasoning) {
+                    yield { thinking: reasoning };
+                }
 
                 if (delta?.content) {
                     contentAcc += delta.content;

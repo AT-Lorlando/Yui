@@ -11,10 +11,12 @@ export type StreamOptions = {
     onConversationId?: (id: string) => void;
 };
 
-/** Un élément du stream : du texte, ou un événement « outil appelé ». */
+/** Un élément du stream : du texte, un événement « outil appelé », ou un
+ *  fragment de raisonnement du modèle (jamais parlé, affiché par l'app). */
 export type StreamItem =
     | string
-    | { tool: string; args?: Record<string, unknown> };
+    | { tool: string; args?: Record<string, unknown> }
+    | { thinking: string };
 
 export type StreamHandler = (
     order: string,
