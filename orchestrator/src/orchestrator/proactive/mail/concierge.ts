@@ -41,6 +41,7 @@ import {
     PUBLIC_DOMAINS,
     sortRules,
     validateRuleInput,
+    type MailAlert,
 } from './rules';
 import type { MailRule, RuleMail, RuleStore, RulesFile } from './rules';
 import {
@@ -606,6 +607,16 @@ export interface ConciergeDeps {
     /** Lire le corps des mails avant classement (défaut oui). */
     readBodies?: boolean;
     now?: () => number;
+    /** Une règle confirmée avec `alert` vient de matcher un mail : prévenir
+     *  tout de suite (le moteur choisit notif/parole selon présence et heure). */
+    onAlert?: (mail: {
+        mailId: string;
+        from: string;
+        subject: string;
+        category: string;
+        alert: MailAlert;
+        ruleId: string;
+    }) => void;
 }
 
 export class MailConcierge {
@@ -1220,6 +1231,20 @@ export class MailConcierge {
                     Logger.warn(`concierge: règle ${m.id} — ${err}`);
                 }
                 this.journal(proposal, { ruleId: v.ruleId });
+                if (v.alert && this.deps.onAlert) {
+                    try {
+                        this.deps.onAlert({
+                            mailId: m.id,
+                            from: m.from,
+                            subject: m.subject,
+                            category: v.category,
+                            alert: v.alert,
+                            ruleId: v.ruleId,
+                        });
+                    } catch (err) {
+                        Logger.warn(`concierge: alerte ${m.id} — ${err}`);
+                    }
+                }
                 concluded++;
             } else if (v.stage === 'signal' && senderAddress(m.from)) {
                 // Expéditeur vide : `ruleFromSignal` apprendrait une règle

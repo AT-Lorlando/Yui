@@ -5,11 +5,15 @@ import { dataPath } from '@yui/shared';
 import Logger from '../../../logger';
 
 export type RuleOrigin = 'user' | 'correction' | 'signal';
+export type MailAlert = 'notify' | 'speak';
 
 export interface MailRule {
     id: string;
     when: { from?: string; subject?: string; header?: string };
-    then: { category: string | null }; // null = règle négative (bloque les signaux, n'attribue rien)
+    /** null = règle négative (bloque les signaux, n'attribue rien).
+     *  `alert` = prévenir TOUT DE SUITE quand la règle matche (sans LLM ni
+     *  attente du prochain point) : notification, ou parole si présent. */
+    then: { category: string | null; alert?: MailAlert };
     origin: RuleOrigin;
     confirmed: boolean;
     hits: number;
@@ -269,6 +273,23 @@ export function validateRuleInput(
         return { ok: false, error: 'catégorie inconnue' };
     }
 
+    const alertRaw = (then as Record<string, unknown>).alert;
+    if (
+        alertRaw !== undefined &&
+        alertRaw !== null &&
+        alertRaw !== 'notify' &&
+        alertRaw !== 'speak'
+    ) {
+        return { ok: false, error: 'alerte inconnue (notify ou speak)' };
+    }
+    const alert = (alertRaw ?? undefined) as MailAlert | undefined;
+    if (alert && category === null) {
+        return {
+            ok: false,
+            error: 'une règle « pas du bruit » ne peut pas alerter',
+        };
+    }
+
     return {
         ok: true,
         rule: {
@@ -277,7 +298,10 @@ export function validateRuleInput(
                 ...(subject ? { subject } : {}),
                 ...(header ? { header } : {}),
             },
-            then: { category: (category ?? null) as string | null },
+            then: {
+                category: (category ?? null) as string | null,
+                ...(alert ? { alert } : {}),
+            },
             origin: 'user',
             confirmed: true,
         },

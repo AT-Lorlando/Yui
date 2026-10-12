@@ -1,7 +1,7 @@
 // Étages déterministes du tri (règles puis signaux) et repli — 0 token avant
 // le LLM. L'orchestration (concierge) reste hors de ce module : ces fonctions
 // sont pures, testables sans réseau ni fichier.
-import type { MailRule, RuleMail } from './rules';
+import type { MailAlert, MailRule, RuleMail } from './rules';
 import { firstMatch } from './rules';
 import type { Signal } from './signals';
 import { detectSignal, signalAllowed } from './signals';
@@ -13,6 +13,8 @@ export interface Verdict {
     category: string;
     stage: Stage;
     ruleId?: string;
+    /** Règle confirmée qui demande une alerte immédiate. */
+    alert?: MailAlert;
     signal?: Signal;
     urgency?: Urgency;
     reason?: string;
@@ -46,6 +48,7 @@ export function deterministicVerdict(
                     category,
                     stage: 'rule',
                     ruleId: rule.id,
+                    ...(rule.then.alert ? { alert: rule.then.alert } : {}),
                     final: true,
                 };
             }
