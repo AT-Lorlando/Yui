@@ -41,6 +41,18 @@ curl -X POST http://10.0.0.101:10001/events \
        "ttlMs":86400000,"link":"https://koya.home.arpa/hosts/2"}'
 ```
 
+Une vraie urgence — `critique` sort **immédiatement**, sans juge LLM, en notification + parole si Jérémy est présent (même la nuit) ; à réserver à ce qui ne peut pas attendre (prod tombée, alarme) :
+
+```bash
+curl -X POST http://10.0.0.101:10001/events \
+  -H "Authorization: Bearer $YUI_BEARER" -H "Content-Type: application/json" \
+  -d '{"source":"koya","key":"prod-down:yoji","kind":"alert","importance":"critique",
+       "subject":"La prod de Yoji ne répond plus","facts":["HTTP 502 depuis 3 minutes"],
+       "ttlMs":3600000,"link":"https://koya.home.arpa/apps/yoji"}'
+```
+
+Quand c'est rétabli, renvoyer un événement `info` avec une autre `key` (ex. `prod-up:yoji`) ; un même `key` renvoyé est dédoublonné tant que ses `facts` ne changent pas.
+
 Avec une intention `todo` (crée un post-it Yoji) :
 
 ```bash

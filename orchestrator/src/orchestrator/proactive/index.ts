@@ -1,6 +1,6 @@
 import Logger from '../../logger';
 import { dataPath } from '@yui/shared';
-import { passesThreshold } from './gates';
+import { isQuietHours, passesThreshold } from './gates';
 import { Dedup } from './dedup';
 import { HeldQueue } from './held';
 import { RateWindow } from './rate';
@@ -141,6 +141,7 @@ export class ProactiveEngine {
             notify: (t) => this.deps.notify(t),
             speak: (t) => this.deps.speak(t),
             now: this.now,
+            quiet: () => this.isQuiet(),
         });
         // Les règles vivent dans mail-rules.json ; `concierge.rules` de la
         // config n'est relu qu'une fois, pour peupler un store encore absent.
@@ -156,6 +157,7 @@ export class ProactiveEngine {
             );
         }
         this.concierge = new MailConcierge({
+            onAlert: (m) => void this.alertMail(m),
             deviceHandler: (t, a) => this.deps.deviceHandler(t, a),
             complete: (sys, user) => this.deps.complete(sys, user),
             rules,
@@ -579,7 +581,26 @@ export class ProactiveEngine {
         );
         const dedupKey = `${e.source}:${e.key}`;
         const fp = factsFingerprint(e);
-        if (!critical && isBrickEnabled(this.cfg, 'judge')) {
+        if (critical) {
+            // Vraie urgence (prod tombée) : pas de juge qui pourrait se taire,
+            // pas d'attente — notification + parole si présent, même la nuit.
+            if (e.action) await this.tryAction(e.action, nowMs);
+            const text = e.facts.length
+                ? `${e.subject}. ${e.facts[0]}`
+                : e.subject;
+            const channel = await this.pushNow(text, true, true);
+            this.journal.record({
+                at: nowMs,
+                source: e.source,
+                subject: e.key,
+                channel,
+                message: text,
+                reason: 'critique : sortie immédiate sans juge',
+            });
+            this.dedup.record(dedupKey, nowMs, text, fp);
+            return;
+        }
+        if (isBrickEnabled(this.cfg, 'judge')) {
             // Agir et parler sont indépendants : l'action whitelistée (avec sa
             // garde anti-conflit) est tentée que l'événement soit dit ou
             // retenu — seul le pipeline historique lie l'action au seuil.
@@ -671,6 +692,59 @@ export class ProactiveEngine {
                 `proactive: formulation échouée, repli sur facts — ${err}`,
             );
             return ev.facts;
+        }
+    }
+
+    private isQuiet(): boolean {
+        return isQuietHours(new Date(this.now()), this.cfg.quietHours);
+    }
+
+    /**
+     * Sortie immédiate, sans juge : `critique` (prod tombée) et alertes de
+     * règle courrier. Notification toujours ; parole seulement si présent et
+     * hors heures de silence — sauf `force` (critique : on réveille).
+     */
+    private async pushNow(
+        text: string,
+        wantSpeak: boolean,
+        force = false,
+    ): Promise<'speak' | 'notify'> {
+        const presence = this.deps.presenceState();
+        const speak =
+            wantSpeak && presence === 'home' && (force || !this.isQuiet());
+        Logger.info(
+            `proactive: sortie immédiate → notification${
+                speak ? ' + TTS' : ''
+            } « ${text.slice(0, 80)} »`,
+        );
+        await this.deps.notify(text);
+        if (speak) await this.deps.speak(text);
+        return speak ? 'speak' : 'notify';
+    }
+
+    /** Règle courrier avec `alert` : prévenir tout de suite. */
+    private async alertMail(m: {
+        mailId: string;
+        from: string;
+        subject: string;
+        category: string;
+        alert: 'notify' | 'speak';
+        ruleId: string;
+    }): Promise<void> {
+        const who = m.from.replace(/<[^>]*>/, '').trim() || m.from;
+        const text = `Courrier : « ${m.subject} » de ${who}.`;
+        try {
+            const channel = await this.pushNow(text, m.alert === 'speak');
+            this.journal.record({
+                at: this.now(),
+                source: 'mail-rule',
+                subject: m.mailId,
+                channel,
+                message: text,
+                reason: `règle ${m.ruleId} (${m.category}) : alerte immédiate`,
+            });
+        } catch (err) {
+            Logger.warn(`proactive: alerte courrier ${m.mailId} — ${err}`);
         }
     }
 
