@@ -16,7 +16,7 @@ import {
 } from './automations';
 import { listScenes } from './scenes';
 import { readAllDeviceStates } from './deviceConditions';
-import { sendNotification } from './notify';
+import { sendNotification, speakText } from './notify';
 
 export interface ToolCallResult {
     id: string;
@@ -235,6 +235,29 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
                     type: 'object',
                     properties: { id: { type: 'string' } },
                     required: ['id'],
+                },
+            },
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'speak_aloud',
+                description:
+                    "Fait une annonce à voix haute sur l'enceinte de l'appartement (Google Home du salon), " +
+                    'indépendamment de ta réponse. À utiliser seulement quand Jérémy le demande ' +
+                    '("dis à voix haute…", "annonce…", "préviens tout le monde que…") ou pour ' +
+                    "alerter quelqu'un qui est à l'appartement alors que lui n'y est pas. " +
+                    "Une réponse normale est déjà lue quand l'ordre vient de la voix : ne pas doubler. " +
+                    'Phrase courte, orale, sans markdown.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        text: {
+                            type: 'string',
+                            description: 'Phrase à prononcer',
+                        },
+                    },
+                    required: ['text'],
                 },
             },
         },
@@ -494,6 +517,20 @@ export async function handleVirtualTool(
             return {
                 id: toolCall.id,
                 content: msg ?? `Automation "${args.id}" introuvable.`,
+            };
+        }
+
+        case 'speak_aloud': {
+            const text = String(args.text ?? '').trim();
+            if (!text) {
+                return { id: toolCall.id, content: 'Erreur : texte vide.' };
+            }
+            const ok = await speakText(text);
+            return {
+                id: toolCall.id,
+                content: ok
+                    ? `Annonce lancée sur l'enceinte : "${text}"`
+                    : "Erreur : le pipeline voix ne répond pas, l'annonce n'a pas été lue.",
             };
         }
 

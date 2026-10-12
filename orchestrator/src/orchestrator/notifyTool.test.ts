@@ -14,6 +14,11 @@ async function run(): Promise<void> {
     assert.deepStrictEqual((t!.function.parameters as any).required, [
         'message',
     ]);
+    // speak_aloud : annonce sur l'enceinte, décidée par le LLM seulement sur
+    // demande explicite (la réponse vocale normale est déjà lue).
+    const sp = tools.find((x) => x.function.name === 'speak_aloud');
+    assert.ok(sp, 'speak_aloud doit être exposé au LLM');
+    assert.deepStrictEqual((sp!.function.parameters as any).required, ['text']);
     // Le tool interne des scènes ne doit PAS être exposé au LLM.
     assert.ok(
         !tools.some((x) => x.function.name === '_notify'),
