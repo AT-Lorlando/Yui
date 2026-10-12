@@ -29,6 +29,9 @@ export interface ComposerDeps {
     speak: (text: string) => Promise<void>;
     now: () => number;
     llmTimeoutMs?: number;
+    /** Heures de silence (23h–7h) : jamais de parole, et un moment ne sort
+     *  qu'une alerte (porte ouverte, urgent) en notification. */
+    quiet?: () => boolean;
 }
 
 export interface BriefResult {
@@ -288,20 +291,41 @@ export class BriefComposer {
 
     async forMoment(input: BriefInputs): Promise<BriefResult | null> {
         const now = this.deps.now();
+        const quiet = this.deps.quiet?.() ?? false;
+        const imposed = imposedFacts(input, now);
         // Les faits imposés passent devant (ils sont urgents) ; le plafond
         // s'applique au total, en rognant la queue de la sélection.
-        const facts = [
-            ...imposedFacts(input, now),
-            ...this.select(input, now),
-        ].slice(0, BRIEF_MAX_FACTS);
+        // Le coucher n'a QUE ses faits imposés (la porte) : avant, l'agenda
+        // ou un retenu suffisait à composer une notification à 1 h 30
+        // (« Il est une heure du matin et tout le monde dort déjà… »).
+        let facts =
+            input.momentKind === 'moment-bedtime'
+                ? imposed
+                : [...imposed, ...this.select(input, now)].slice(
+                      0,
+                      BRIEF_MAX_FACTS,
+                  );
+        // Heures de silence : seules les alertes sortent, le reste attend
+        // le réveil (il n'est pas marqué dit, il ressortira).
+        if (quiet) {
+            facts = facts.filter(
+                (f) =>
+                    f.nature === 'alert' ||
+                    f.importance === 'urgent' ||
+                    f.importance === 'critique',
+            );
+        }
         if (
             facts.length === 0 &&
-            !momentRequiresSpeech(input.momentKind, input.situation)
+            !(
+                momentRequiresSpeech(input.momentKind, input.situation) &&
+                (!quiet || input.momentKind === 'moment-bedtime')
+            )
         ) {
             return null;
         }
         const composed = await this.compose(input, facts, now);
-        const channel = this.channelFor(input);
+        const channel = quiet ? 'notify' : this.channelFor(input);
         await this.emit(input, channel, composed.text, facts, now);
         return this.settle(
             input,

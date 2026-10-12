@@ -61,6 +61,7 @@ function harness(
         llmTimeoutMs?: number;
         notify?: (t: string) => Promise<void>;
         speak?: (t: string) => Promise<void>;
+        quiet?: boolean;
     } = {},
 ): Harness {
     const calls = {
@@ -102,6 +103,7 @@ function harness(
         ...(opts.llmTimeoutMs !== undefined
             ? { llmTimeoutMs: opts.llmTimeoutMs }
             : {}),
+        ...(opts.quiet !== undefined ? { quiet: () => opts.quiet! } : {}),
     });
     return h;
 }
@@ -254,6 +256,94 @@ async function run(): Promise<void> {
         assert.strictEqual(h.calls.speak.length, 0);
         assert.strictEqual(h.journal.list()[0]!.channel, 'notify');
         assert.strictEqual(h.journal.spentToday(T), 0);
+    }
+
+    // (d2) Coucher avec de la matière ordinaire (agenda, retenu) → silence :
+    // seuls les faits imposés comptent au coucher (fin des notifs à 1 h 30).
+    {
+        const h = harness({ llm: async () => 'Semaine 42.' });
+        h.held.add(
+            {
+                source: 'calendar',
+                key: 'week-42',
+                kind: 'info',
+                importance: 'utile',
+                subject: 'Semaine 42 de 2026',
+                facts: [],
+                at: T - 1000,
+            } as any,
+            T - 1000,
+        );
+        const r = await h.composer.forMoment(
+            inputs(h, {
+                momentKind: 'moment-bedtime',
+                momentFacts: 'lumières éteintes',
+                situation: situation({ doorLocked: true }),
+            }),
+        );
+        assert.strictEqual(r, null, 'coucher sans alerte → rien');
+        assert.strictEqual(h.calls.complete.length, 0, 'aucun LLM');
+        assert.strictEqual(
+            h.held.peek(T).length,
+            1,
+            'le retenu attend le réveil',
+        );
+    }
+
+    // (d3) Heures de silence : un retour la nuit ne parle jamais ; sans
+    // alerte → rien, avec un fait urgent → notification seule.
+    {
+        const h = harness({ quiet: true });
+        h.held.add(
+            {
+                source: 'calendar',
+                key: 'week-42',
+                kind: 'info',
+                importance: 'utile',
+                subject: 'Semaine 42 de 2026',
+                facts: [],
+                at: T - 1000,
+            } as any,
+            T - 1000,
+        );
+        const r = await h.composer.forMoment(inputs(h));
+        assert.strictEqual(r, null, 'nuit + rien d’urgent → silence');
+        assert.strictEqual(h.calls.speak.length, 0);
+
+        const h2 = harness({ quiet: true, llm: async () => 'Disque plein.' });
+        h2.held.add(
+            {
+                source: 'koya',
+                key: 'disk',
+                kind: 'alert',
+                importance: 'urgent',
+                subject: 'Disque plein',
+                facts: [],
+                at: T - 1000,
+            } as any,
+            T - 1000,
+        );
+        const r2 = await h2.composer.forMoment(inputs(h2));
+        assert.ok(r2, 'urgent la nuit → sort');
+        assert.strictEqual(r2.channel, 'notify', 'jamais parlé la nuit');
+        assert.strictEqual(h2.calls.speak.length, 0);
+        assert.strictEqual(h2.calls.notify.length, 1);
+
+        // Coucher porte ouverte la nuit → notification, pas l'enceinte.
+        const h3 = harness({
+            quiet: true,
+            llm: async () => 'La porte n’est pas verrouillée.',
+        });
+        const r3 = await h3.composer.forMoment(
+            inputs(h3, {
+                momentKind: 'moment-bedtime',
+                momentFacts: 'lumières éteintes',
+                situation: situation({ doorLocked: false }),
+            }),
+        );
+        assert.ok(r3, 'porte ouverte → sort même la nuit');
+        assert.strictEqual(r3.channel, 'notify');
+        assert.strictEqual(h3.calls.speak.length, 0);
     }
 
     // (e) Coucher : porte fermée sans fait → null ; porte ouverte → parle même sans retenu.
