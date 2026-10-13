@@ -20,7 +20,7 @@ async function run() {
     {
         const cfg = loadTvConfig();
         assert.strictEqual(cfg.chromecastInput, 'HDMI3');
-        assert.strictEqual(cfg.inputs.HDMI3, 'Chromecast');
+        assert.strictEqual(cfg.inputs.HDMI3, 'Shield');
         assert.ok(cfg.mac.length > 0);
     }
     // loadSmartThingsCreds → throw quand absent

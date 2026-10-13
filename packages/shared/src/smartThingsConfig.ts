@@ -65,11 +65,20 @@ export function mergeKnownInputs(
 const CREDS_FILE = 'smartthings.json';
 const TV_CONFIG_FILE = 'smartthings-tv.json';
 
+// L'entrée du lecteur (Shield) suit TV_CAST_INPUT, comme tv_prep.py côté
+// cast : avec le défaut HDMI3 figé, `withTvOn` basculait la TV sur l'ancien
+// dongle alors que le Shield est sur HDMI1 en prod (13/10/2026).
+const CAST_INPUT = process.env.TV_CAST_INPUT?.trim() || 'HDMI3';
 const DEFAULT_TV_CONFIG: TvConfig = {
     mac: 'D0:D0:03:30:48:4B',
     ip: '10.0.0.133',
-    chromecastInput: 'HDMI3',
-    inputs: { HDMI3: 'Chromecast', HDMI2: 'NintendoSwitch', dtv: 'TV' },
+    chromecastInput: CAST_INPUT,
+    inputs: {
+        [CAST_INPUT]: 'Shield',
+        ...(CAST_INPUT !== 'HDMI3' ? { HDMI3: 'Chromecast' } : {}),
+        HDMI2: 'NintendoSwitch',
+        dtv: 'TV',
+    },
 };
 
 export function loadSmartThingsCreds(): SmartThingsCreds {
