@@ -14,9 +14,12 @@ import {
     ChromecastController,
     listMediaFiles,
     mediaFileNames,
+    SHOW_SERVICES,
+    type ShowService,
 } from './ChromecastController';
 import { LocalTizenBackend, loadTvConfig } from '@yui/shared';
 import { buildChromecastTools } from './tools';
+import { buildCatalog, resolveApp, type ShieldApp } from './shieldApps';
 import { handleCastApp } from './castAppHandler';
 import { FullyClient } from './FullyClient';
 import Logger from './logger';
@@ -31,8 +34,16 @@ const server = new Server(
     { capabilities: { tools: {} } },
 );
 
+// Catalogue des apps du Shield : connues + installées (ADB), rafraîchi au
+// démarrage puis toutes les 10 min ; sans ADB, les apps connues.
+let shieldCatalog: ShieldApp[] = buildCatalog([]);
+async function refreshShieldCatalog(): Promise<void> {
+    const installed = await chromecast.listInstalledPackages();
+    if (installed.length) shieldCatalog = buildCatalog(installed);
+}
+
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: buildChromecastTools(mediaFileNames()) };
+    return { tools: buildChromecastTools(mediaFileNames(), shieldCatalog) };
 });
 
 async function withTvOn<T>(cast: Promise<T>): Promise<T> {
@@ -128,6 +139,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 return { content: [{ type: 'text', text }] };
             }
 
+            case 'shield_launch': {
+                const query = String((args as any)?.app ?? '');
+                const app = resolveApp(query, shieldCatalog);
+                if (!app) {
+                    throw new McpError(
+                        ErrorCode.InvalidParams,
+                        `App inconnue : "${query}". Apps : ${shieldCatalog
+                            .map((a) => a.id)
+                            .join(', ')}`,
+                    );
+                }
+                const text = await withTvOn(
+                    chromecast.launchApp(app.package, app.label),
+                );
+                return { content: [{ type: 'text', text }] };
+            }
+
             case 'tv_media': {
                 const action = String((args as any).action);
                 return {
@@ -172,6 +200,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         },
                     ],
                 };
+            }
+
+            case 'search_shows': {
+                const query = String((args as any)?.query ?? '');
+                const hits = await chromecast.searchShows(query);
+                return {
+                    content: [{ type: 'text', text: JSON.stringify(hits) }],
+                };
+            }
+
+            case 'play_show': {
+                const a = (args ?? {}) as any;
+                const service = String(a.service ?? '') as ShowService;
+                const id = String(a.id ?? '').trim();
+                if (!SHOW_SERVICES.includes(service) || !id) {
+                    throw new McpError(
+                        ErrorCode.InvalidParams,
+                        `play_show : service (${SHOW_SERVICES.join(
+                            ', ',
+                        )}) et id requis`,
+                    );
+                }
+                const text = await withTvOn(
+                    chromecast.playShow(
+                        service,
+                        id,
+                        String(a.title ?? ''),
+                        a.autoplay !== false,
+                    ),
+                );
+                return { content: [{ type: 'text', text }] };
             }
 
             case 'find_show': {
@@ -282,6 +341,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
+    void refreshShieldCatalog();
+    setInterval(() => void refreshShieldCatalog(), 10 * 60 * 1000).unref?.();
     const transport = new StdioServerTransport();
     await server.connect(transport);
     Logger.info('mcp-chromecast server running on stdio');

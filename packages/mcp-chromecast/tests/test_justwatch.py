@@ -9,17 +9,17 @@ PREF = ['crunchyroll', 'netflix', 'disney', 'prime']
 EDGES_ONE_PIECE = [
     {'node': {'content': {'title': 'One Piece'}, 'offers': [
         {'standardWebURL': 'https://www.netflix.com/title/80107103',
-         'package': {'shortName': 'nfx'}},
+         'package': {'technicalName': 'netflix'}},
     ]}},
     {'node': {'content': {'title': 'One Piece'}, 'offers': [
         {'standardWebURL': 'https://www.crunchyroll.com/series/GR3VWXP96/one-piece',
-         'package': {'shortName': 'cru'}},
+         'package': {'technicalName': 'crunchyroll'}},
         {'standardWebURL': 'https://www.netflix.com/title/80107103',
-         'package': {'shortName': 'nfx'}},
+         'package': {'technicalName': 'netflix'}},
     ]}},
     {'node': {'content': {'title': 'Autre chose'}, 'offers': [
         {'standardWebURL': 'https://www.crunchyroll.com/series/GZZZZ/autre',
-         'package': {'shortName': 'cru'}},
+         'package': {'technicalName': 'crunchyroll'}},
     ]}},
 ]
 
@@ -65,3 +65,29 @@ if __name__ == '__main__':
     if failures:
         sys.exit(1)
     print('All justwatch tests passed')
+
+
+def test_extract_id_crunchyroll_keeps_episode_kind():
+    assert jw._extract_id('crunchyroll', 'https://www.crunchyroll.com/series/GR3VWXP96/one-piece') == 'GR3VWXP96'
+    assert jw._extract_id('crunchyroll', 'https://www.crunchyroll.com/watch/GE00380778JAJP') == 'episode/GE00380778JAJP'
+    assert jw._extract_id('crunchyroll', 'https://www.crunchyroll.com/fr/watch/GRWEW95KR/ep') == 'episode/GRWEW95KR'
+
+
+def test_parse_all_lists_every_service_and_dedupes():
+    edges = [
+        {'node': {'objectType': 'SHOW', 'content': {'title': 'One Piece', 'originalReleaseYear': 1999}, 'offers': [
+            {'standardWebURL': 'https://www.netflix.com/title/80107103', 'package': {'technicalName': 'netflix'}},
+            {'standardWebURL': 'https://www.crunchyroll.com/watch/GE00380778JAJP', 'package': {'technicalName': 'crunchyroll'}},
+            {'standardWebURL': 'https://www.crunchyroll.com/watch/GE00380778JAJP', 'package': {'technicalName': 'crunchyroll'}},
+            {'standardWebURL': 'https://x', 'package': {'technicalName': 'amazoncrunchyroll'}},
+        ]}},
+        {'node': {'objectType': 'MOVIE', 'content': {'title': 'One Piece Film - Red', 'originalReleaseYear': 2022}, 'offers': [
+            {'standardWebURL': 'https://www.crunchyroll.com/series/GRMG8ZQZR', 'package': {'technicalName': 'crunchyroll'}},
+        ]}},
+    ]
+    assert jw.parse_all(edges) == [
+        {'service': 'netflix', 'id': '80107103', 'title': 'One Piece', 'year': 1999, 'type': 'show'},
+        {'service': 'crunchyroll', 'id': 'episode/GE00380778JAJP', 'title': 'One Piece', 'year': 1999, 'type': 'show'},
+        {'service': 'crunchyroll', 'id': 'GRMG8ZQZR', 'title': 'One Piece Film - Red', 'year': 2022, 'type': 'movie'},
+    ]
+    assert jw.parse_all([]) == []

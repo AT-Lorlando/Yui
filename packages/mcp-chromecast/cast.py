@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import content_cache
 import dial
+import justwatch
 import tv_prep
 
 if len(sys.argv) < 4:
@@ -86,6 +87,25 @@ def cmd_youtube(source: str | None) -> str:
     return f'YouTube: {title or vid_id}'
 
 
+def cmd_launch_id(service: str, content_id: str, label: str | None) -> str:
+    """Lance *content_id* (déjà résolu) sur *service* : DIAL deep-link,
+    repli Cast SDK play_media si l'app n'est pas inscrite en DIAL."""
+    # Crunchyroll : `episode/<id>` (nature gardée pour le Shield) → DIAL
+    # ne veut que l'id.
+    dial_id = content_id.rsplit('/', 1)[-1] if service == 'crunchyroll' else content_id
+    result = dial.launch(HOST, service, dial_id)
+    if 'HTTP 404' in result:
+        # DIAL doesn't know this app — fall back to Cast SDK media_controller.
+        try:
+            cast = _connect_cast()
+            cast.media_controller.play_media(content_id, 'video/mp4')
+            cast.media_controller.block_until_active(timeout=8)
+            return f'Cast SDK: {service} → {label} (id={content_id})'
+        except Exception as exc:
+            return f'{result} — Cast SDK fallback failed: {exc}'
+    return f'{result} ({label})'
+
+
 def cmd_service(service: str, title: str | None) -> str:
     """Named service: resolve content ID via cache/JustWatch, then launch.
 
@@ -98,18 +118,7 @@ def cmd_service(service: str, title: str | None) -> str:
     content_id, full_title = content_cache.resolve(service, title)
 
     if content_id:
-        result = dial.launch(HOST, service, content_id)
-        label = full_title or title
-        if 'HTTP 404' in result:
-            # DIAL doesn't know this app — fall back to Cast SDK media_controller.
-            try:
-                cast = _connect_cast()
-                cast.media_controller.play_media(content_id, 'video/mp4')
-                cast.media_controller.block_until_active(timeout=8)
-                return f'Cast SDK: {service} → {label} (id={content_id})'
-            except Exception as exc:
-                return f'{result} — Cast SDK fallback failed: {exc}'
-        return f'{result} ({label})'
+        return cmd_launch_id(service, content_id, full_title or title)
 
     # No content ID — open the app only.
     if title:
@@ -179,6 +188,13 @@ def main() -> None:
         print(_json.dumps({'platform': service, 'id': cid, 'title': full_title}))
         return
 
+    if CMD == 'search':
+        # Plusieurs résultats (titre × plateforme) pour un choix dans l'app.
+        import json as _json
+        query = sys.argv[4] if len(sys.argv) > 4 else ''
+        print(_json.dumps(justwatch.search_all(query) if query else []))
+        return
+
     if CMD == 'prep':
         # TV on + bonne entrée HDMI, sans rien caster — utilisé par le chemin
         # ADB (Prime/Fully) qui ne passe plus par les commandes de cast.
@@ -215,6 +231,14 @@ def main() -> None:
     elif CMD in _NAMED_SERVICES:
         title = sys.argv[4] if len(sys.argv) > 4 else None
         print(cmd_service(CMD, title))
+
+    elif CMD == 'launchid':
+        # <service> <id> [label] — id déjà choisi (préréglage « Lancer un titre »).
+        if len(sys.argv) < 6 or sys.argv[4] not in _NAMED_SERVICES:
+            print('ERROR: launchid requires <service> <id> [label]', file=sys.stderr)
+            sys.exit(1)
+        label = sys.argv[6] if len(sys.argv) > 6 else None
+        print(cmd_launch_id(sys.argv[4], sys.argv[5], label))
 
     elif CMD == 'media':
         if len(sys.argv) < 5:

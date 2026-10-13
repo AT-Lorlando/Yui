@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { dataPath } from '@yui/shared';
 import Logger from './logger';
+import { parsePackages } from './shieldApps';
 
 const CAST_SCRIPT = path.join(__dirname, '..', 'cast.py');
 const ATV_SCRIPT = path.join(__dirname, '..', 'atv_launch.py');
@@ -15,6 +16,13 @@ const FULLY_PACKAGE = process.env.FULLY_PACKAGE ?? 'de.ozerov.fully';
 const PRIME_PACKAGE =
     process.env.PRIME_PACKAGE ?? 'com.amazon.amazonvideo.livingroom';
 const MOONLIGHT_PACKAGE = process.env.MOONLIGHT_PACKAGE ?? 'com.limelight';
+// Apps natives du Shield pour les cast_* historiques (13/10/2026) : la fiche
+// s'ouvre dans l'app (deep-link JustWatch, comme Prime) au lieu du receiver
+// Cast — repli sur le cast quand le lien manque ou qu'ADB est absent.
+const NETFLIX_PACKAGE = 'com.netflix.ninja';
+const YOUTUBE_PACKAGE = 'com.google.android.youtube.tv';
+const CRUNCHYROLL_PACKAGE = 'com.crunchyroll.crunchyroid';
+const DISNEY_PACKAGE = 'com.disney.disneyplus';
 
 // ── Lancement d'apps sur l'Android TV ────────────────────────────────────────
 // Deux transports, du plus fiable au moins fiable :
@@ -127,12 +135,17 @@ async function ensureShieldReady(): Promise<void> {
     }
 }
 
+// Une cible « URI » (https://, crunchyroll://…) part en intent VIEW ; sinon
+// c'est un package à lancer tel quel.
+const isUri = (target: string): boolean =>
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(target);
+
 async function adbLaunch(target: string, pkg?: string): Promise<string> {
     await ensureShieldReady();
     // Épingler le package est indispensable pour les liens que l'app link ne
     // couvre pas (ex. primevideo /watch) : sans lui, `am start` résout sur le
     // launcher et il ne se passe rien.
-    const args = target.startsWith('http')
+    const args = isUri(target)
         ? [
               '-s',
               ATV_ADB_HOST,
@@ -156,7 +169,7 @@ async function adbLaunch(target: string, pkg?: string): Promise<string> {
               'android.intent.category.LAUNCHER',
               '1',
           ];
-    const wanted = pkg ?? (target.startsWith('http') ? '' : target);
+    const wanted = pkg ?? (isUri(target) ? '' : target);
     for (let attempt = 0; attempt < 3; attempt++) {
         const out = await execAdb(args);
         // `am start` sort en 0 même sur échec — l'erreur est dans la sortie.
@@ -266,6 +279,57 @@ async function nudgePrimeProfile(): Promise<void> {
 }
 
 /** ADB si configuré, sinon (ou en cas d'échec ADB) Android TV Remote. */
+export type ShowService = 'netflix' | 'crunchyroll' | 'disney' | 'prime';
+export const SHOW_SERVICES: ShowService[] = [
+    'netflix',
+    'crunchyroll',
+    'disney',
+    'prime',
+];
+const SHOW_PACKAGE: Record<ShowService, string> = {
+    netflix: NETFLIX_PACKAGE,
+    crunchyroll: CRUNCHYROLL_PACKAGE,
+    disney: DISNEY_PACKAGE,
+    prime: PRIME_PACKAGE,
+};
+
+/**
+ * URL/URI à ouvrir dans l'app native du Shield pour un id résolu
+ * (justwatch.py) — null si le service n'a pas de lien natif fiable.
+ * `autoplay` : lecture directe plutôt que la fiche — honoré par Netflix
+ * (`/watch` reprend où on en était) ; Prime reste sur la fiche (`/watch`
+ * relançait S1E1, vécu sur Mentalist) et Crunchyroll ouvre ce que JustWatch
+ * a donné (série → fiche, épisode → lecteur).
+ */
+export function nativeUrl(
+    service: ShowService,
+    id: string,
+    autoplay: boolean,
+): string | null {
+    if (service === 'netflix')
+        return `https://www.netflix.com/${autoplay ? 'watch' : 'title'}/${id}`;
+    // L'app Android TV ne déclare que son schéma propre (pas d'app link
+    // https). Un id d'épisode arrive préfixé `episode/` (justwatch.py) ; un
+    // id nu de 9 caractères est une série, sinon un épisode (vieux caches).
+    if (service === 'crunchyroll') {
+        if (id.includes('/')) return `crunchyroll://${id}`;
+        return /^G[A-Z0-9]{8}$/i.test(id)
+            ? `crunchyroll://series/${id}`
+            : `crunchyroll://episode/${id}`;
+    }
+    // Prime : l'id EST le deep-link de la fiche.
+    if (service === 'prime') return isUri(id) ? id : null;
+    return null;
+}
+
+export interface ShowHit {
+    service: ShowService;
+    id: string;
+    title: string;
+    year: number | null;
+    type: 'show' | 'movie';
+}
+
 async function launchOnTv(
     target: string,
     expectedPkg: string,
@@ -302,7 +366,8 @@ function run(args: string[]): Promise<string> {
 }
 
 // Lance atv_launch.py <host> <cert> <key> <package|url> [pkg attendu]
-// (Android TV Remote v2). La cible peut être un app link https:// — Android
+// (Android TV Remote v2). La cible peut être un app link https:// ou un
+// schéma propre (crunchyroll://) — Android
 // résout l'intent (deep-link Prime, etc.).
 function runAtv(target: string, expectedPkg?: string): Promise<string> {
     const cert = dataPath('atv-cert.pem');
@@ -413,26 +478,121 @@ export function listMediaFiles(
 // ── ChromecastController ───────────────────────────────────────────────────────
 
 export class ChromecastController {
+    /** Packages tiers installés sur le Shield (vide sans ADB). */
+    async listInstalledPackages(): Promise<string[]> {
+        if (!ATV_ADB_HOST) return [];
+        try {
+            await adbConnect();
+            const out = await adbShell(
+                ['pm', 'list', 'packages', '-3'],
+                10_000,
+            );
+            return parsePackages(out);
+        } catch (e) {
+            Logger.warn(`listInstalledPackages: ${e}`);
+            return [];
+        }
+    }
+
+    /** Ouvre une app du Shield (TV allumée + HDMI en parallèle). */
+    async launchApp(pkg: string, label = pkg): Promise<string> {
+        Logger.info(`Shield: launch ${label} (${pkg})`);
+        const [, result] = await Promise.all([
+            run(['prep']).catch(() => {}),
+            launchOnTv(pkg, pkg),
+        ]);
+        return result;
+    }
+
+    /**
+     * Service de streaming : app native du Shield d'abord (fiche du titre via
+     * le lien JustWatch, ou l'app seule), cast en repli — lien introuvable
+     * avec un titre, ADB absent, ou lancement raté.
+     */
+    private async nativeOrCast(
+        service: 'netflix' | 'crunchyroll' | 'disney',
+        pkg: string,
+        title: string | undefined,
+    ): Promise<string> {
+        const castFallback = () =>
+            title ? run([service, title]) : run([service]);
+        if (!ATV_ADB_HOST) return castFallback();
+        const toUrl = (id: string) => nativeUrl(service, id, false);
+        if (title && service === 'disney') return castFallback();
+        Logger.info(`Shield: ${service}${title ? ` "${title}"` : ''} (natif)`);
+        const prep = run(['prep']).catch(() => {});
+        let link = '';
+        if (title) {
+            const out = await run(['link', service, title]).catch(() => '');
+            const last =
+                out
+                    .split('\n')
+                    .map((l) => l.trim())
+                    .filter((l) => l.startsWith('LINK:'))
+                    .pop() ?? 'LINK:';
+            const id = last.slice(5);
+            link = id ? toUrl(id) ?? '' : '';
+            if (!link) {
+                Logger.info(
+                    `Shield: pas de lien ${service} pour "${title}" → cast`,
+                );
+                await prep;
+                return castFallback();
+            }
+        }
+        try {
+            const [, result] = await Promise.all([
+                prep,
+                launchOnTv(link || pkg, pkg),
+            ]);
+            return result;
+        } catch (e) {
+            Logger.warn(`Shield: ${service} natif KO (${e}) → cast`);
+            return castFallback();
+        }
+    }
+
     castYoutube(source?: string): Promise<string> {
         Logger.info(
             `Chromecast: youtube${source ? ` "${source}"` : ' (browse)'}`,
         );
+        if (ATV_ADB_HOST) {
+            // App native sans source ; lien direct si URL/id ; recherche
+            // libre → cast (le receiver sait chercher, l'app non).
+            if (!source) return this.launchApp(YOUTUBE_PACKAGE, 'YouTube');
+            const id =
+                /(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/)([A-Za-z0-9_-]{11})/.exec(
+                    source,
+                )?.[1] ?? (/^[A-Za-z0-9_-]{11}$/.test(source) ? source : '');
+            if (id) {
+                return (async () => {
+                    const [, result] = await Promise.all([
+                        run(['prep']).catch(() => {}),
+                        launchOnTv(
+                            `https://www.youtube.com/watch?v=${id}`,
+                            YOUTUBE_PACKAGE,
+                        ),
+                    ]);
+                    return result;
+                })().catch((e) => {
+                    Logger.warn(`Shield: youtube natif KO (${e}) → cast`);
+                    return run(['youtube', source]);
+                });
+            }
+        }
         return source ? run(['youtube', source]) : run(['youtube']);
     }
 
     castNetflix(title?: string): Promise<string> {
-        Logger.info(`Chromecast: netflix${title ? ` "${title}"` : ''}`);
-        return title ? run(['netflix', title]) : run(['netflix']);
+        return this.nativeOrCast('netflix', NETFLIX_PACKAGE, title);
     }
 
     castCrunchyroll(title?: string): Promise<string> {
-        Logger.info(`Chromecast: crunchyroll${title ? ` "${title}"` : ''}`);
-        return title ? run(['crunchyroll', title]) : run(['crunchyroll']);
+        return this.nativeOrCast('crunchyroll', CRUNCHYROLL_PACKAGE, title);
     }
 
     castDisney(title?: string): Promise<string> {
-        Logger.info(`Chromecast: disney${title ? ` "${title}"` : ''}`);
-        return title ? run(['disney', title]) : run(['disney']);
+        return this.nativeOrCast('disney', DISNEY_PACKAGE, title);
     }
 
     async castPrime(title?: string): Promise<string> {
@@ -466,6 +626,54 @@ export class ChromecastController {
         // fond pour ne pas retarder la réponse.
         void nudgePrimeProfile();
         return result;
+    }
+
+    /** Résultats JustWatch (titre × plateforme) pour le choix dans l'app. */
+    async searchShows(query: string): Promise<ShowHit[]> {
+        const q = query.trim();
+        if (!q) return [];
+        Logger.info(`Chromecast: search_shows "${q}"`);
+        const out = await run(['search', q]);
+        const lastLine =
+            out
+                .split('\n')
+                .map((l) => l.trim())
+                .filter((l) => l.startsWith('['))
+                .pop() ?? '[]';
+        return JSON.parse(lastLine);
+    }
+
+    /**
+     * Lance un titre déjà choisi (préréglage « Lancer un titre ») : app
+     * native du Shield avec le lien du service, sinon cast DIAL/SDK par id.
+     */
+    async playShow(
+        service: ShowService,
+        id: string,
+        title: string,
+        autoplay: boolean,
+    ): Promise<string> {
+        const label = title || id;
+        const castFallback = () => run(['launchid', service, id, label]);
+        const url = ATV_ADB_HOST ? nativeUrl(service, id, autoplay) : null;
+        if (!url) return castFallback();
+        Logger.info(
+            `Shield: ${service} "${label}" ${
+                autoplay ? 'lecture' : 'fiche'
+            } (natif)`,
+        );
+        const prep = run(['prep']).catch(() => {});
+        try {
+            const [, result] = await Promise.all([
+                prep,
+                launchOnTv(url, SHOW_PACKAGE[service]),
+            ]);
+            if (service === 'prime') void nudgePrimeProfile();
+            return result;
+        } catch (e) {
+            Logger.warn(`Shield: ${service} natif KO (${e}) → cast`);
+            return castFallback();
+        }
     }
 
     async findShow(title: string): Promise<{

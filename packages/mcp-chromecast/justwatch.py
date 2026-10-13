@@ -30,7 +30,7 @@ SUPPORTED_SERVICES = list(_PROVIDER_TECH.keys())
 
 # Extraction du content ID depuis standardWebURL.
 _NETFLIX_ID = re.compile(r'netflix\.com/(?:title|watch)/(\d+)')
-_CRUNCHY_ID = re.compile(r'crunchyroll\.com/(?:series|watch)/([A-Z0-9]+)', re.I)
+_CRUNCHY_ID = re.compile(r'crunchyroll\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?(series|watch)/([A-Z0-9]+)', re.I)
 _DISNEY_ID = re.compile(r'disneyplus\.com/(?:[^/?#]+/){1,3}([^/?&#]+)')
 
 
@@ -47,8 +47,15 @@ def _extract_id(service: str, url: str) -> str | None:
         m = _NETFLIX_ID.search(url)
         return m.group(1) if m else None
     if service == 'crunchyroll':
+        # JustWatch rend tantôt la série (/series/<id>), tantôt un épisode
+        # (/watch/<id>). L'app Android TV les ouvre par des routes
+        # différentes : on garde la nature (`episode/<id>`), le cast DIAL ne
+        # prend que l'id (cf. cast.py).
         m = _CRUNCHY_ID.search(url)
-        return m.group(1) if m else None
+        if not m:
+            return None
+        kind, cid = m.group(1).lower(), m.group(2)
+        return cid if kind == 'series' else f'episode/{cid}'
     if service == 'disney':
         m = _DISNEY_ID.search(url)
         return m.group(1) if m else None
@@ -76,6 +83,7 @@ query GetSearchTitles($searchTitlesFilter: TitleFilter!, $country: Country!, $la
           objectType
           content(country: $country, language: $language) {
             title
+            originalReleaseYear
           }
           offers(country: $country, platform: WEB, filter: { monetizationTypes: [FLATRATE] }) {
             standardWebURL
@@ -89,21 +97,21 @@ query GetSearchTitles($searchTitlesFilter: TitleFilter!, $country: Country!, $la
 '''
 
 
-def _variables(title: str) -> dict:
+def _variables(title: str, first: int = 4) -> dict:
     return {
         'searchTitlesFilter': {'searchQuery': title},
         'country': 'FR',
         'language': 'fr',
-        'first': 4,
+        'first': first,
     }
 
 
-def _search(title: str) -> list:
+def _search(title: str, first: int = 4) -> list:
     """Interroge JustWatch et renvoie la liste d'edges, ou [] en cas d'erreur."""
     try:
         resp = requests.post(
             _API,
-            json={'query': _QUERY, 'variables': _variables(title)},
+            json={'query': _QUERY, 'variables': _variables(title, first)},
             headers=_HEADERS,
             timeout=10,
         )
@@ -163,6 +171,43 @@ def parse_any(edges: list, preference: list, title: str) -> tuple[str | None, st
             cid, ft = found[service]
             return service, cid, ft
     return None, None, None
+
+
+def parse_all(edges: list) -> list[dict]:
+    """Tous les couples (titre, plateforme) exploitables, pour un choix dans
+    l'app : [{service, id, title, year, type}], dédoublonnés par (service, id),
+    dans l'ordre de pertinence JustWatch. Pur."""
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for edge in edges or []:
+        node = edge.get('node', {}) or {}
+        content = node.get('content', {}) or {}
+        node_title = (content.get('title') or '').strip()
+        if not node_title:
+            continue
+        year = content.get('originalReleaseYear')
+        kind = 'movie' if node.get('objectType') == 'MOVIE' else 'show'
+        for offer in node.get('offers', []) or []:
+            tech = (offer.get('package', {}) or {}).get('technicalName')
+            service = _SERVICE_BY_TECH.get(tech)
+            if not service:
+                continue
+            cid = _extract_id(service, offer.get('standardWebURL', ''))
+            if not cid or (service, cid) in seen:
+                continue
+            seen.add((service, cid))
+            out.append({
+                'service': service,
+                'id': cid,
+                'title': node_title,
+                'year': year,
+                'type': kind,
+            })
+    return out
+
+
+def search_all(title: str, first: int = 8) -> list[dict]:
+    return parse_all(_search(title, first))
 
 
 def find_on_service(title: str, service: str) -> tuple[str | None, str | None]:

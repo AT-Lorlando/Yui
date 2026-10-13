@@ -26,7 +26,7 @@ async def main() -> int:
     host, cert, key, target = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
     # Confirmation du 1er plan : package explicite, ou la cible si c'en est un.
     expected = sys.argv[5] if len(sys.argv) > 5 else (
-        None if target.startswith('http') else target
+        None if '://' in target else target
     )
 
     remote = AndroidTVRemote("Yui", cert, key, host)

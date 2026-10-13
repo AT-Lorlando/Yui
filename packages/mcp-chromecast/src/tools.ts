@@ -1,3 +1,4 @@
+import { buildCatalog, shieldLaunchTool, type ShieldApp } from './shieldApps';
 import { CAST_APP_TOOL } from './castAppHandler';
 
 export const CHROMECAST_TOOLS = [
@@ -151,6 +152,56 @@ export const CHROMECAST_TOOLS = [
         },
     },
     {
+        name: 'search_shows',
+        description:
+            'Recherche JustWatch : plusieurs résultats (titre × plateforme) ' +
+            "pour choisir un titre précis dans l'app. Renvoie " +
+            '[{service, id, title, year, type}].',
+        inputSchema: {
+            type: 'object' as const,
+            'x-audience': ['app'],
+            properties: {
+                query: {
+                    type: 'string',
+                    title: 'Recherche',
+                    description: 'Titre à chercher',
+                },
+            },
+            required: ['query'],
+        },
+    },
+    {
+        name: 'play_show',
+        description:
+            'Lancer un titre déjà choisi (résultat de search_shows) sur la TV : ' +
+            'app native du Shield, cast en repli. autoplay = lecture directe ' +
+            '(Netflix reprend où on en était) plutôt que la fiche.',
+        inputSchema: {
+            type: 'object' as const,
+            'x-audience': ['app'],
+            properties: {
+                service: {
+                    type: 'string',
+                    title: 'Plateforme',
+                    enum: ['netflix', 'crunchyroll', 'disney', 'prime'],
+                },
+                id: {
+                    type: 'string',
+                    title: 'Identifiant',
+                    description: 'Id du contenu tel que rendu par search_shows',
+                },
+                title: { type: 'string', title: 'Titre' },
+                autoplay: {
+                    type: 'boolean',
+                    title: 'Lancer la lecture',
+                    description:
+                        'true = lecture directe (reprise), false = fiche du titre',
+                },
+            },
+            required: ['service', 'id'],
+        },
+    },
+    {
         name: 'remember_show',
         description:
             'Mémoriser sur quelle plateforme se trouve une série/film/animé, pour les prochaines fois. ' +
@@ -253,15 +304,18 @@ export const CHROMECAST_TOOLS = [
  * actually on disk. Built per tools/list call (a readdir is cheap) so dropping
  * a new wallpaper in assets/media shows up without restarting the server.
  */
-export function buildChromecastTools(media: {
-    wallpapers: string[];
-    videos: string[];
-}) {
+export function buildChromecastTools(
+    media: {
+        wallpapers: string[];
+        videos: string[];
+    },
+    shieldApps: ShieldApp[] = buildCatalog([]),
+) {
     const files: Record<string, string[]> = {
         cast_wallpaper: media.wallpapers,
         cast_video: media.videos,
     };
-    return CHROMECAST_TOOLS.map((tool) => {
+    return [...CHROMECAST_TOOLS, shieldLaunchTool(shieldApps)].map((tool) => {
         const values = files[tool.name];
         if (!values?.length) return tool;
         const props = tool.inputSchema.properties as Record<string, unknown>;
