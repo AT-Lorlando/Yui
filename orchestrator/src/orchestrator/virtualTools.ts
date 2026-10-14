@@ -51,6 +51,36 @@ export function setSecretaryBriefProvider(
     secretaryBriefProvider = fn;
 }
 
+// Ordres de lecture du courrier (mail_watch) — câblé par main.ts sur le
+// moteur proactif ; `null` tant qu'il n'est pas monté.
+let mailWatchProvider:
+    | ((text: string, days: number) => Promise<string>)
+    | null = null;
+
+export function setMailWatchProvider(
+    fn: (text: string, days: number) => Promise<string>,
+): void {
+    mailWatchProvider = fn;
+}
+
+export const MAIL_WATCH_TEXT_MIN = 5;
+export const MAIL_WATCH_TEXT_MAX = 300;
+export const MAIL_WATCH_DAYS_MIN = 1;
+export const MAIL_WATCH_DAYS_MAX = 60;
+export const MAIL_WATCH_DAYS_DEFAULT = 14;
+
+/** Durée d'un ordre bornée à 1–60 jours (entier), 14 par défaut. Pur. */
+export function mailWatchDays(value: unknown): number {
+    const n = typeof value === 'string' ? Number(value) : value;
+    if (typeof n !== 'number' || !Number.isFinite(n)) {
+        return MAIL_WATCH_DAYS_DEFAULT;
+    }
+    return Math.min(
+        MAIL_WATCH_DAYS_MAX,
+        Math.max(MAIL_WATCH_DAYS_MIN, Math.round(n)),
+    );
+}
+
 export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
     return [
         {
@@ -349,6 +379,33 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
                                 'today = agenda du jour, pending = ce qui attend une action. Omis = depuis le dernier point.',
                         },
                     },
+                },
+            },
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'mail_watch',
+                description:
+                    "Demande à la secrétaire de guetter un mail précis et de prévenir quand il arrive (réponse de quelqu'un, offre, promo ciblée…)",
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        text: {
+                            type: 'string',
+                            minLength: MAIL_WATCH_TEXT_MIN,
+                            maxLength: MAIL_WATCH_TEXT_MAX,
+                            description:
+                                "Ce qu'il faut guetter, en une phrase (ex. « J'attends une réponse de Michel sur le devis »).",
+                        },
+                        days: {
+                            type: 'number',
+                            minimum: MAIL_WATCH_DAYS_MIN,
+                            maximum: MAIL_WATCH_DAYS_MAX,
+                            description: 'Durée de guet en jours (défaut 14).',
+                        },
+                    },
+                    required: ['text'],
                 },
             },
         },
@@ -651,6 +708,42 @@ export async function handleVirtualTool(
                 return {
                     id: toolCall.id,
                     content: `La secrétaire n'a pas pu faire le point : ${message}`,
+                };
+            }
+        }
+
+        case 'mail_watch': {
+            if (!mailWatchProvider) {
+                return {
+                    id: toolCall.id,
+                    content: "La secrétaire n'est pas disponible.",
+                };
+            }
+            const text = typeof args.text === 'string' ? args.text.trim() : '';
+            if (
+                text.length < MAIL_WATCH_TEXT_MIN ||
+                text.length > MAIL_WATCH_TEXT_MAX
+            ) {
+                return {
+                    id: toolCall.id,
+                    content: `Le texte à guetter doit faire entre ${MAIL_WATCH_TEXT_MIN} et ${MAIL_WATCH_TEXT_MAX} caractères.`,
+                };
+            }
+            try {
+                return {
+                    id: toolCall.id,
+                    content: await mailWatchProvider(
+                        text,
+                        mailWatchDays(args.days),
+                    ),
+                };
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                Logger.warn(`mail_watch en échec: ${message}`);
+                return {
+                    id: toolCall.id,
+                    content: `Je n'ai pas pu enregistrer ce guet : ${message}`,
                 };
             }
         }

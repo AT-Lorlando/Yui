@@ -3,6 +3,7 @@ import {
     getVirtualTools,
     handleVirtualTool,
     setSecretaryBriefProvider,
+    setMailWatchProvider,
 } from './virtualTools';
 
 // notify_user : le LLM peut pousser une notification FCM (le _notify des
@@ -51,6 +52,65 @@ async function run(): Promise<void> {
     assert.ok(
         failing?.content.startsWith("La secrétaire n'a pas pu faire le point"),
         `contenu inattendu: ${failing?.content}`,
+    );
+
+    // mail_watch : exposé au LLM (pas de x-audience), texte requis.
+    const mw = tools.find((x) => x.function.name === 'mail_watch');
+    assert.ok(mw, 'mail_watch doit être exposé au LLM');
+    const mwParams = mw!.function.parameters as any;
+    assert.deepStrictEqual(mwParams.required, ['text']);
+    assert.strictEqual(mwParams['x-audience'], undefined);
+    const watch = (args: Record<string, unknown>) =>
+        handleVirtualTool({
+            id: 'call-w',
+            type: 'function',
+            function: { name: 'mail_watch', arguments: JSON.stringify(args) },
+        } as any);
+    assert.strictEqual(
+        (await watch({ text: 'Réponse de Michel' }))?.content,
+        "La secrétaire n'est pas disponible.",
+    );
+    const calls: Array<[string, number]> = [];
+    setMailWatchProvider(async (text, days) => {
+        calls.push([text, days]);
+        return `ok ${days}`;
+    });
+    assert.strictEqual(
+        (await watch({ text: '  Réponse de Michel  ' }))?.content,
+        'ok 14',
+    );
+    assert.deepStrictEqual(calls[0], ['Réponse de Michel', 14], 'défaut 14 j');
+    await watch({ text: 'Offre DevOps', days: 200 });
+    await watch({ text: 'Offre DevOps', days: 0 });
+    await watch({ text: 'Offre DevOps', days: 'abc' });
+    await watch({ text: 'Offre DevOps', days: 7.6 });
+    assert.deepStrictEqual(
+        calls.slice(1).map((c) => c[1]),
+        [60, 1, 14, 8],
+        'jours bornés 1–60',
+    );
+    const n = calls.length;
+    const short = await watch({ text: 'abc' });
+    const long = await watch({ text: 'x'.repeat(301) });
+    const none = await watch({});
+    assert.strictEqual(
+        calls.length,
+        n,
+        'texte invalide : provider jamais appelé',
+    );
+    for (const r of [short, long, none]) {
+        assert.ok(
+            r?.content.includes('5 et 300'),
+            `message de validation attendu: ${r?.content}`,
+        );
+    }
+    setMailWatchProvider(async () => {
+        throw new Error("Trop d'ordres actifs (maximum 40)");
+    });
+    const err = await watch({ text: 'Réponse de Michel' });
+    assert.ok(
+        err?.content.includes("Trop d'ordres actifs"),
+        `erreur relayée au LLM: ${err?.content}`,
     );
 
     console.log('All notifyTool tests passed');
