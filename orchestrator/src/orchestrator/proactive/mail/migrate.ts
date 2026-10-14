@@ -1,6 +1,9 @@
 import * as fs from 'fs';
 import {
+    matchesFrom,
     newKeepSender,
+    PUBLIC_DOMAINS,
+    unsafeMatchReason,
     newSpamSender,
     type KeepSender,
     type SendersFile,
@@ -71,25 +74,6 @@ export const READ_ALWAYS_CATEGORIES = new Set([
     'perso',
 ]);
 
-const PUBLIC_DOMAINS = new Set([
-    'gmail.com',
-    'googlemail.com',
-    'outlook.com',
-    'hotmail.com',
-    'live.com',
-    'yahoo.com',
-    'yahoo.fr',
-    'icloud.com',
-    'me.com',
-    'free.fr',
-    'orange.fr',
-    'wanadoo.fr',
-    'sfr.fr',
-    'laposte.net',
-    'proton.me',
-    'protonmail.com',
-]);
-
 /** Nom d'affichage : label de 2e niveau du domaine, majuscule initiale, ≤ 40 car. */
 export function nameFromMatch(match: string): string {
     const m = match.trim().toLowerCase();
@@ -154,18 +138,26 @@ export function migrateRulesToSenders(
     };
 
     const live: MailRule[] = [];
+    const exceptions: MailRule[] = [];
     for (const r of rules) {
+        // un match trop large (« bot », « gmail.com ») ne passerait pas la
+        // validation des listes : abandonné plutôt que de faire échouer tout
+        if (r.when.from && unsafeMatchReason(r.when.from)) {
+            dropped++;
+            continue;
+        }
         if (!r.confirmed) {
             if (r.origin === 'signal' && r.when.from) {
                 unknown.push({ match: r.when.from, proposed: 'spam' });
             }
             continue;
         }
-        if (r.then.category === null || !r.when.from) {
+        if (!r.when.from) {
             dropped++;
             continue;
         }
-        live.push(r);
+        if (r.then.category === null) exceptions.push(r);
+        else live.push(r);
     }
 
     // Pass 1 : règles d'expéditeur seul ; pass 2 : règles {from, subject}
@@ -204,6 +196,9 @@ export function migrateRulesToSenders(
         keep.push(k);
     }
 
+    // les osef de l'expéditeur seul, avant que le pass 2 n'en retire
+    const spamMatches = spam.map((s) => s.match);
+
     for (const r of live.filter((x) => x.when.subject)) {
         const match = r.when.from as string;
         const cat = r.then.category as string;
@@ -213,12 +208,16 @@ export function migrateRulesToSenders(
             continue;
         }
         if (!k) {
+            // Pas de règle d'expéditeur seul : en v2 le reste de ses mails
+            // allait au LLM (donc lu). Le garder en « lu par défaut » plutôt
+            // que de ranger en silence ce qui n'est pas le sujet de la règle.
             removeSpam(match);
             k = newKeepSender(
                 {
                     match,
                     name: uniqueName(nameFromMatch(match), taken),
-                    read: 'never',
+                    read: 'rules',
+                    readDefault: true,
                 },
                 r.createdAt,
             );
@@ -232,6 +231,55 @@ export function migrateRulesToSenders(
             subject: r.when.subject as string,
             read: READ_ALWAYS_CATEGORIES.has(cat),
         });
+        mergeStats(k, r);
+    }
+
+    // Pass 3 : exceptions v2 « pas du bruit » (then.category: null). En v2
+    // elles passaient AVANT une règle osef plus large (airbnb.com → promo
+    // sauf les réservations) ; perdues, ces mails finiraient à la corbeille.
+    // Couverte par un osef → expéditeur à garder (qui l'emporte sur osef) :
+    // expéditeur seul → toujours lu ; avec sujet → lu sur ce sujet, le reste
+    // rangé sans lecture. Non couverte → abandonnée (boîte de réception).
+    for (const r of exceptions) {
+        const match = r.when.from as string;
+        const covered = spamMatches.some((m) => matchesFrom(m, match));
+        let k = keepOf(match);
+        if (!covered) {
+            dropped++;
+            continue;
+        }
+        if (!k) {
+            removeSpam(match);
+            k = r.when.subject
+                ? newKeepSender(
+                      {
+                          match,
+                          name: uniqueName(nameFromMatch(match), taken),
+                          read: 'rules',
+                          readDefault: false,
+                      },
+                      r.createdAt,
+                  )
+                : newKeepSender(
+                      {
+                          match,
+                          name: uniqueName(nameFromMatch(match), taken),
+                          read: 'always',
+                      },
+                      r.createdAt,
+                  );
+            keep.push(k);
+        }
+        if (r.when.subject) {
+            if (k.read !== 'rules') {
+                k.readDefault = k.read === 'always';
+                k.read = 'rules';
+            }
+            (k.rules ??= []).push({
+                subject: r.when.subject,
+                read: true,
+            });
+        }
         mergeStats(k, r);
     }
 

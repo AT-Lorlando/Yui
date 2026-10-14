@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { MailRule } from './migrate';
 import { migrateRulesToSenders, nameFromMatch, readRulesFile } from './migrate';
+import { resolveSender, validateSendersFile } from './senders';
 
 let n = 0;
 function rule(
@@ -54,6 +55,7 @@ function run(): void {
     const { file, report } = migrateRulesToSenders(rules, 12345);
 
     assert.strictEqual(file.version, 3);
+    validateSendersFile(JSON.parse(JSON.stringify(file)));
     assert.deepStrictEqual(
         file.spam.map((s) => s.match),
         ['promo.shop.com', 'news.org', 'osef.net', 'bot.io'],
@@ -134,6 +136,102 @@ function run(): void {
     const y = r3.file.keep.find((k) => k.match === 'y.com')!;
     assert.deepStrictEqual(y.rules, [{ subject: 'deal', read: false }]);
     assert.strictEqual(y.readDefault, true);
+
+    // Exceptions v2 « pas du bruit » couvertes par un osef (cas de prod) :
+    // elles deviennent des expéditeurs à garder, pas des Yui/Spam.
+    const subj = 'réservation|reçu|facture';
+    const r4 = migrateRulesToSenders(
+        [
+            rule({ from: 'airbnb.com', subject: subj }, null),
+            rule({ from: 'comeup.com', subject: 'paiement|facture' }, null),
+            rule({ from: 'calendar-notification@google.com' }, null),
+            rule({ from: 'notifications@github.com' }, null), // non couverte
+            rule({ from: 'comeup.com' }, 'osef', { origin: 'correction' }),
+            rule({ from: 'google.com' }, 'osef', { origin: 'correction' }),
+            rule({ from: 'airbnb.com' }, 'promo', { origin: 'correction' }),
+        ],
+        1,
+    );
+    const keep4 = (m: string) => r4.file.keep.find((k) => k.match === m);
+    const air = keep4('airbnb.com')!;
+    assert.strictEqual(air.read, 'rules');
+    assert.strictEqual(air.readDefault, false);
+    assert.deepStrictEqual(air.rules, [{ subject: subj, read: true }]);
+    const come = keep4('comeup.com')!;
+    assert.strictEqual(come.read, 'rules');
+    assert.strictEqual(come.readDefault, false);
+    assert.deepStrictEqual(come.rules, [
+        { subject: 'paiement|facture', read: true },
+    ]);
+    assert.strictEqual(
+        keep4('calendar-notification@google.com')!.read,
+        'always',
+    );
+    assert.ok(!keep4('notifications@github.com'));
+    // google.com reste osef ; airbnb/comeup ne sont plus osef (le garder l'emporte)
+    assert.deepStrictEqual(
+        r4.file.spam.map((s) => s.match),
+        ['google.com'],
+    );
+    assert.strictEqual(r4.report.dropped, 1);
+    // verdicts : la réservation airbnb est lue, la promo rangée sans lecture
+    const f4 = r4.file;
+    const v1 = resolveSender(f4, {
+        from: 'Airbnb <automated@airbnb.com>',
+        subject: 'Votre réservation est confirmée',
+    });
+    assert.ok(v1.kind === 'keep' && v1.read);
+    const v2 = resolveSender(f4, {
+        from: 'Airbnb <discover@airbnb.com>',
+        subject: 'Idées de voyage',
+    });
+    assert.ok(v2.kind === 'keep' && !v2.read);
+    const v3 = resolveSender(f4, {
+        from: 'Google Agenda <calendar-notification@google.com>',
+        subject: 'Invitation',
+    });
+    assert.ok(v3.kind === 'keep' && v3.read);
+    assert.strictEqual(
+        resolveSender(f4, { from: 'x@google.com', subject: 'y' }).kind,
+        'spam',
+    );
+
+    // exception fusionnée dans un « à garder » existant de même match
+    const r5 = migrateRulesToSenders(
+        [
+            rule({ from: 'b.com' }, 'promo'),
+            rule({ from: 'b.com', subject: 'rdv' }, 'action'),
+            rule({ from: 'b.com', subject: 'facture' }, null),
+        ],
+        1,
+    );
+    assert.strictEqual(r5.file.keep.length, 1);
+    assert.deepStrictEqual(r5.file.keep[0].rules, [
+        { subject: 'rdv', read: true },
+        { subject: 'facture', read: true },
+    ]);
+    assert.deepStrictEqual(r5.file.spam, []);
+
+    // règle de sujet sans règle d'expéditeur seul → lu par défaut
+    const r6 = migrateRulesToSenders(
+        [
+            rule(
+                { from: 'noreply-accounts@google.com', subject: 'alerte' },
+                'securite',
+            ),
+        ],
+        1,
+    );
+    assert.strictEqual(r6.file.keep[0].read, 'rules');
+    assert.strictEqual(r6.file.keep[0].readDefault, true);
+
+    // match trop large : abandonné, la migration ne lève pas
+    const r7 = migrateRulesToSenders(
+        [rule({ from: 'gmail.com' }, 'promo'), rule({ from: 'bot' }, 'osef')],
+        1,
+    );
+    assert.deepStrictEqual(r7.file.spam, []);
+    assert.strictEqual(r7.report.dropped, 2);
 
     assert.strictEqual(
         nameFromMatch('trailmarguestaud@gmail.com'),

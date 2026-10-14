@@ -24,9 +24,15 @@ export const RULES_BACKUP_NAME = 'mail-rules.v2.bak.json';
 export function migrateMailRulesAtBoot(
     senders: Pick<SenderStore, 'exists' | 'replace'>,
     now: number,
-    rulesFile: string = dataPath('mail-rules.json'),
-    reportFile: string = dataPath('mail-migration.json'),
+    opts: {
+        rulesFile?: string;
+        reportFile?: string;
+        /** Inconnus du rapport → file « à trier » du courrier (spec §5). */
+        seedUnknown?: (entries: MigrationReport['unknown']) => void;
+    } = {},
 ): MigrationReport | null {
+    const rulesFile = opts.rulesFile ?? dataPath('mail-rules.json');
+    const reportFile = opts.reportFile ?? dataPath('mail-migration.json');
     if (senders.exists() || !fs.existsSync(rulesFile)) return null;
     try {
         const rules = readRulesFile(rulesFile);
@@ -38,6 +44,15 @@ export function migrateMailRulesAtBoot(
             rulesFile,
             path.join(path.dirname(rulesFile), RULES_BACKUP_NAME),
         );
+        if (report.unknown.length) {
+            try {
+                opts.seedUnknown?.(report.unknown);
+            } catch (e) {
+                Logger.warn(
+                    `courrier : inconnus de la migration non posés — ${e}`,
+                );
+            }
+        }
         Logger.info(
             `courrier : ${rules.length} règle(s) v2 migrée(s) — ${report.keep} à garder, ${report.spam} osef, ${report.dropped} abandonnée(s), ${report.unknown.length} à revoir`,
         );
