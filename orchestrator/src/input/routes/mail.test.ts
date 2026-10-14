@@ -5,7 +5,10 @@ import http from 'http';
 import os from 'os';
 import path from 'path';
 import { mailRoutes, type MailHandler } from './mail';
-import { NotFoundError } from '../../orchestrator/proactive/mail/errors';
+import {
+    BadRequestError,
+    NotFoundError,
+} from '../../orchestrator/proactive/mail/errors';
 import { SenderStore } from '../../orchestrator/proactive/mail/senders';
 import {
     addKeepSender,
@@ -75,6 +78,10 @@ async function run(): Promise<void> {
             seen.apply = { id, max };
             if (id === 'zz')
                 throw new NotFoundError('Expéditeur introuvable : zz');
+            if (id === 'sp')
+                throw new BadRequestError(
+                    "le rangement rétroactif n'existe que pour les expéditeurs à garder",
+                );
             return { matched: 1, applied: 1 };
         },
         mailUnknown: () => unknown,
@@ -205,6 +212,34 @@ async function run(): Promise<void> {
     assert.ok(senders.keep().some((k) => k.match === 'dup@y.fr'));
     senders.remove(senders.keep().find((k) => k.match === 'dup@y.fr')!.id);
 
+    // match trop large : domaine grand public nu ou sans « . » ni « @ » → 400
+    for (const [path, body] of [
+        ['/mail/senders/spam', { match: 'gmail.com' }],
+        ['/mail/senders/spam', { match: '@Gmail.com' }],
+        ['/mail/senders/spam', { match: 'promo' }],
+        ['/mail/senders/keep', { match: 'outlook.com', name: 'O' }],
+        ['/mail/senders/keep', { match: 'bot', name: 'B' }],
+    ] as const) {
+        const nb = senders.keep().length + senders.spam().length;
+        const bad = await call('POST', path, body);
+        assert.strictEqual(bad.status, 400, JSON.stringify(body));
+        assert.strictEqual(
+            senders.keep().length + senders.spam().length,
+            nb,
+            'rien écrit',
+        );
+        if (body.match.toLowerCase().includes('.com')) {
+            assert.ok(
+                /grand public/.test(bad.body.error),
+                JSON.stringify(bad.body),
+            );
+        }
+    }
+    // une adresse précise sur un domaine grand public passe
+    r = await call('POST', '/mail/senders/spam', { match: 'jean@gmail.com' });
+    assert.strictEqual(r.status, 201);
+    senders.remove(r.body.id);
+
     // delete
     assert.strictEqual(
         (await call('DELETE', `/mail/senders/${spamId}`)).status,
@@ -235,6 +270,9 @@ async function run(): Promise<void> {
         (await call('POST', '/mail/senders/zz/apply', {})).status,
         404,
     );
+    const spApply = await call('POST', '/mail/senders/sp/apply', {});
+    assert.strictEqual(spApply.status, 400);
+    assert.ok(/expéditeurs à garder/.test(spApply.body.error));
 
     // ordres : days > 60 rejeté (400, pas clampé), défaut 14, texte requis
     assert.strictEqual(

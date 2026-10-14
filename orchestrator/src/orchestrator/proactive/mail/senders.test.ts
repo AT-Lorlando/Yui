@@ -9,8 +9,11 @@ import {
     newKeepSender,
     newSpamSender,
     resolveSender,
+    unsafeMatchReason,
+    validateKeepFields,
     validateSendersFile,
 } from './senders';
+import { BadRequestError } from './errors';
 
 const now = 1000;
 
@@ -100,6 +103,21 @@ function run() {
     bad((g) => (g.keep[0].read = 'x'), /read|lecture/i);
     bad((g) => (g.spam[0].match = 'a'), /2/);
     assert.throws(() => validateSendersFile(null));
+    // match trop large : domaine grand public nu, sans « . » ni « @ »
+    bad((g) => (g.spam[0].match = 'gmail.com'), /grand public/);
+    bad((g) => (g.keep[0].match = '@hotmail.com'), /grand public/);
+    bad((g) => (g.spam[0].match = 'promo'), /« \. » ou un « @ »/);
+    assert.strictEqual(unsafeMatchReason('jean@gmail.com'), null);
+    assert.strictEqual(unsafeMatchReason('qonto.com'), null);
+    assert.throws(
+        () =>
+            validateKeepFields(
+                { match: 'yahoo.fr', name: 'Y', read: 'never' },
+                'expéditeur',
+            ),
+        (e: unknown) =>
+            e instanceof BadRequestError && /grand public/.test(e.message),
+    );
 
     // store
     const tmp = path.join(
@@ -124,6 +142,24 @@ function run() {
     assert.strictEqual(s2.remove(k.id), false);
     assert.throws(() => s2.replace({ version: 3, keep: [{}], spam: [] }));
     assert.strictEqual(s2.keep().length, 0);
+
+    // chargement : une entrée écrite avant la règle de sûreté est écartée,
+    // pas tout le fichier
+    const legacy = path.join(path.dirname(tmp), 'legacy.json');
+    fs.writeFileSync(
+        legacy,
+        JSON.stringify({
+            version: 3,
+            keep: [{ ...newKeepSender({ match: 'ok.fr', name: 'Ok' }, now) }],
+            spam: [newSpamSender('gmail.com', now), newSpamSender('p.fr', now)],
+        }),
+    );
+    const s3 = new SenderStore(legacy);
+    assert.strictEqual(s3.keep().length, 1);
+    assert.deepStrictEqual(
+        s3.spam().map((x) => x.match),
+        ['p.fr'],
+    );
 
     console.log('senders: all tests passed');
 }

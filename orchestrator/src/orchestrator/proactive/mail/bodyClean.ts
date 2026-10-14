@@ -10,6 +10,22 @@ const QUOTE_START = [
 const FOOTER =
     /^.*(se désabonner|désinscri|unsubscribe|mentions légales|vous recevez ce (mail|message|courriel)|cet e-?mail (vous )?a été envoyé|ne pas répondre à ce message).*$/im;
 
+/**
+ * Pied de page : coupé à partir de la ligne trouvée seulement si elle est
+ * dans la seconde moitié du corps — « merci de ne pas répondre à ce
+ * message » en TÊTE d'un mail transactionnel effacerait tout. Plus haut, on
+ * ne retire que cette ligne, puis on cherche la suivante.
+ */
+function cutFooter(body: string): string {
+    for (;;) {
+        const foot = FOOTER.exec(body);
+        if (!foot) return body;
+        if (foot.index >= body.length / 2) return body.slice(0, foot.index);
+        const end = foot.index + foot[0].length;
+        body = body.slice(0, foot.index) + body.slice(end + 1);
+    }
+}
+
 export function cleanBody(full: string, max = BODY_MAX): string {
     const idx = full.indexOf(MARKER);
     let body = idx >= 0 ? full.slice(idx + MARKER.length) : full;
@@ -19,8 +35,7 @@ export function cleanBody(full: string, max = BODY_MAX): string {
     }
     const sig = /^-- ?$/m.exec(body);
     if (sig) body = body.slice(0, sig.index);
-    const foot = FOOTER.exec(body);
-    if (foot) body = body.slice(0, foot.index);
+    body = cutFooter(body);
     body = body
         .split('\n')
         .filter((l) => !l.trimStart().startsWith('>'))

@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { dataPath } from '@yui/shared';
 import Logger from '../../../logger';
+import { BadRequestError } from './errors';
 
 export type ReadMode = 'always' | 'never' | 'rules';
 
@@ -121,12 +122,60 @@ function isObj(v: unknown): v is Record<string, unknown> {
     return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/** Domaines grand public : une règle de domaine nu y attraperait tout le monde. */
+export const PUBLIC_DOMAINS = new Set([
+    'gmail.com',
+    'googlemail.com',
+    'outlook.com',
+    'hotmail.com',
+    'live.com',
+    'yahoo.com',
+    'yahoo.fr',
+    'icloud.com',
+    'me.com',
+    'free.fr',
+    'orange.fr',
+    'wanadoo.fr',
+    'sfr.fr',
+    'laposte.net',
+    'proton.me',
+    'protonmail.com',
+]);
+
+/**
+ * Raison du refus d'un `match` (ou null s'il est sûr) : trop court, sans `.`
+ * ni `@` (« bot » attraperait n'importe quel expéditeur), ou domaine grand
+ * public nu (`gmail.com`, `@gmail.com`).
+ */
+export function unsafeMatchReason(match: string): string | null {
+    const m = match.trim().toLowerCase();
+    if (m.length < 2) {
+        return "l'expéditeur (match) doit faire au moins 2 caractères";
+    }
+    if (!m.includes('.') && !m.includes('@')) {
+        return "l'expéditeur (match) doit contenir un « . » ou un « @ »";
+    }
+    if (PUBLIC_DOMAINS.has(m.replace(/^@/, ''))) {
+        return "précise l'adresse pour un domaine grand public";
+    }
+    return null;
+}
+
+/** Lève une BadRequestError (→ 400) si le match n'est pas sûr. */
+export function assertSafeMatch(match: string, where?: string): void {
+    const reason = unsafeMatchReason(match);
+    if (reason) {
+        throw new BadRequestError(where ? `${where} : ${reason}` : reason);
+    }
+}
+
 function checkMatch(v: unknown, where: string): string {
-    if (typeof v !== 'string' || v.trim().length < 2) {
-        throw new Error(
+    if (typeof v !== 'string') {
+        throw new BadRequestError(
             `${where} : l'expéditeur (match) doit faire au moins 2 caractères`,
         );
     }
+    assertSafeMatch(v, where);
     return v;
 }
 
@@ -154,6 +203,7 @@ export function validateKeepFields(
     k: Record<string, unknown>,
     where: string,
 ): void {
+    if (k.match !== undefined) checkMatch(k.match, where);
     if (
         typeof k.name !== 'string' ||
         k.name.length < 1 ||
@@ -221,6 +271,32 @@ export function validateSendersFile(raw: unknown): SendersFile {
         checkCommon(s, where, ids);
     });
     return raw as unknown as SendersFile;
+}
+
+/**
+ * Au chargement seulement : une entrée écrite avant la règle de sûreté des
+ * `match` est écartée (warn) plutôt que de faire rejeter — et vider — tout
+ * le fichier.
+ */
+function dropUnsafeMatches(raw: unknown): unknown {
+    if (!isObj(raw)) return raw;
+    const out: Record<string, unknown> = { ...raw };
+    for (const key of ['keep', 'spam']) {
+        const list = raw[key];
+        if (!Array.isArray(list)) continue;
+        out[key] = list.filter((e: unknown) => {
+            const m = isObj(e) && typeof e.match === 'string' ? e.match : null;
+            const reason = m === null ? null : unsafeMatchReason(m);
+            if (reason) {
+                Logger.warn(
+                    `mail-senders.json : "${m}" écarté au chargement (${reason})`,
+                );
+                return false;
+            }
+            return true;
+        });
+    }
+    return out;
 }
 
 function newId(prefix: string): string {
@@ -328,7 +404,9 @@ export class SenderStore {
         if (!fs.existsSync(this.path)) return;
         try {
             this.data = validateSendersFile(
-                JSON.parse(fs.readFileSync(this.path, 'utf-8')),
+                dropUnsafeMatches(
+                    JSON.parse(fs.readFileSync(this.path, 'utf-8')),
+                ),
             );
         } catch (e) {
             Logger.warn(`mail-senders.json illisible, réinitialisation : ${e}`);

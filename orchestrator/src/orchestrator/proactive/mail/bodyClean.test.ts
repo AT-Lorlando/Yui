@@ -15,6 +15,19 @@ function run(): void {
         '--- Corps ---\nPromo -50 %\n\nVous recevez cet e-mail car vous êtes abonné. Se désabonner ici.\nMentions légales';
     assert.strictEqual(cleanBody(footer), 'Promo -50 %');
 
+    // pied de page en tête (mail transactionnel) : seule la ligne part
+    const top =
+        '--- Corps ---\nMerci de ne pas répondre à ce message.\nVotre commande n° 4521 a été expédiée.\nLivraison prévue jeudi 16 octobre entre 8 h et 13 h.\nSuivi colis : 6A123456789.';
+    const topOut = cleanBody(top);
+    assert.ok(!topOut.includes('ne pas répondre'), topOut);
+    assert.ok(topOut.startsWith('Votre commande n° 4521'), topOut);
+    assert.ok(topOut.includes('6A123456789'), topOut);
+    // pied de page en seconde moitié : coupé à partir de là
+    const bottom =
+        '--- Corps ---\nBonjour, votre facture de septembre est disponible dans votre espace client.\nMontant : 42 €.\nMerci de ne pas répondre à ce message.\nSociété X, 1 rue Y';
+    const bottomOut = cleanBody(bottom);
+    assert.ok(bottomOut.endsWith('Montant : 42 €.'), bottomOut);
+
     const long = '--- Corps ---\n' + 'a'.repeat(5_000);
     assert.strictEqual(cleanBody(long).length, 2_501); // 2500 + '…'
 

@@ -4,6 +4,7 @@
 // la file « à trier » du courrier.
 import type { MailCourier } from './courier';
 import {
+    assertSafeMatch,
     newKeepSender,
     newSpamSender,
     senderAddress,
@@ -28,7 +29,11 @@ export function forgetMatchedUnknowns(courier: Courier, match: string): void {
     const domain = m.replace(/^@/, '');
     for (const u of courier.unknown()) {
         const a = u.address.toLowerCase();
-        if (a.endsWith('@' + domain) || a.endsWith('.' + domain)) {
+        if (
+            a === domain ||
+            a.endsWith('@' + domain) ||
+            a.endsWith('.' + domain)
+        ) {
             courier.forgetUnknown(u.address);
         }
     }
@@ -72,6 +77,7 @@ export function addSpamSender(
     match: string,
     now: number,
 ): SpamSender {
+    assertSafeMatch(match, 'expéditeur'); // avant toute écriture
     const s = newSpamSender(match, now);
     senders.upsertSpam(s);
     for (const id of sameMatchIds(senders, s.match, s.id)) senders.remove(id);

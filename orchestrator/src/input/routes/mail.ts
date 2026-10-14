@@ -9,7 +9,10 @@ import express from 'express';
 import * as fs from 'fs';
 import { dataPath } from '@yui/shared';
 import type { ProactiveHandler } from '../InputSource';
-import { NotFoundError } from '../../orchestrator/proactive/mail/errors';
+import {
+    BadRequestError,
+    NotFoundError,
+} from '../../orchestrator/proactive/mail/errors';
 import type { RequireAuth } from './helpers';
 
 export type MailHandler = Pick<
@@ -106,7 +109,7 @@ export function mailRoutes(
                 await fn(req, res);
             } catch (e: any) {
                 const msg = e instanceof Error ? e.message : String(e);
-                if (e instanceof BadRequest) {
+                if (e instanceof BadRequest || e instanceof BadRequestError) {
                     res.status(400).json({ error: msg });
                 } else if (e instanceof NotFoundError) {
                     res.status(404).json({ error: msg });
