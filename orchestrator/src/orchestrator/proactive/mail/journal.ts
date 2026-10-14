@@ -5,7 +5,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { dataPath } from '@yui/shared';
 import Logger from '../../../logger';
-import type { Stage, Urgency } from './triage';
+
+/** Étages v2 (rule/signal/llm/fallback, anciennes entrées) et v3 (keep/spam/inbox/trash). */
+export type DecisionStage =
+    | 'rule'
+    | 'signal'
+    | 'llm'
+    | 'fallback'
+    | 'keep'
+    | 'spam'
+    | 'inbox'
+    | 'trash';
+export type DecisionUrgency = 'none' | 'soon' | 'now';
 
 export interface MailDecision {
     at: number;
@@ -13,12 +24,20 @@ export interface MailDecision {
     from: string;
     subject: string;
     category: string;
-    stage: Stage;
+    stage: DecisionStage;
     ruleId?: string;
     signal?: string;
-    urgency?: Urgency;
+    urgency?: DecisionUrgency;
     reason?: string;
     applied: boolean;
+    /** v3 : nom de la boîte (expéditeur gardé). */
+    box?: string;
+    /** v3 : le mail est passé au lecteur IA. */
+    read?: boolean;
+    /** v3 : le lecteur a demandé de prévenir. */
+    notify?: boolean;
+    /** v3 : ordre de lecture auquel le mail répond. */
+    orderId?: string;
 }
 
 export const MAIL_JOURNAL_MAX = 200;

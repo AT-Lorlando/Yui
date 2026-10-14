@@ -911,7 +911,8 @@ export class MailConcierge {
         const byCategory: Record<string, number> = {};
         for (const d of this.deps.journal.list(200)) {
             if (d.at < since) continue;
-            byStage[d.stage]++;
+            // les étages v3 (keep/spam/inbox/trash) ne comptent pas dans le bilan v2
+            if (d.stage in byStage) byStage[d.stage as keyof typeof byStage]++;
             byCategory[d.category] = (byCategory[d.category] ?? 0) + 1;
         }
         return {
