@@ -40,10 +40,14 @@ from config import (
     CONVERSATION_WINDOW_S,
     SAVE_AUDIO_DEBUG,
     STOP_WORDS,
+    STT_MAX_COMPRESSION,
+    STT_MAX_NO_SPEECH,
+    STT_MIN_LOGPROB,
     YUI_STREAM_URL,
     YUI_URL,
 )
 import speech_state
+from stt_filter import hallucination_reason
 from text_utils import contains_trigger, find_sentence_end, strip_trigger
 import tts as tts_mod
 from tts import generate_tts, play_audio_blocking, play_chime
@@ -130,28 +134,29 @@ class WhisperSTT:
             hallucination_silence_threshold=1.0,
             word_timestamps=False,
             suppress_blank=True,
+            # Pas de repli en température : sur du bruit, les retentatives à
+            # T > 0 fabriquent les « Sous-titrage ST' 501 ». Un décodage qui
+            # échoue aux seuils garde ses stats, et stt_filter le rejette.
+            temperature=0.0,
         )
 
-        text = " ".join(seg.text.strip() for seg in segments).strip()
-
-        # Reject if Whisper itself wasn't confident (no_speech_prob high for all segments)
+        segs = list(segments)
+        text = " ".join(seg.text.strip() for seg in segs).strip()
         if not text:
             return ""
 
-        # Post-filter common French hallucinations
-        for pattern in [
-            "merci d'avoir regardé",
-            "sous-titres réalisés par",
-            "sous-titres par",
-            "merci de votre attention",
-            "à bientôt",
-            "abonnez-vous",
-            "likez",
-        ]:
-            if pattern in text.lower() and len(text) < len(pattern) + 20:
-                log.warning(f"Filtered hallucination: {text!r}")
-                return ""
-
+        # Hallucinations (génériques de sous-titres, bruit) : texte + stats Whisper.
+        reason, st = hallucination_reason(
+            text,
+            segs,
+            max_no_speech=STT_MAX_NO_SPEECH,
+            min_logprob=STT_MIN_LOGPROB,
+            max_compression=STT_MAX_COMPRESSION,
+        )
+        if reason:
+            log.warning(f"[stt] rejeté ({reason}) {text!r} [{st.summary()}]")
+            return ""
+        log.info(f"[stt] {text!r} [{st.summary()}]")
         return text
 
 

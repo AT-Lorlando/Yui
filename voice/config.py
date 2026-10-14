@@ -46,6 +46,10 @@ WHISPER_CONVO_PROMPT = os.getenv(
 
 # Minimum RMS energy to send audio to Whisper. Below this = noise, skip entirely.
 WHISPER_MIN_RMS = float(os.getenv("WHISPER_MIN_RMS", "400"))
+# Filtre d'hallucinations (stt_filter.py) : seuils sur les statistiques Whisper.
+STT_MAX_NO_SPEECH = float(os.getenv("STT_MAX_NO_SPEECH", "0.5"))    # no_speech_prob pondéré
+STT_MIN_LOGPROB   = float(os.getenv("STT_MIN_LOGPROB", "-1.0"))     # avg_logprob pondéré
+STT_MAX_COMPRESSION = float(os.getenv("STT_MAX_COMPRESSION", "2.4"))  # répétitions
 
 # ── Silero VAD ────────────────────────────────────────────────────────────────
 SILERO_THRESHOLD      = float(os.getenv("SILERO_THRESHOLD", "0.5"))
