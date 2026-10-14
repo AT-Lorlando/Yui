@@ -177,11 +177,29 @@ async function run(): Promise<void> {
     );
     assert.strictEqual(journal.list(1)[0]!.channel, 'hold');
     assert.strictEqual(journal.list(1)[0]!.subject, 'm6');
+    // Les suivants du jour : comptés, en file, mais plus de nouvelle entrée.
+    const journalSize = journal.list(300).length;
+    await engine.notifyMail({ ...ref, mailId: 'm6b' }, item);
+    assert.strictEqual(notified.length, 5);
+    assert.strictEqual(
+        journal.list(300).length,
+        journalSize,
+        'un seul « plafonnée » par jour au journal',
+    );
+    assert.deepStrictEqual(
+        engine.takeMailNotified().map((n) => [n.mailId, n.capped === true]),
+        [['m6b', true]],
+    );
 
     // Le plafond survit au redémarrage (relu du journal) …
     const restarted = build();
     await restarted.notifyMail({ ...ref, mailId: 'm7' }, item);
     assert.strictEqual(notified.length, 5, 'plafond relu après redémarrage');
+    assert.strictEqual(
+        journal.list(300).length,
+        journalSize,
+        'entrée « plafonnée » du jour relue après redémarrage',
+    );
     // … et repart le lendemain.
     now = NOW + 86_400_000;
     await restarted.notifyMail({ ...ref, mailId: 'm8' }, item);

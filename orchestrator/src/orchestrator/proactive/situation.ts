@@ -31,11 +31,6 @@ export interface Situation {
     agenda: SituationEvent[];
     /** Colis actifs (pas encore livrés/archivés). */
     parcels: Array<{ label: string; status: string }>;
-    /** Héritage du concierge v2 (mails « action ») — plus alimenté : l'état
-     *  du courrier (inconnus, ordres actifs) vit dans `sections.mail`, posé
-     *  par le connecteur ; les mails signalés sont des événements retenus.
-     *  Gardé pour les instantanés persistés et les lecteurs existants. */
-    mailActions: string[];
     musicPlaying: boolean;
     /** État courant par connecteur (`snapshot()`), une section par source. */
     sections?: Record<string, Fact[]>;
@@ -120,7 +115,6 @@ export async function buildSituation(
                 label: String(p.content ?? p.label ?? p.tracking ?? 'colis'),
                 status: String(p.status ?? '?'),
             })),
-        mailActions: [],
         musicPlaying: playback?.playing === true,
         sections: snapshots,
     };
@@ -154,10 +148,6 @@ export function diffSituation(
         if (old === undefined) d.push(`nouveau colis suivi : ${p.label}`);
         else if (old !== p.status)
             d.push(`colis « ${p.label} » : ${old} → ${p.status}`);
-    }
-    const prevMail = new Set(prev.mailActions);
-    for (const m of next.mailActions) {
-        if (!prevMail.has(m)) d.push(`mail à traiter : « ${m} »`);
     }
     if (prev.musicPlaying !== next.musicPlaying) {
         d.push(next.musicPlaying ? 'musique lancée' : 'musique arrêtée');
@@ -199,11 +189,6 @@ export function summarizeSituation(s: Situation): string {
             `Colis : ${s.parcels
                 .map((p) => `${p.label} (${p.status})`)
                 .join(' ; ')}.`,
-        );
-    }
-    if (s.mailActions.length && !covered('mail')) {
-        lines.push(
-            `Mails à traiter : ${s.mailActions.slice(0, 5).join(' ; ')}.`,
         );
     }
     // Une ligne par connecteur ayant un état à montrer — les sources récentes

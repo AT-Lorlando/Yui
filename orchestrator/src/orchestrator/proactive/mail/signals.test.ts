@@ -1,21 +1,10 @@
 import assert from 'assert';
-import * as os from 'os';
-import * as fs from 'fs';
-import * as path from 'path';
-process.env.YUI_DATA_DIR = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'yui-signals-'),
-);
-const S = require('./signals') as typeof import('./signals');
-const R = require('./rules') as typeof import('./rules');
-const { BASE_CATEGORIES } =
-    require('./concierge') as typeof import('./concierge');
+import * as S from './signals';
 
 const m = (from: string, headers: Record<string, string> = {}) => ({
-    id: 'x',
     from,
     subject: 's',
     headers,
-    snippet: '',
 });
 
 async function run() {
@@ -56,53 +45,11 @@ async function run() {
             .category,
         'newsletter',
     );
-    // garde-fous
-    const NOW = 1;
-    const confirmedAny = R.newRule({
-        when: { from: 'noreply@github.com' },
-        category: 'admin',
-        origin: 'user',
-        confirmed: true,
-        now: NOW,
-    });
-    const perso = R.newRule({
-        when: { from: 'github.com' },
-        category: 'perso',
-        origin: 'correction',
-        confirmed: true,
-        now: NOW,
-    });
-    const negative = R.newRule({
-        when: { from: 'noreply@github.com' },
-        category: null,
-        origin: 'user',
-        confirmed: true,
-        now: NOW,
-    });
-    const unconfirmed = R.ruleFromSignal(
-        'noreply@github.com',
-        'notification',
-        NOW,
+    // le sujet est facultatif
+    assert.deepStrictEqual(
+        S.detectSignal({ from: 'Alerts <ALERTS@bank.fr>', headers: {} }),
+        { signal: 'automated-sender', category: 'notification' },
     );
-    assert.strictEqual(
-        S.signalAllowed([confirmedAny], m('noreply@github.com')),
-        false,
-    );
-    assert.strictEqual(
-        S.signalAllowed([perso], m('noreply@github.com')),
-        false,
-    );
-    assert.strictEqual(
-        S.signalAllowed([negative], m('noreply@github.com')),
-        false,
-    );
-    assert.strictEqual(
-        S.signalAllowed([unconfirmed], m('noreply@github.com')),
-        true,
-    );
-    assert.strictEqual(S.signalAllowed([], m('noreply@github.com')), true);
-    const notif = BASE_CATEGORIES.find((c) => c.id === 'notification');
-    assert.ok(notif && notif.archive && notif.label === 'Yui/Notifications');
     console.log('signals ok');
 }
 

@@ -58,31 +58,6 @@ export type BrickOverrides = Record<
     { enabled?: boolean; settings?: Record<string, unknown> }
 >;
 
-export interface ConciergeRule {
-    /** Sous-chaîne cherchée dans l'expéditeur (adresse ou domaine). */
-    match: string;
-    category: string;
-}
-
-export interface CustomCategory {
-    id: string;
-    label?: string;
-    description?: string;
-    archive?: boolean;
-}
-
-export interface ConciergeConfig {
-    pollMinutes?: number;
-    /** Catégories appliquées sans validation (labels + archivage promo/news). */
-    autoCategories?: string[];
-    /** Legacy — migré vers mail-rules.json au premier démarrage, ignoré ensuite. */
-    rules?: ConciergeRule[];
-    /** Règles en français injectées dans le prompt (acceptées depuis les doutes). */
-    promptRules?: string[];
-    /** Catégories ajoutées par Jérémy (ou proposées par le LLM et acceptées). */
-    customCategories?: CustomCategory[];
-}
-
 export interface ProactiveConfig {
     enabled: boolean;
     chattiness: Chattiness;
@@ -96,7 +71,6 @@ export interface ProactiveConfig {
     /** Post-its Yoji créés par jour à partir des intentions `todo` (défaut 5). */
     postitsPerDay?: number;
     bricks?: BrickOverrides;
-    concierge?: ConciergeConfig;
     whitelist: WhitelistAction[];
     /** Editable system prompts for proactive message formulation. */
     prompts?: { phrase?: string; digest?: string };

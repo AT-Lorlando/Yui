@@ -144,11 +144,6 @@ export function returnMomentFacts(situation: Situation | null): string {
                     .join(', ')}`,
             );
         }
-        if (situation.mailActions.length) {
-            bits.push(
-                `${situation.mailActions.length} mail(s) demandent une action`,
-            );
-        }
         const next = situation.agenda[0];
         if (next?.start)
             bits.push(`prochain événement : « ${next.title} » à ${next.start}`);

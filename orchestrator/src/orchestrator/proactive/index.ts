@@ -104,6 +104,8 @@ export class ProactiveEngine {
      *  (donc aussi après un redémarrage) — le journal est la persistance. */
     private mailNotifyDay = '';
     private mailNotifyCount = 0;
+    /** Mails plafonnés du jour ; seul le premier est écrit au journal. */
+    private mailCappedCount = 0;
     private judge: Judge;
     private said: SaidMemory;
     private postits: PostitRegistry;
@@ -320,16 +322,26 @@ export class ProactiveEngine {
         const day = new Date(now).toDateString();
         if (day !== this.mailNotifyDay) {
             this.mailNotifyDay = day;
-            this.mailNotifyCount = this.journal
+            const today = this.journal
                 .list(300)
                 .filter(
                     (e) =>
                         e.source === 'mail-reader' &&
-                        (e.channel === 'speak' || e.channel === 'notify') &&
                         new Date(e.at).toDateString() === day,
-                ).length;
+                );
+            this.mailNotifyCount = today.filter(
+                (e) => e.channel === 'speak' || e.channel === 'notify',
+            ).length;
+            // Relu après un redémarrage : l'entrée « plafonnée » du jour
+            // n'est écrite qu'une fois.
+            this.mailCappedCount = today.filter(
+                (e) => e.channel === 'hold',
+            ).length;
         }
-        if (this.mailNotifyCount >= MAIL_NOTIFY_PER_DAY) return false;
+        if (this.mailNotifyCount >= MAIL_NOTIFY_PER_DAY) {
+            this.mailCappedCount++;
+            return false;
+        }
         this.mailNotifyCount++;
         return true;
     }
@@ -809,8 +821,11 @@ export class ProactiveEngine {
         }`;
         if (!allowed) {
             Logger.info(
-                `proactive: courrier ${m.mailId} non poussé (plafond ${MAIL_NOTIFY_PER_DAY}/jour)`,
+                `proactive: courrier ${m.mailId} non poussé (plafond ${MAIL_NOTIFY_PER_DAY}/jour, ${this.mailCappedCount} retenu(s) aujourd'hui)`,
             );
+            // Une seule entrée de journal par jour (le premier mail plafonné) :
+            // les suivants restent comptés et en file pour le prochain point.
+            if (this.mailCappedCount > 1) return;
             this.journal.record({
                 at: this.now(),
                 source: 'mail-reader',

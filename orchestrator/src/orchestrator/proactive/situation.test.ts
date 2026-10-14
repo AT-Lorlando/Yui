@@ -9,7 +9,6 @@ function run(): void {
         doorLocked: true,
         agenda: [],
         parcels: [],
-        mailActions: [],
         musicPlaying: false,
         sections: {
             weather: [{ label: 'Météo', value: '20°C à Toulouse' }],
@@ -50,12 +49,10 @@ function run(): void {
             },
         ],
         parcels: [{ label: 'Casque', status: 'transit' }],
-        mailActions: ['Facture'],
     };
     const legacy = summarizeSituation({ ...full, sections: {} } as never);
     assert.ok(legacy.includes('Agenda 24h : Kinéis à 10:20'), legacy);
     assert.ok(legacy.includes('Colis : Casque (transit)'), legacy);
-    assert.ok(legacy.includes('Mails à traiter : Facture'), legacy);
 
     const sectioned = summarizeSituation({
         ...full,
@@ -67,7 +64,6 @@ function run(): void {
     } as never);
     assert.ok(!sectioned.includes('Agenda 24h'), sectioned);
     assert.ok(!sectioned.includes('Colis : Casque (transit)'), sectioned);
-    assert.ok(!sectioned.includes('Mails à traiter'), sectioned);
     assert.ok(
         sectioned.includes('calendar : Agenda Kinéis à 10:20'),
         sectioned,

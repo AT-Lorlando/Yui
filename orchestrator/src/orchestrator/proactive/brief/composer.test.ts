@@ -37,7 +37,6 @@ const situation = (over: Partial<Situation> = {}): Situation => ({
     doorLocked: true,
     agenda: [],
     parcels: [],
-    mailActions: [],
     musicPlaying: false,
     ...over,
 });
@@ -384,14 +383,16 @@ async function run(): Promise<void> {
         );
 
         // Coucher porte fermée avec matière → notify, même présent.
-        const h3 = harness({ llm: async () => 'Un mail à traiter : « RIB ».' });
+        const h3 = harness({
+            llm: async () => 'Le colis « Casque » est en route.',
+        });
         const quiet = await h3.composer.forMoment(
             inputs(h3, {
                 momentKind: 'moment-bedtime',
                 momentFacts: 'lumières éteintes',
                 situation: situation({
                     doorLocked: true,
-                    mailActions: ['RIB'],
+                    parcels: [{ label: 'Casque', status: 'shipped' }],
                 }),
             }),
         );
@@ -516,7 +517,6 @@ async function run(): Promise<void> {
     {
         const h = harness();
         const sit = situation({
-            mailActions: ['RIB', 'Facture'],
             parcels: [{ label: 'ASOS', status: 'en transit' }],
         });
         const base = inputs(h, {
@@ -539,7 +539,6 @@ async function run(): Promise<void> {
         const r = await h.composer.onDemand(base);
         assert.ok(r.text.length > 0);
         assert.ok(r.text.includes('Rien de nouveau'), r.text);
-        assert.ok(r.text.includes('2 mails à traiter'), r.text);
         assert.ok(r.text.includes('1 colis en cours'), r.text);
         assert.strictEqual(r.channel, 'brief');
         assert.strictEqual(r.usedLlm, false);

@@ -1,5 +1,5 @@
 // Journal des décisions de tri — trace ce qui a été classé et pourquoi
-// (audit, page /mail, diagnostic du concierge). Anneau borné : ce n'est pas
+// (audit, page /mail, diagnostic du facteur). Anneau borné : ce n'est pas
 // un historique complet, seulement de quoi comprendre les dernières minutes.
 import * as fs from 'fs';
 import * as path from 'path';
@@ -85,7 +85,7 @@ export class MailJournal {
                 ? parsed.decisions
                 : [];
         } catch (e) {
-            // fichier corrompu : on repart à vide plutôt que de planter le concierge au démarrage
+            // fichier corrompu : on repart à vide plutôt que de planter le courrier au démarrage
             Logger.warn(`mail-journal.json illisible, réinitialisation : ${e}`);
             this.decisions = [];
         }

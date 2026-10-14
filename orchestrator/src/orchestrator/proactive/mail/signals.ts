@@ -1,8 +1,14 @@
 // Détecteur de signaux de masse : en-têtes, local part automatisées.
-// Les signaux ne décident jamais seuls — une règle non confirmée peut être
-// bloquée par une règle utilisateur opposée.
-import type { MailRule, RuleMail } from './rules';
-import { ruleFor, senderLocalPart, firstMatch } from './rules';
+// Les signaux ne décident plus rien : ils pré-cochent « Osef » dans la file
+// des nouveaux expéditeurs (courrier v3).
+import { senderAddress } from './senders';
+
+/** Ce que le détecteur lit d'un mail. */
+export interface SignalInput {
+    from: string;
+    subject?: string;
+    headers: Record<string, string>;
+}
 
 export type Signal =
     | 'list-unsubscribe'
@@ -41,7 +47,7 @@ export const AUTOMATED_LOCAL_PARTS: ReadonlySet<string> = new Set([
  *
  * Retourne null si aucun signal.
  */
-export function detectSignal(mail: RuleMail): SignalHit | null {
+export function detectSignal(mail: SignalInput): SignalHit | null {
     // 1. List-Unsubscribe (case-insensitive header key and value)
     const listUnsubscribe = findHeaderCaseInsensitive(
         mail.headers,
@@ -79,44 +85,14 @@ export function detectSignal(mail: RuleMail): SignalHit | null {
     }
 
     // 5. Partie locale automatisée
-    const local = senderLocalPart(mail.from).toLowerCase();
+    const address = senderAddress(mail.from);
+    const at = address.indexOf('@');
+    const local = (at >= 0 ? address.slice(0, at) : address).toLowerCase();
     if (AUTOMATED_LOCAL_PARTS.has(local)) {
         return { signal: 'automated-sender', category: 'notification' };
     }
 
     return null;
-}
-
-/**
- * Vérifie si un signal est autorisé (pas de règle utilisateur contraire).
- *
- * Retourne false (signal bloqué) si :
- * - Existe une règle confirmée pour cette adresse exacte (quelle que soit la catégorie)
- * - Existe une règle confirmée avec catégorie 'perso' qui matche le mail
- * - Existe une règle négative confirmée (then.category === null) qui matche
- *
- * Retourne true (signal autorisé) sinon.
- */
-export function signalAllowed(rules: MailRule[], mail: RuleMail): boolean {
-    // Vérifier s'il existe une règle confirmée pour cette adresse exacte
-    const exactRule = ruleFor(rules, mail.from);
-    if (exactRule && exactRule.confirmed) {
-        return false;
-    }
-
-    // Chercher une règle confirmée qui matche
-    const matchedRule = firstMatch(rules, mail);
-    if (matchedRule && matchedRule.confirmed) {
-        // Si c'est une règle perso ou une règle négative, bloquer le signal
-        if (
-            matchedRule.then.category === 'perso' ||
-            matchedRule.then.category === null
-        ) {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 /**

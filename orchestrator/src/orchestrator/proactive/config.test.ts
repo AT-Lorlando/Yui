@@ -100,6 +100,7 @@ function run(): void {
                     },
                     'mail-concierge': { enabled: true },
                 },
+                // ancienne section v2 : tolérée à la lecture, plus migrée
                 concierge: { pollMinutes: 45 },
             }),
         );
@@ -107,7 +108,7 @@ function run(): void {
         // (sinon le tri activé serait mort avec les mails importants coupés).
         assert.deepStrictEqual(migrated.bricks!.mail, {
             enabled: true,
-            settings: { query: 'q', triage: true, pollMinutes: 45 },
+            settings: { query: 'q', triage: true },
         });
         assert.strictEqual(migrated.bricks!['mail-important'], undefined);
         assert.strictEqual(migrated.bricks!['mail-concierge'], undefined);

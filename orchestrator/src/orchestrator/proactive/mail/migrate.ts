@@ -1,4 +1,4 @@
-import type { MailRule } from './rules';
+import * as fs from 'fs';
 import {
     newKeepSender,
     newSpamSender,
@@ -6,6 +6,48 @@ import {
     type SendersFile,
     type SpamSender,
 } from './senders';
+
+/** Règle v2 (mail-rules.json) — seul format encore lu, par la migration. */
+export interface MailRule {
+    id: string;
+    when: { from?: string; subject?: string; header?: string };
+    /** null = règle négative (« pas du bruit »). */
+    then: { category: string | null; alert?: 'notify' | 'speak' };
+    origin: 'user' | 'correction' | 'signal';
+    confirmed: boolean;
+    hits: number;
+    lastHitAt?: number;
+    createdAt: number;
+}
+
+export interface RulesFile {
+    version: 1;
+    rules: MailRule[];
+}
+
+/**
+ * Lecture tolérante de mail-rules.json (v2) : pas de validation, pas de store.
+ * Fichier absent ou illisible → []. Les entrées sans `when`/`then` sont jetées.
+ */
+export function readRulesFile(file: string): MailRule[] {
+    try {
+        const parsed = JSON.parse(
+            fs.readFileSync(file, 'utf-8'),
+        ) as Partial<RulesFile>;
+        if (!Array.isArray(parsed?.rules)) return [];
+        return parsed.rules.filter(
+            (r): r is MailRule =>
+                !!r &&
+                typeof r === 'object' &&
+                !!r.when &&
+                typeof r.when === 'object' &&
+                !!r.then &&
+                typeof r.then === 'object',
+        );
+    } catch {
+        return [];
+    }
+}
 
 export interface MigrationReport {
     at: number;

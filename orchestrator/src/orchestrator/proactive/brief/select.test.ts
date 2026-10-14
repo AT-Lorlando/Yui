@@ -29,7 +29,6 @@ const situation: Situation = {
         },
     ],
     parcels: [{ label: 'ASOS', status: 'out-for-delivery' }],
-    mailActions: ['Renvoyer le RIB'],
     musicPlaying: false,
 };
 
@@ -50,7 +49,6 @@ async function run(): Promise<void> {
         subjects.includes('situation:agenda-today-2026-09-27-Entretien Kinéis'),
     );
     assert.ok(subjects.includes('situation:parcel-ASOS-out-for-delivery'));
-    assert.ok(subjects.includes('situation:mail-Renvoyer le RIB'));
     assert.strictEqual(
         facts.find((f) => f.subject === 'koya:disk')!.heldKey,
         'koya:disk',
@@ -71,10 +69,11 @@ async function run(): Promise<void> {
             .every((f) => f.importance === 'utile'),
         'faits de situation : importance utile',
     );
-    // Scope par défaut (aucun scope précisé) : les trois catégories.
+    // Scope par défaut (aucun scope précisé) : agenda et colis ; le courrier
+    // n'est plus un fait de situation (événements retenus du lecteur).
     assert.ok(subjects.some((s) => s.startsWith('situation:agenda')));
     assert.ok(subjects.some((s) => s.startsWith('situation:parcel')));
-    assert.ok(subjects.some((s) => s.startsWith('situation:mail')));
+    assert.ok(!subjects.some((s) => s.startsWith('situation:mail')));
     // Scope pending : pas d'agenda.
     const pending = collectFacts(
         {
@@ -87,8 +86,8 @@ async function run(): Promise<void> {
         T,
     );
     assert.ok(!pending.some((f) => f.subject.startsWith('situation:agenda')));
-    assert.ok(pending.some((f) => f.subject.startsWith('situation:mail')));
-    // Scope today : agenda + colis, pas de mails.
+    assert.ok(pending.some((f) => f.subject.startsWith('situation:parcel')));
+    // Scope today : agenda + colis.
     const today = collectFacts(
         {
             momentKind: 'on-demand',

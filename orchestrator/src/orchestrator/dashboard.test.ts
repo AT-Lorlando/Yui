@@ -294,6 +294,49 @@ async function run(): Promise<void> {
         assert.strictEqual(d.todos, null, 'pas de todoProject → todos null');
     }
 
+    // ── briefing courrier : la tuile vit dès qu'il y a un ordre actif ──────────
+    {
+        const none = await buildDashboard(
+            makeDeps({
+                mailTriage: () => ({
+                    pendingCount: 0,
+                    ordersCount: 0,
+                    actions: [],
+                    classifiedToday: 3,
+                }),
+            }),
+        );
+        assert.strictEqual(none.briefing, null, 'rien à montrer → null');
+        const onlyOrders = await buildDashboard(
+            makeDeps({
+                mailTriage: () => ({
+                    pendingCount: 0,
+                    ordersCount: 2,
+                    actions: [],
+                    classifiedToday: 0,
+                }),
+            }),
+        );
+        assert.deepStrictEqual(onlyOrders.briefing, {
+            mailActions: [],
+            pendingCount: 0,
+            doubtCount: 0,
+            ordersCount: 2,
+            classifiedToday: 0,
+        });
+        const unknown = await buildDashboard(
+            makeDeps({
+                mailTriage: () => ({
+                    pendingCount: 4,
+                    actions: [],
+                    classifiedToday: 0,
+                }),
+            }),
+        );
+        assert.strictEqual(unknown.briefing!.pendingCount, 4);
+        assert.strictEqual(unknown.briefing!.ordersCount, 0);
+    }
+
     console.log('dashboard.test.ts OK');
 }
 

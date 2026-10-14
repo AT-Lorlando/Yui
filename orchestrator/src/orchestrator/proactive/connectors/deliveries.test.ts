@@ -12,11 +12,11 @@ import type { PresenceState } from '../../presence';
 // de résoudre les modules.
 process.env.YUI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-dlv-'));
 const { dataPath } = require('@yui/shared') as typeof import('@yui/shared');
-const { deliveriesConnector } =
+const { deliveriesConnector, parcelOrderText } =
     require('./deliveries') as typeof import('./deliveries');
 const { ConnectorState } =
     require('../connectorState') as typeof import('../connectorState');
-const { OrderStore, ORDERS_MAX } =
+const { OrderStore, ORDERS_MAX, ORDER_TEXT_MAX } =
     require('../mail/orders') as typeof import('../mail/orders');
 
 const NOW = new Date('2026-10-14T10:00:00').getTime();
@@ -126,6 +126,21 @@ async function run(): Promise<void> {
         warns.some((w) => w.includes('parcel:p3')),
         `avertissement attendu : ${warns.join(' | ')}`,
     );
+
+    // Libellé de colis très long : l'ordre est rogné, jamais refusé.
+    const long = parcelOrderText('Casque '.repeat(80));
+    assert.ok(long.length <= ORDER_TEXT_MAX, `${long.length}`);
+    assert.ok(long.startsWith('Commande Casque'));
+    assert.ok(long.includes('…'));
+    assert.ok(long.endsWith('le numéro de suivi'));
+    assert.strictEqual(
+        parcelOrderText('Casque'),
+        'Commande Casque : extraire la date de livraison estimée, le transporteur et le numéro de suivi',
+    );
+    const store = new OrderStore(
+        path.join(process.env.YUI_DATA_DIR!, 'long-orders.json'),
+    );
+    store.add({ text: long, source: 'connector', origin: 'parcel:x' }, NOW);
 
     console.log('All deliveries connector tests passed');
 }

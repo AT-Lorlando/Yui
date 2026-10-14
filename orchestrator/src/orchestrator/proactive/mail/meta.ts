@@ -1,5 +1,5 @@
 // Métadonnées Gmail (list_messages_meta) → mails du facteur. Repris tel quel
-// du concierge v2 (parseMetaList), seul le type est renommé.
+// du tri v2 (parseMetaList), seul le type est renommé.
 
 export interface CourierMail {
     id: string;

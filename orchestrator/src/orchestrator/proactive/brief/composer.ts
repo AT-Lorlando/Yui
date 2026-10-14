@@ -119,15 +119,6 @@ function emptyOnDemandText(situation: Situation | null): string {
     const base = templateBrief('on-demand', []);
     if (!situation) return base;
     const parts: string[] = [];
-    if (situation.mailActions.length) {
-        parts.push(
-            countLine(
-                situation.mailActions.length,
-                'mail à traiter',
-                'mails à traiter',
-            ),
-        );
-    }
     if (situation.parcels.length) {
         parts.push(
             countLine(

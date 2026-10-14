@@ -1,6 +1,9 @@
 import assert from 'assert';
-import type { MailRule } from './rules';
-import { migrateRulesToSenders, nameFromMatch } from './migrate';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import type { MailRule } from './migrate';
+import { migrateRulesToSenders, nameFromMatch, readRulesFile } from './migrate';
 
 let n = 0;
 function rule(
@@ -138,6 +141,22 @@ function run(): void {
     );
     assert.strictEqual(nameFromMatch('@gmail.com'), 'Gmail');
     assert.strictEqual(nameFromMatch('QONTO.COM'), 'Qonto');
+
+    // readRulesFile : lecture tolérante, sans validation
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-migrate-'));
+    const f = path.join(dir, 'mail-rules.json');
+    assert.deepStrictEqual(readRulesFile(f), []); // absent
+    fs.writeFileSync(f, '{oops');
+    assert.deepStrictEqual(readRulesFile(f), []); // illisible
+    fs.writeFileSync(f, JSON.stringify({ version: 1, rules: 'x' }));
+    assert.deepStrictEqual(readRulesFile(f), []); // pas un tableau
+    const good = rule({ from: 'a.com' }, 'promo');
+    fs.writeFileSync(
+        f,
+        JSON.stringify({ version: 1, rules: [good, null, { id: 'z' }] }),
+    );
+    assert.deepStrictEqual(readRulesFile(f), [good]); // entrées informes jetées
+    fs.rmSync(dir, { recursive: true, force: true });
 
     console.log('migrate: all tests passed');
 }

@@ -39,11 +39,16 @@ export interface DashboardData {
     todos: {
         items: Array<{ title: string; state: string; priority: string }>;
     } | null;
-    /** Tri courrier (concierge) : mails à traiter + activité du jour. */
+    /** Courrier : mails signalés, nouveaux expéditeurs, ordres actifs. */
     briefing: {
+        /** Derniers mails signalés par le lecteur. */
         mailActions: Array<{ subject: string; from: string }>;
+        /** Nouveaux expéditeurs en attente (« nouvel(aux) expéditeur(s) »). */
         pendingCount: number;
+        /** Toujours 0 depuis le courrier v3 — gardé pour l'app. */
         doubtCount: number;
+        /** Ordres de lecture actifs (« Ce que j'attends »). */
+        ordersCount: number;
         classifiedToday: number;
     } | null;
     generatedAt: string;
@@ -65,10 +70,12 @@ export interface DashboardDeps {
     agendaPending?: () => boolean;
     /** Projet Yoji dont on affiche les tâches ouvertes (ex. "todos/Personal"). */
     todoProject?: string;
-    /** Résumé du tri courrier (concierge) — null si brique inactive. */
+    /** Résumé du courrier — null si brique inactive. */
     mailTriage?: () => {
+        /** Nouveaux expéditeurs en attente. */
         pendingCount: number;
         doubtCount?: number;
+        ordersCount?: number;
         actions: Array<{ subject: string; from: string }>;
         classifiedToday: number;
     } | null;
@@ -339,11 +346,14 @@ export async function buildDashboard(
         briefing: (() => {
             try {
                 const t = deps.mailTriage?.();
-                if (!t || (!t.actions.length && !t.pendingCount)) return null;
+                const orders = t?.ordersCount ?? 0;
+                if (!t || (!t.actions.length && !t.pendingCount && !orders))
+                    return null;
                 return {
                     mailActions: t.actions,
                     pendingCount: t.pendingCount,
                     doubtCount: t.doubtCount ?? 0,
+                    ordersCount: orders,
                     classifiedToday: t.classifiedToday,
                 };
             } catch {

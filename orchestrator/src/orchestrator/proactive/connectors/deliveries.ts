@@ -3,7 +3,7 @@ import { listParcels } from '../../deliveries/tracker';
 import { fromCandidate } from '../events';
 import type { Event, Fact } from '../events';
 import type { ConnectorContext, ConnectorDef } from '../connector';
-import type { OrderStore } from '../mail/orders';
+import { ORDER_TEXT_MAX, type OrderStore } from '../mail/orders';
 import type { Parcel } from '../../deliveries/tracker';
 import type { ParcelStatus } from '../../deliveries/providers';
 
@@ -17,6 +17,20 @@ const ON_THE_WAY: ReadonlySet<ParcelStatus> = new Set<ParcelStatus>([
 const PARCEL_ORDER_DAYS = 21;
 
 type ParcelOrders = Pick<OrderStore, 'all' | 'add' | 'byOrigin' | 'fulfill'>;
+
+const ORDER_PREFIX = 'Commande ';
+const ORDER_SUFFIX =
+    ' : extraire la date de livraison estimée, le transporteur et le numéro de suivi';
+
+/** Texte de l'ordre d'un colis, le libellé rogné pour tenir dans
+ *  ORDER_TEXT_MAX (sinon `add` lève à chaque poll pour un long libellé). */
+export function parcelOrderText(label: string): string {
+    const room = ORDER_TEXT_MAX - ORDER_PREFIX.length - ORDER_SUFFIX.length;
+    const clean = label.replace(/\s+/g, ' ').trim();
+    const clipped =
+        clean.length > room ? clean.slice(0, room - 1).trimEnd() + '…' : clean;
+    return ORDER_PREFIX + clipped + ORDER_SUFFIX;
+}
 
 /**
  * Ordres de lecture automatiques (courrier v3) : un colis en route fait
@@ -42,10 +56,9 @@ export function syncParcelOrders(
         try {
             orders.add(
                 {
-                    text:
-                        'Commande ' +
-                        String(p.content ?? p.label ?? p.tracking) +
-                        ' : extraire la date de livraison estimée, le transporteur et le numéro de suivi',
+                    text: parcelOrderText(
+                        String(p.content ?? p.label ?? p.tracking),
+                    ),
                     days: PARCEL_ORDER_DAYS,
                     source: 'connector',
                     origin,

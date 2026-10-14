@@ -6,8 +6,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { dataPath } from '@yui/shared';
 import Logger from '../../../logger';
-import { migrateRulesToSenders, type MigrationReport } from './migrate';
-import { RuleStore } from './rules';
+import {
+    migrateRulesToSenders,
+    readRulesFile,
+    type MigrationReport,
+} from './migrate';
 import type { SenderStore } from './senders';
 
 export const RULES_BACKUP_NAME = 'mail-rules.v2.bak.json';
@@ -26,7 +29,7 @@ export function migrateMailRulesAtBoot(
 ): MigrationReport | null {
     if (senders.exists() || !fs.existsSync(rulesFile)) return null;
     try {
-        const rules = new RuleStore(rulesFile).all();
+        const rules = readRulesFile(rulesFile);
         const { file, report } = migrateRulesToSenders(rules, now);
         senders.replace(file);
         fs.mkdirSync(path.dirname(reportFile), { recursive: true });

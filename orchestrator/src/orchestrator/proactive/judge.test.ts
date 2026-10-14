@@ -23,7 +23,6 @@ function situationAt(hour: number, over: Partial<Situation> = {}): Situation {
         doorLocked: true,
         agenda: [],
         parcels: [],
-        mailActions: [],
         musicPlaying: false,
         ...over,
     };
@@ -307,22 +306,18 @@ async function run(): Promise<void> {
     const facts = returnMomentFacts(
         situationAt(18, {
             parcels: [{ label: 'chaussures ASOS', status: 'delivered' }],
-            mailActions: ['Relance impôts'],
         }),
     );
     assert.ok(facts.includes('chaussures ASOS'));
-    assert.ok(facts.includes('1 mail'));
 
     // ── Deltas de situation ───────────────────────────────────────────────
     const d = diffSituation(
         situationAt(9, { parcels: [{ label: 'colis A', status: 'shipped' }] }),
         situationAt(9, {
             parcels: [{ label: 'colis A', status: 'delivered' }],
-            mailActions: ['Facture EDF'],
         }),
     );
     assert.ok(d.some((x) => x.includes('colis A')));
-    assert.ok(d.some((x) => x.includes('Facture EDF')));
 
     console.log('All judge/bricks/moments tests passed');
 }
