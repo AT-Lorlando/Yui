@@ -250,6 +250,17 @@ async function run(): Promise<void> {
     assert.strictEqual(summary.unknownCount, 0);
     assert.strictEqual(summary.pendingCount, 0);
 
+    // ── Erreur MCP (isError) : le facteur la voit comme un échec ─────────
+    const toolCalls: string[] = [];
+    deps.callToolWithStatus = async (tool) => {
+        toolCalls.push(tool);
+        return { result: 'invalid_grant', isError: true };
+    };
+    const failed = await engine.courier.scan();
+    assert.strictEqual(failed.error, 'invalid_grant');
+    assert.deepStrictEqual(toolCalls, ['list_messages_meta']);
+    delete deps.callToolWithStatus;
+
     console.log('All engine-mail tests passed');
 }
 

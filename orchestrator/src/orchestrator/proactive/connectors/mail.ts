@@ -6,6 +6,13 @@
 // point), jamais `urgent`, pour que le juge ne pousse pas une seconde fois.
 // Les faits d'un mail lu sans alerte et les ordres satisfaits deviennent des
 // événements `info`, retenus sans juge pour le prochain point.
+//
+// `events()` n'attend JAMAIS le scan : il vide d'abord les files (remplies
+// par le scan PRÉCÉDENT), puis relance scan + balayage en arrière-plan. Un
+// scan (Gmail + lecteur IA) peut dépasser le délai du runner
+// (POLL_TIMEOUT_MS) : attendu ici, son dépassement jetterait les avis déjà
+// vidés. Conséquence assumée : les avis d'un scan sortent au poll SUIVANT
+// (la sortie immédiate, elle, part déjà de notifyMail).
 import {
     SUBJECT_MAX,
     TODO_TITLE_MAX,
@@ -15,6 +22,7 @@ import {
 } from '../events';
 import type { Event, Fact } from '../events';
 import type { ConnectorDef } from '../connector';
+import Logger from '../../../logger';
 import type { ReaderItem } from '../mail/reader';
 import type { MailOrder } from '../mail/orders';
 
@@ -101,9 +109,6 @@ export function mailConnector(services: MailConnectorServices): ConnectorDef {
             },
         ],
         async events(ctx): Promise<Event[]> {
-            const { courier } = services;
-            await courier.scan();
-            await courier.sweep();
             const now = ctx.now();
             const out: Event[] = [];
 
@@ -176,6 +181,14 @@ export function mailConnector(services: MailConnectorServices): ConnectorDef {
                     ttlMs: INFO_TTL_MS,
                 });
             }
+            // scan unique (partagé avec POST /mail/scan), jamais attendu
+            const { courier } = services;
+            void courier
+                .scan()
+                .then(() => courier.sweep())
+                .catch((e) =>
+                    Logger.warn(`courrier : scan de fond en échec : ${e}`),
+                );
             return out;
         },
         async snapshot(ctx): Promise<Fact[]> {

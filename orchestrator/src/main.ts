@@ -174,6 +174,8 @@ async function main() {
         presenceState: () => presence.getState(),
         subscribePresence: (cb) => presence.onChange(cb),
         deviceHandler: (tool, args) => orchestrator.callTool(tool, args ?? {}),
+        callToolWithStatus: (tool, args) =>
+            orchestrator.callToolWithStatus(tool, args),
         runScene: makeSceneRunner,
     });
 

@@ -17,6 +17,7 @@ import {
     newSpamSender,
 } from './senders';
 import { OrderStore } from './orders';
+import { BadRequestError, NotFoundError } from './errors';
 import { MailJournal } from './journal';
 import type { ReaderItem } from './reader';
 
@@ -403,11 +404,12 @@ async function run() {
         assert.ok(t.prompts[0].user.includes('SNIPPET-B1'));
     }
 
-    // (e) sweep : trash_email pour chaque id, journal trash, pas de 2e passage avant 24 h
+    // (e) sweep : trash_email pour chaque id ENCORE osef, journal trash, pas de 2e passage avant 24 h
+    const SWEEP_Q = 'label:"Yui/Spam" older_than:15d -in:inbox';
     {
         const t = setup({
             list: (q) =>
-                q === 'label:"Yui/Spam" older_than:15d'
+                q === SWEEP_Q
                     ? [
                           { id: 'old1', from: 'a@promo.io', subject: 'x' },
                           { id: 'old2', from: 'b@promo.io', subject: 'y' },
@@ -418,7 +420,7 @@ async function run() {
         assert.strictEqual(n, 2);
         const list = byTool(t.calls, 'list_messages_meta');
         assert.deepStrictEqual(list[0].args, {
-            query: 'label:"Yui/Spam" older_than:15d',
+            query: SWEEP_Q,
             maxResults: 50,
         });
         assert.deepStrictEqual(
@@ -447,6 +449,35 @@ async function run() {
         assert.strictEqual(s.byStage.trash, 5);
     }
 
+    // sweep : le label seul ne suffit pas — un expéditeur passé « à garder »
+    // ou retiré des listes n'est pas jeté, son Yui/Spam est retiré
+    {
+        const t = setup({
+            list: (q) =>
+                q === SWEEP_Q
+                    ? [
+                          { id: 's1', from: 'a@promo.io', subject: 'x' },
+                          { id: 's2', from: 'b@qonto.com', subject: 'y' },
+                          { id: 's3', from: 'c@ailleurs.fr', subject: 'z' },
+                      ]
+                    : [],
+        });
+        assert.strictEqual(await t.courier.sweep(), 1);
+        assert.deepStrictEqual(
+            byTool(t.calls, 'trash_email').map((c) => c.args),
+            [{ messageId: 's1' }],
+        );
+        assert.deepStrictEqual(
+            byTool(t.calls, 'modify_labels').map((c) => c.args),
+            [
+                { messageId: 's2', remove: [SPAM_LABEL] },
+                { messageId: 's3', remove: [SPAM_LABEL] },
+            ],
+        );
+        assert.strictEqual(t.journal.size(), 1);
+        assert.strictEqual(t.courier.getState().stats.trashed, 1);
+    }
+
     // (f) applySender : range rétroactivement, jamais de trash_email
     {
         const t = setup({
@@ -460,19 +491,24 @@ async function run() {
                       ]
                     : [],
         });
-        const sp = await t.courier.applySender(t.spam.id);
-        assert.deepStrictEqual(sp, { matched: 1, applied: 1 });
+        // osef : refusé (400), aucun appel Gmail
+        await assert.rejects(
+            () => t.courier.applySender(t.spam.id),
+            (e: unknown) =>
+                e instanceof BadRequestError &&
+                /expéditeurs à garder/.test(e.message),
+        );
+        assert.strictEqual(t.calls.length, 0);
         const kp = await t.courier.applySender(t.qonto.id, 30);
         assert.deepStrictEqual(kp, { matched: 1, applied: 1 });
         const lists = byTool(t.calls, 'list_messages_meta');
-        assert.deepStrictEqual(lists[1].args, {
+        assert.deepStrictEqual(lists[0].args, {
             query: 'from:qonto.com newer_than:90d',
             maxResults: 30,
         });
         assert.deepStrictEqual(
             byTool(t.calls, 'modify_labels').map((c) => c.args),
             [
-                { messageId: 'r1', add: [SPAM_LABEL], archive: true },
                 // gardé l'emporte sur osef : Yui/Spam retiré (sinon le balayage le jetterait)
                 {
                     messageId: 'r3',
@@ -483,7 +519,10 @@ async function run() {
             ],
         );
         assert.strictEqual(byTool(t.calls, 'trash_email').length, 0);
-        await assert.rejects(() => t.courier.applySender('nope'));
+        await assert.rejects(
+            () => t.courier.applySender('nope'),
+            (e: unknown) => e instanceof NotFoundError,
+        );
     }
 
     // dryRun : verdicts sans aucune écriture
@@ -601,6 +640,151 @@ async function run() {
         const ids = t.courier.getState().processedIds;
         assert.strictEqual(ids.length, 1000);
         assert.strictEqual(ids[0], 'c1-0');
+    }
+
+    // scan unique : deux appels concurrents partagent la même exécution
+    {
+        const t = setup({
+            list: () => [{ id: 'sf1', from: 'a@promo.io', subject: 'x' }],
+        });
+        const [a, b] = await Promise.all([t.courier.scan(), t.courier.scan()]);
+        assert.strictEqual(a, b, 'même promesse, même résultat');
+        assert.strictEqual(byTool(t.calls, 'list_messages_meta').length, 1);
+        // terminé : le scan suivant repart
+        await t.courier.scan();
+        assert.strictEqual(byTool(t.calls, 'list_messages_meta').length, 2);
+    }
+
+    // erreurs MCP rendues en texte (« Error: … ») = échecs
+    {
+        // modify_labels en échec → non traité, retenté au poll suivant
+        let failLabels = true;
+        const t = setup({
+            list: () => [{ id: 'e1', from: 'a@promo.io', subject: 'x' }],
+        });
+        const orig = t.deps.deviceHandler;
+        t.deps.deviceHandler = async (tool, args) => {
+            if (tool === 'modify_labels' && failLabels) {
+                orig(tool, args); // tracé
+                return 'Error: boom';
+            }
+            return orig(tool, args);
+        };
+        const r1 = await t.courier.scan();
+        assert.strictEqual(r1.spammed, 0);
+        assert.strictEqual(t.journal.size(), 0, 'rien de journalisé');
+        assert.ok(!t.courier.getState().processedIds.includes('e1'));
+        assert.strictEqual(t.senders.spam()[0].hits, 0, 'pas de hit compté');
+        failLabels = false;
+        const r2 = await t.courier.scan();
+        assert.strictEqual(r2.spammed, 1);
+        assert.ok(t.courier.getState().processedIds.includes('e1'));
+        assert.strictEqual(byTool(t.calls, 'modify_labels').length, 2);
+    }
+    {
+        // trash_email en échec → pas compté
+        const t = setup({
+            list: (q) =>
+                q.startsWith('label:')
+                    ? [{ id: 'e2', from: 'a@promo.io', subject: 'x' }]
+                    : [],
+        });
+        const orig = t.deps.deviceHandler;
+        t.deps.deviceHandler = async (tool, args) =>
+            tool === 'trash_email' ? 'Erreur : quota' : orig(tool, args);
+        assert.strictEqual(await t.courier.sweep(), 0);
+        assert.strictEqual(t.courier.getState().stats.trashed, 0);
+        assert.strictEqual(t.journal.size(), 0);
+    }
+    {
+        // get_email en échec → l'extrait est lu à la place
+        const t = setup({
+            list: () => [
+                {
+                    id: 'e3',
+                    from: 'x@inconnu.fr',
+                    subject: 's',
+                    snippet: 'SNIPPET-E3',
+                },
+            ],
+            replies: [
+                '[{"i":1,"notify":false,"urgency":"none","reason":"","facts":[]}]',
+            ],
+        });
+        const orig = t.deps.deviceHandler;
+        t.deps.deviceHandler = async (tool, args) =>
+            tool === 'get_email' ? 'Error: boom' : orig(tool, args);
+        await t.courier.scan();
+        assert.ok(t.prompts[0].user.includes('SNIPPET-E3'));
+        assert.ok(!t.prompts[0].user.includes('boom'));
+    }
+    {
+        // corps vide après nettoyage → l'extrait
+        const t = setup({
+            list: () => [
+                {
+                    id: 'e5',
+                    from: 'x@inconnu.fr',
+                    subject: 's',
+                    snippet: 'SNIPPET-E5',
+                },
+            ],
+            replies: [
+                '[{"i":1,"notify":false,"urgency":"none","reason":"","facts":[]}]',
+            ],
+        });
+        const orig = t.deps.deviceHandler;
+        t.deps.deviceHandler = async (tool, args) =>
+            tool === 'get_email'
+                ? 'From: x\n--- Corps ---\n   '
+                : orig(tool, args);
+        await t.courier.scan();
+        assert.ok(t.prompts[0].user.includes('SNIPPET-E5'));
+    }
+    {
+        // list_messages_meta en échec → erreur rapportée, rien n'est fait
+        const t = setup({});
+        t.deps.deviceHandler = async (tool, args = {}) => {
+            t.calls.push({ tool, args });
+            return 'Error: invalid_grant';
+        };
+        const r = await t.courier.scan();
+        assert.ok(r.error && /invalid_grant/.test(r.error));
+        assert.strictEqual(r.scanned, 0);
+        assert.strictEqual(t.calls.length, 1);
+        assert.strictEqual(t.courier.getState().lastScanAt, 0);
+        assert.strictEqual(t.journal.size(), 0);
+    }
+
+    // inconnus de la migration posés dans la file, sans écraser l'existant
+    {
+        const t = setup({});
+        assert.strictEqual(
+            t.courier.seedUnknown([
+                { match: 'News.Shop.com' },
+                { match: 'bot@x.fr' },
+            ]),
+            2,
+        );
+        const u = t.courier
+            .unknown()
+            .find((x) => x.address === 'news.shop.com')!;
+        assert.deepStrictEqual(
+            { ...u, lastAt: 0 },
+            {
+                address: 'news.shop.com',
+                from: 'News.Shop.com',
+                count: 0,
+                lastSubject: '',
+                lastAt: 0,
+                lastMailId: '',
+                signal: 'quarantaine',
+            },
+        );
+        assert.strictEqual(t.courier.seedUnknown([{ match: 'bot@x.fr' }]), 0);
+        // relu depuis le disque
+        const c2 = new MailCourier(t.deps, t.stateFile);
+        assert.strictEqual(c2.unknown().length, 2);
     }
 
     // état illisible → repart à vide

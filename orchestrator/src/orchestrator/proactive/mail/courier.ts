@@ -3,7 +3,7 @@
 // fait lire par l'IA les mails « à lire » (ordres de lecture compris), et
 // met à la corbeille les osef de plus de 15 jours. Jamais de suppression
 // définitive ; seul le balayage appelle trash_email.
-import { NotFoundError } from './errors';
+import { BadRequestError, NotFoundError } from './errors';
 import * as fs from 'fs';
 import * as path from 'path';
 import { dataPath } from '@yui/shared';
@@ -101,7 +101,15 @@ const UNKNOWN_MAX = 200;
 const UNKNOWN_SHOWN = 100;
 const PENDING_MAX = 200;
 const DAY_MS = 86_400_000;
-const SWEEP_QUERY = `label:"${SPAM_LABEL}" older_than:${TRASH_AFTER_DAYS}d`;
+// -in:inbox : un mail remis en boîte de réception à la main n'est plus un osef
+const SWEEP_QUERY = `label:"${SPAM_LABEL}" older_than:${TRASH_AFTER_DAYS}d -in:inbox`;
+
+/**
+ * `orchestrator.callTool` rend le texte « Error: … » au lieu de lever quand
+ * le MCP signale `isError` ; le moteur lève déjà (callToolWithStatus), ceci
+ * est la défense en profondeur.
+ */
+const TOOL_ERROR = /^(Error|Erreur)\b/i;
 
 function chunks<T>(arr: T[], size: number): T[][] {
     const out: T[][] = [];
@@ -144,6 +152,8 @@ type Conclusion = Pick<
 >;
 
 interface ScanResult {
+    /** Liste Gmail en échec : rien n'a été fait. */
+    error?: string;
     scanned: number;
     kept: number;
     spammed: number;
@@ -156,6 +166,8 @@ export class MailCourier {
     private file: string;
     private state: CourierState = emptyState();
     private processed = new Set<string>();
+    private inflightScan: Promise<ScanResult> | null = null;
+    private inflightSweep: Promise<number> | null = null;
 
     constructor(private deps: CourierDeps, stateFile?: string) {
         this.file = stateFile ?? dataPath('mail-courier.json');
@@ -170,12 +182,37 @@ export class MailCourier {
         return this.state;
     }
 
-    async scan(
-        query = 'in:inbox newer_than:2d',
-        max = 40,
-    ): Promise<ScanResult> {
+    /** Appel d'outil ; un résultat texte « Error: … » / « Erreur … » lève. */
+    private async call(
+        tool: string,
+        args: Record<string, unknown>,
+    ): Promise<unknown> {
+        const r = await this.deps.deviceHandler(tool, args);
+        if (typeof r === 'string' && TOOL_ERROR.test(r.trimStart())) {
+            throw new Error(r.trim());
+        }
+        return r;
+    }
+
+    /**
+     * Un seul scan à la fois : le poll du connecteur et POST /mail/scan
+     * partagent l'exécution en cours (sinon deux scans rangeraient et
+     * feraient lire les mêmes mails).
+     */
+    scan(query = 'in:inbox newer_than:2d', max = 40): Promise<ScanResult> {
+        if (this.inflightScan) return this.inflightScan;
+        const p = this.doScan(query, max).finally(() => {
+            this.inflightScan = null;
+        });
+        this.inflightScan = p;
+        return p;
+    }
+
+    private async doScan(query: string, max: number): Promise<ScanResult> {
         const now = this.now();
-        const { deviceHandler, senders } = this.deps;
+        const { senders } = this.deps;
+        const deviceHandler = (tool: string, args: Record<string, unknown>) =>
+            this.call(tool, args);
         const res: ScanResult = {
             scanned: 0,
             kept: 0,
@@ -192,12 +229,20 @@ export class MailCourier {
             if (c.notify) res.notified++;
         };
 
-        const listed = parseMetaList(
-            await deviceHandler('list_messages_meta', {
-                query,
-                maxResults: max,
-            }),
-        );
+        let listed: CourierMail[];
+        try {
+            listed = parseMetaList(
+                await deviceHandler('list_messages_meta', {
+                    query,
+                    maxResults: max,
+                }),
+            );
+        } catch (e) {
+            // Gmail indisponible (jeton expiré…) : rien n'est rangé ni lu
+            Logger.warn(`courrier : liste Gmail en échec : ${e}`);
+            res.error = String((e as Error)?.message ?? e);
+            return res;
+        }
         res.scanned = listed.length;
         const pending = this.state.pending ?? (this.state.pending = {});
         const byId = new Map<string, CourierMail>();
@@ -219,12 +264,12 @@ export class MailCourier {
             try {
                 if (v.kind === 'keep') {
                     if (before !== 'keep') {
-                        senders.recordHit(v.sender.id, now);
                         await deviceHandler('modify_labels', {
                             messageId: m.id,
                             add: [v.label],
                             archive: true,
                         });
+                        senders.recordHit(v.sender.id, now);
                     }
                     if (v.read) toRead.push({ mail: m, verdict: v });
                     else
@@ -236,12 +281,12 @@ export class MailCourier {
                             }),
                         );
                 } else if (v.kind === 'spam') {
-                    senders.recordHit(v.sender.id, now);
                     await deviceHandler('modify_labels', {
                         messageId: m.id,
                         add: [SPAM_LABEL],
                         archive: true,
                     });
+                    senders.recordHit(v.sender.id, now);
                     tally(this.conclude(m, { stage: 'spam', read: false }));
                 } else {
                     if (!before) this.rememberUnknown(m, now);
@@ -273,20 +318,22 @@ export class MailCourier {
         batch: Array<{ mail: CourierMail; verdict: SenderVerdict }>,
         now: number,
     ): Promise<Conclusion[]> {
-        const { deviceHandler, orders } = this.deps;
+        const { orders } = this.deps;
         const boxOf = (v: SenderVerdict) =>
             v.kind === 'keep' ? v.sender.name : undefined;
         const readerMails: ReaderMail[] = [];
         for (const { mail, verdict } of batch) {
             let body = mail.snippet;
             try {
-                body = cleanBody(
-                    String(
-                        await deviceHandler('get_email', {
-                            messageId: mail.id,
-                        }),
-                    ),
-                );
+                // corps vide après nettoyage → l'extrait Gmail
+                body =
+                    cleanBody(
+                        String(
+                            await this.call('get_email', {
+                                messageId: mail.id,
+                            }),
+                        ),
+                    ) || mail.snippet;
             } catch (e) {
                 Logger.warn(`courrier : corps de ${mail.id} illisible : ${e}`);
             }
@@ -456,6 +503,32 @@ export class MailCourier {
             .slice(0, UNKNOWN_SHOWN);
     }
 
+    /**
+     * Inconnus proposés par la migration v2 (signaux non confirmés) : posés
+     * dans la file « à trier » pour que l'app les montre pré-cochés osef.
+     * Un inconnu déjà connu de la file n'est pas écrasé.
+     */
+    seedUnknown(entries: Array<{ match: string }>): number {
+        const now = this.now();
+        let added = 0;
+        for (const { match } of entries) {
+            const key = match.trim().toLowerCase();
+            if (!key || this.state.unknown[key]) continue;
+            this.state.unknown[key] = {
+                address: key,
+                from: match,
+                count: 0,
+                lastSubject: '',
+                lastAt: now,
+                lastMailId: '',
+                signal: 'quarantaine',
+            };
+            added++;
+        }
+        if (added) this.save();
+        return added;
+    }
+
     forgetUnknown(address: string): void {
         const key = address.trim().toLowerCase();
         if (!this.state.unknown[key]) return;
@@ -463,14 +536,28 @@ export class MailCourier {
         this.save();
     }
 
-    /** Corbeille des Yui/Spam de plus de 15 jours, au plus une fois par SWEEP_EVERY_MS. */
-    async sweep(): Promise<number> {
+    /**
+     * Corbeille des Yui/Spam de plus de 15 jours, au plus une fois par
+     * SWEEP_EVERY_MS. Le label seul ne suffit pas : un mail n'est jeté que
+     * si les listes le disent ENCORE osef (expéditeur passé « à garder » ou
+     * retiré entre-temps → label Yui/Spam retiré, plus jamais candidat).
+     */
+    sweep(): Promise<number> {
+        if (this.inflightSweep) return this.inflightSweep;
+        const p = this.doSweep().finally(() => {
+            this.inflightSweep = null;
+        });
+        this.inflightSweep = p;
+        return p;
+    }
+
+    private async doSweep(): Promise<number> {
         const now = this.now();
         if (now - this.state.lastSweepAt < SWEEP_EVERY_MS) return 0;
         let mails: CourierMail[];
         try {
             mails = parseMetaList(
-                await this.deps.deviceHandler('list_messages_meta', {
+                await this.call('list_messages_meta', {
                     query: SWEEP_QUERY,
                     maxResults: 50,
                 }),
@@ -482,8 +569,24 @@ export class MailCourier {
         this.state.lastSweepAt = now;
         let trashed = 0;
         for (const m of mails) {
+            if (resolveSender(this.deps.senders.file(), m).kind !== 'spam') {
+                Logger.debug(
+                    `courrier : ${m.id} n'est plus osef, ${SPAM_LABEL} retiré sans corbeille`,
+                );
+                try {
+                    await this.call('modify_labels', {
+                        messageId: m.id,
+                        remove: [SPAM_LABEL],
+                    });
+                } catch (e) {
+                    Logger.warn(
+                        `courrier : retrait de ${SPAM_LABEL} sur ${m.id} en échec : ${e}`,
+                    );
+                }
+                continue;
+            }
             try {
-                await this.deps.deviceHandler('trash_email', {
+                await this.call('trash_email', {
                     messageId: m.id,
                 });
             } catch (e) {
@@ -507,19 +610,29 @@ export class MailCourier {
         return trashed;
     }
 
-    /** Rangement rétroactif (≤ max mails sur 90 jours) ; JAMAIS de corbeille. */
+    /**
+     * Rangement rétroactif d'un « à garder » (≤ max mails sur 90 jours) ;
+     * JAMAIS de corbeille. Refusé pour un osef : étiqueter Yui/Spam des mois
+     * de courrier d'un coup les livrerait au balayage.
+     */
     async applySender(
         id: string,
         max = 100,
     ): Promise<{ matched: number; applied: number }> {
         const senders = this.deps.senders;
         const keep = senders.keep().find((s) => s.id === id);
-        const spam = keep ? undefined : senders.spam().find((s) => s.id === id);
-        const match = keep?.match ?? spam?.match;
-        if (!match) throw new NotFoundError(`Expéditeur introuvable : ${id}`);
-        const label = keep ? labelFor(keep) : SPAM_LABEL;
+        if (!keep) {
+            if (senders.spam().some((s) => s.id === id)) {
+                throw new BadRequestError(
+                    "le rangement rétroactif n'existe que pour les expéditeurs à garder",
+                );
+            }
+            throw new NotFoundError(`Expéditeur introuvable : ${id}`);
+        }
+        const match = keep.match;
+        const label = labelFor(keep);
         const mails = parseMetaList(
-            await this.deps.deviceHandler('list_messages_meta', {
+            await this.call('list_messages_meta', {
                 query: `from:${match} newer_than:90d`,
                 maxResults: max,
             }),
@@ -529,10 +642,10 @@ export class MailCourier {
             try {
                 // « à garder » l'emporte sur osef : retirer Yui/Spam, sinon le
                 // balayage mettrait ces mails à la corbeille 15 jours plus tard
-                await this.deps.deviceHandler('modify_labels', {
+                await this.call('modify_labels', {
                     messageId: m.id,
                     add: [label],
-                    ...(keep ? { remove: [SPAM_LABEL] } : {}),
+                    remove: [SPAM_LABEL],
                     archive: true,
                 });
                 applied++;
@@ -557,7 +670,7 @@ export class MailCourier {
     > {
         const file = this.deps.senders.file();
         return parseMetaList(
-            await this.deps.deviceHandler('list_messages_meta', {
+            await this.call('list_messages_meta', {
                 query,
                 maxResults: max,
             }),

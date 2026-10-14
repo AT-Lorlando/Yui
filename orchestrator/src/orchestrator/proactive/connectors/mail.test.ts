@@ -34,7 +34,52 @@ function notice(
     };
 }
 
+/** events() rend les avis du scan précédent sans attendre le scan lancé. */
+async function neverWaitsForScan(): Promise<void> {
+    let scanStarted = 0;
+    let sweeps = 0;
+    let queued: MailNotice[] = [notice('prev', 'soon')];
+    const c = mailConnector({
+        courier: {
+            // scan qui ne se termine jamais pendant le test
+            scan: () => {
+                scanStarted++;
+                return new Promise(() => {});
+            },
+            sweep: async () => {
+                sweeps++;
+                return 0;
+            },
+            unknown: () => [],
+        },
+        orders: { active: () => [] },
+        takeNotified: () => queued.splice(0),
+        takeFacts: () => [],
+        takeFulfilled: () => [],
+    });
+    const ctx = {
+        callTool: async () => null,
+        settings: {},
+        state: new ConnectorState(),
+        presence: () => 'home',
+        now: () => NOW,
+        log: { info: () => {}, warn: () => {} },
+    } as unknown as ConnectorContext;
+    const timeout = new Promise<'timeout'>((r) =>
+        setTimeout(() => r('timeout'), 500),
+    );
+    const evs = await Promise.race([c.events!(ctx), timeout]);
+    assert.notStrictEqual(evs, 'timeout', 'events() attend le scan');
+    assert.deepStrictEqual(
+        (evs as Array<{ key: string }>).map((e) => e.key),
+        ['mail-notify-prev'],
+    );
+    assert.strictEqual(scanStarted, 1, 'scan lancé en arrière-plan');
+    assert.strictEqual(sweeps, 0, 'balayage après le scan seulement');
+}
+
 async function run(): Promise<void> {
+    await neverWaitsForScan();
     const now = NOW;
     let scans = 0;
     let sweeps = 0;
@@ -79,6 +124,7 @@ async function run(): Promise<void> {
 
     // ── Rien à drainer : scan + balayage quand même, aucun événement ─────
     assert.deepStrictEqual(await c.events!(ctx), []);
+    await new Promise((r) => setImmediate(r)); // scan + balayage de fond
     assert.strictEqual(scans, 1, 'scan à chaque poll');
     assert.strictEqual(
         sweeps,

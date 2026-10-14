@@ -183,11 +183,10 @@ export class ProactiveEngine {
         // Courrier v3 : listes d'expéditeurs (migrées une fois des règles v2),
         // ordres de lecture, facteur.
         this.mailSenders = new SenderStore();
-        migrateMailRulesAtBoot(this.mailSenders, this.now());
         this.mailOrders = new OrderStore();
         this.mailJournal = new MailJournal();
         this.courier = new MailCourier({
-            deviceHandler: (t, a) => this.deps.deviceHandler(t, a),
+            deviceHandler: (t, a) => this.mailToolCall(t, a),
             complete: (sys, user) => this.deps.complete(sys, user),
             senders: this.mailSenders,
             orders: this.mailOrders,
@@ -200,6 +199,10 @@ export class ProactiveEngine {
             onFulfilled: (m, item, order) =>
                 this.mailOrderFulfilled(m, item, order),
             now: this.now,
+        });
+        // Après le facteur : les inconnus du rapport rejoignent sa file.
+        migrateMailRulesAtBoot(this.mailSenders, this.now(), {
+            seedUnknown: (entries) => this.courier.seedUnknown(entries),
         });
         this.connectors = buildConnectors({
             mail: {
@@ -222,6 +225,26 @@ export class ProactiveEngine {
         // État de module : les briques des connecteurs doivent être connues de
         // `getBricks()`/`isBrickEnabled` dès la construction, pas au `start()`.
         registerConnectorBricks(this.connectors);
+    }
+
+    /**
+     * Appel d'outil du facteur : une erreur MCP (`isError`) LÈVE au lieu de
+     * rendre le texte « Error: … » — sinon un modify_labels raté serait
+     * journalisé appliqué et le mail marqué traité.
+     */
+    private async mailToolCall(
+        tool: string,
+        args?: Record<string, unknown>,
+    ): Promise<unknown> {
+        if (!this.deps.callToolWithStatus) {
+            return this.deps.deviceHandler(tool, args);
+        }
+        const { result, isError } = await this.deps.callToolWithStatus(
+            tool,
+            args ?? {},
+        );
+        if (isError) throw new Error(String(result));
+        return result;
     }
 
     /** La brique qui gouverne une source : le connecteur/moment lui-même s'il

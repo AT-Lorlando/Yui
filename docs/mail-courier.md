@@ -2,7 +2,7 @@
 
 Yui range le courrier par **expéditeur** (trois listes) et confie la lecture à un **lecteur IA** qui ne répond qu'à une question : *faut-il prévenir Jérémy ?* Plus de catégories, plus de quarantaine, plus de règles par signal : le tri en quatre étages du 28/09 a disparu.
 
-Code : `orchestrator/src/orchestrator/proactive/mail/` — `senders.ts` (listes, résolution), `courier.ts` (le facteur : poll, rangement, lecture, balayage), `reader.ts` (prompt et parse du lecteur), `bodyClean.ts`, `orders.ts`, `migrate.ts` + `bootMigration.ts`, `journal.ts`, `signals.ts`. Le connecteur `mail` (`proactive/connectors/mail.ts`) fait tourner le facteur à chaque poll.
+Code : `orchestrator/src/orchestrator/proactive/mail/` — `senders.ts` (listes, résolution), `courier.ts` (le facteur : poll, rangement, lecture, balayage), `reader.ts` (prompt et parse du lecteur), `bodyClean.ts`, `orders.ts`, `migrate.ts` + `bootMigration.ts`, `journal.ts`, `signals.ts`. Le connecteur `mail` (`proactive/connectors/mail.ts`) fait tourner le facteur à chaque poll — **sans l'attendre** : il vide d'abord les files du scan précédent, puis relance scan + balayage en arrière-plan (un scan peut dépasser le délai de 60 s du runner) ; les événements d'un scan sortent donc au poll suivant. Le scan est unique (`POST /mail/scan` rejoint celui en cours).
 
 ## Les trois listes
 
@@ -45,7 +45,7 @@ Une regex de sujet invalide est ignorée (un seul avertissement par expéditeur)
 
 **Inconnus** : chaque expéditeur inconnu entre dans la file « Nouveaux expéditeurs » de l'app (adresse, nombre, dernier sujet ; 200 max, état dans `mail-courier.json`). Un geste « Garder » (nom + lecture) ou « Osef » le sort de la file. Les signaux de masse (`List-Unsubscribe`, `List-Id`, `Precedence: bulk|list`, `Auto-Submitted`, partie locale `no-reply`/`alerts`…, `detectSignal` dans `signals.ts`) **ne décident rien** : ils pré-cochent « Osef » dans cette file. Un inconnu non traité revient à chaque mail — jamais de spam implicite.
 
-**Rangement rétroactif** (`POST /mail/senders/:id/apply`) : les mails des 90 derniers jours de l'expéditeur (≤ 100 par défaut, 200 max) reçoivent son label et sont archivés ; un « à garder » retire au passage `Yui/Spam`. Jamais de corbeille rétroactive.
+**Rangement rétroactif** (`POST /mail/senders/:id/apply`) : les mails des 90 derniers jours de l'expéditeur (≤ 100 par défaut, 200 max) reçoivent son label et sont archivés ; un « à garder » retire au passage `Yui/Spam`. **Refusé pour un osef** (400 : étiqueter des mois de courrier `Yui/Spam` les livrerait au balayage). Jamais de corbeille rétroactive.
 
 ## Le lecteur IA
 
@@ -89,7 +89,7 @@ Tool LLM `mail_watch {text (5–300), days? (1–60, défaut 14)}` — « Yui, p
 
 ## Balayage osef
 
-Une fois par jour (dans le poll du connecteur `mail`) : `label:"Yui/Spam" older_than:15d` → `trash_email` par lot de 50, journal `stage: trash`. **Corbeille seulement**, jamais de suppression définitive : Gmail purge la corbeille 30 jours plus tard, soit 45 jours récupérables au total.
+Une fois par jour (après le scan de fond du connecteur `mail`) : `label:"Yui/Spam" older_than:15d -in:inbox` → par lot de 50, **revérifié contre les listes** : seul un mail que `resolveSender` dit encore osef part en `trash_email` (journal `stage: trash`) ; un autre (expéditeur passé « à garder » ou retiré) perd son label `Yui/Spam` et n'est plus candidat. **Corbeille seulement**, jamais de suppression définitive : Gmail purge la corbeille 30 jours plus tard, soit 45 jours récupérables au total.
 
 ## Fichiers
 
@@ -110,9 +110,10 @@ Une fois, au démarrage du moteur (`migrateMailRulesAtBoot`), si `mail-senders.j
 
 - catégories `promo`, `newsletter`, `osef`, `notification` → **osef** ;
 - `finance`, `securite`, `admin`, `commande`, `evenement`, `action`, `lire`, `perso` → **à garder**, `name` = label de deuxième niveau du domaine avec majuscule (`qonto.com` → Qonto, `notif.laposte.fr` → Laposte ; une adresse sur un domaine grand public prend sa partie locale), noms dédoublonnés ; `read: always` pour `action`/`securite`/`lire`/`perso`, `never` sinon ;
-- une règle `{from, subject}` devient une règle de contenu de l'expéditeur (`read: rules`, `readDefault` = ancien mode) ;
-- « pas du bruit » (`category: null`) et règles sans expéditeur → **supprimées** (l'expéditeur redevient inconnu) ;
-- signaux en quarantaine (non confirmés) → rapport `unknown`, pré-cochés osef dans la file.
+- une règle `{from, subject}` devient une règle de contenu de l'expéditeur (`read: rules`, `readDefault` = ancien mode ; sans règle d'expéditeur seul, `readDefault: true` — en v2 le reste de ses mails allait au lecteur) ;
+- « pas du bruit » (`category: null`) **couverte par un osef** (`matchesFrom(osef, from)`, ex. `airbnb.com → promo` + `null` sur `réservation|reçu|facture`, `calendar-notification@google.com` sous `google.com → osef`) → **à garder** : expéditeur seul → `read: always` ; avec sujet → `read: rules` + `{subject, read: true}`, `readDefault: false` (fusionnée dans le « à garder » existant de même `match`). Le « à garder » l'emporte sur l'osef. Non couverte → supprimée (l'expéditeur redevient inconnu) ; règles sans expéditeur → supprimées ;
+- `match` trop large (sans `.` ni `@`, ou domaine grand public nu) → supprimé (comptée dans `dropped`) ;
+- signaux en quarantaine (non confirmés) → rapport `unknown`, **posés dans la file des inconnus** du facteur au démarrage (`seedUnknown`, `signal: quarantaine`), pré-cochés osef dans l'app.
 
 Puis `mail-senders.json` est écrit, le rapport posé dans `mail-migration.json`, et `mail-rules.json` renommé **`mail-rules.v2.bak.json`**. Un échec laisse `mail-rules.json` en place (nouvel essai au démarrage suivant). La section `concierge` de `proactive.json` est ignorée si elle traîne encore.
 
@@ -133,7 +134,7 @@ Authentification Bearer sur toutes les routes (`input/routes/mail.ts`).
 | `/mail/orders` | POST | `{text, days? 1–60}` → nouvel ordre (201, 400 si trop long ou plafond atteint) |
 | `/mail/orders/:id` | DELETE | Supprime un ordre (204 / 404) |
 | `/mail/dry-run` | POST | `{query?, max? ≤ 100}` → verdict des listes par mail, **aucune écriture** |
-| `/mail/scan` | POST | Lance un poll du facteur maintenant |
+| `/mail/scan` | POST | Lance un poll du facteur maintenant (scan unique : rejoint celui en cours s'il y en a un ; `error` si la liste Gmail échoue) |
 | `/mail/journal?limit=50&scope=actions` | GET | Décisions (défaut 50, max 200) |
 | `/mail/stats?days=7` | GET | Compteurs du journal par étage (1–90 jours) |
 | `/mail/migration` | GET | Rapport de migration, 404 s'il n'y en a pas |
@@ -168,3 +169,5 @@ Le contrat JSON est ajouté par le code après ce texte (et après les ordres) :
 - Jamais de suppression définitive ; la corbeille ne concerne que `Yui/Spam` de plus de 15 jours.
 - Archivage uniquement par un label de boîte ou osef ; un inconnu reste en boîte de réception.
 - Le facteur ne lève jamais vers le connecteur : un rangement en échec est retenté au poll suivant.
+- Une erreur MCP est un échec, jamais un succès : le moteur passe par `callToolWithStatus` (`isError` → lève) et le facteur traite en plus tout résultat texte `Error…`/`Erreur…` comme une exception (`modify_labels` raté → mail non traité ; `trash_email` raté → non compté ; `get_email` raté ou corps vide après nettoyage → extrait Gmail ; liste en échec → scan sans effet, `error` rendu).
+- `match` sûr (listes, routes, PUT du fichier) : un `.` ou un `@`, jamais un domaine grand public nu (`gmail.com` → 400 « précise l'adresse pour un domaine grand public »). Au chargement, une entrée ancienne qui ne passe pas est écartée avec un avertissement, pas tout le fichier.

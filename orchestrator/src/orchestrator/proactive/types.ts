@@ -94,6 +94,14 @@ export interface ProactiveDeps {
         args?: Record<string, unknown>,
     ) => Promise<unknown>;
     runScene: (id: string) => Promise<{ success: boolean; error?: string }>;
+    /**
+     * Appel d'outil qui distingue l'erreur MCP (`isError`) — le facteur du
+     * courrier s'en sert pour lever sur un échec Gmail. Absent → deviceHandler.
+     */
+    callToolWithStatus?: (
+        tool: string,
+        args: Record<string, unknown>,
+    ) => Promise<{ result: unknown; isError: boolean }>;
     /** Horloge injectable pour les tests. */
     now?: () => number;
 }
