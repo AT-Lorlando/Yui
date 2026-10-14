@@ -107,6 +107,38 @@ function run(): void {
         { subject: 'urgent', read: true },
     ]);
 
+    // keep wins over spam, whatever the order
+    const r3 = migrateRulesToSenders(
+        [
+            rule({ from: 'x.com' }, 'promo'),
+            rule({ from: 'x.com' }, 'action'),
+            rule({ from: 'y.com' }, 'action'),
+            rule({ from: 'y.com' }, 'promo'),
+            rule({ from: 'z.com' }, 'promo'),
+            rule({ from: 'z.com', subject: 'rdv' }, 'action'),
+            rule({ from: 'w.com', subject: 'deal' }, 'promo'),
+            rule({ from: 'y.com', subject: 'deal' }, 'promo'),
+        ],
+        1,
+    );
+    assert.deepStrictEqual(r3.file.spam, []);
+    assert.deepStrictEqual(r3.file.keep.map((k) => k.match).sort(), [
+        'x.com',
+        'y.com',
+        'z.com',
+    ]);
+    assert.strictEqual(r3.report.dropped, 1);
+    const y = r3.file.keep.find((k) => k.match === 'y.com')!;
+    assert.deepStrictEqual(y.rules, [{ subject: 'deal', read: false }]);
+    assert.strictEqual(y.readDefault, true);
+
+    assert.strictEqual(
+        nameFromMatch('trailmarguestaud@gmail.com'),
+        'Trailmarguestaud',
+    );
+    assert.strictEqual(nameFromMatch('@gmail.com'), 'Gmail');
+    assert.strictEqual(nameFromMatch('QONTO.COM'), 'Qonto');
+
     console.log('migrate: all tests passed');
 }
 

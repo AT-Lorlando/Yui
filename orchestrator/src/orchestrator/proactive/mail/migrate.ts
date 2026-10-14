@@ -29,11 +29,35 @@ export const READ_ALWAYS_CATEGORIES = new Set([
     'perso',
 ]);
 
+const PUBLIC_DOMAINS = new Set([
+    'gmail.com',
+    'googlemail.com',
+    'outlook.com',
+    'hotmail.com',
+    'live.com',
+    'yahoo.com',
+    'yahoo.fr',
+    'icloud.com',
+    'me.com',
+    'free.fr',
+    'orange.fr',
+    'wanadoo.fr',
+    'sfr.fr',
+    'laposte.net',
+    'proton.me',
+    'protonmail.com',
+]);
+
 /** Nom d'affichage : label de 2e niveau du domaine, majuscule initiale, ≤ 40 car. */
 export function nameFromMatch(match: string): string {
-    const domain = match.includes('@')
-        ? match.slice(match.lastIndexOf('@') + 1)
-        : match;
+    const m = match.trim().toLowerCase();
+    const at = m.lastIndexOf('@');
+    const domain = at >= 0 ? m.slice(at + 1) : m;
+    const local = at > 0 ? m.slice(0, at) : '';
+    if (local && PUBLIC_DOMAINS.has(domain)) {
+        const l = local.replace(/\//g, '').trim();
+        if (l) return (l[0].toUpperCase() + l.slice(1)).slice(0, 40);
+    }
     const parts = domain.split('.').filter(Boolean);
     const label =
         (parts.length >= 2 ? parts[parts.length - 2] : parts[0]) ?? '';
@@ -80,6 +104,13 @@ export function migrateRulesToSenders(
     const spamOf = (m: string) =>
         spam.find((s) => s.match.toLowerCase() === m.toLowerCase());
 
+    const removeSpam = (m: string) => {
+        const i = spam.findIndex(
+            (x) => x.match.toLowerCase() === m.toLowerCase(),
+        );
+        if (i >= 0) spam.splice(i, 1);
+    };
+
     const live: MailRule[] = [];
     for (const r of rules) {
         if (!r.confirmed) {
@@ -117,6 +148,7 @@ export function migrateRulesToSenders(
             mergeStats(ex, r);
             continue;
         }
+        removeSpam(match);
         const k = newKeepSender(
             {
                 match,
@@ -134,7 +166,12 @@ export function migrateRulesToSenders(
         const match = r.when.from as string;
         const cat = r.then.category as string;
         let k = keepOf(match);
+        if (!k && SPAM_CATEGORIES.has(cat)) {
+            dropped++;
+            continue;
+        }
         if (!k) {
+            removeSpam(match);
             k = newKeepSender(
                 {
                     match,
