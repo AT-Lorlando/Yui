@@ -12,8 +12,8 @@ export function buildConnectors(services: ConnectorServices): ConnectorDef[] {
         weatherConnector,
         presenceConnector(services.subscribePresence),
         calendarConnector,
-        mailConnector({ concierge: services.concierge }),
-        deliveriesConnector(services.complete),
+        mailConnector(services.mail),
+        deliveriesConnector(services.complete, services.orders),
         yojiConnector,
     ];
 }

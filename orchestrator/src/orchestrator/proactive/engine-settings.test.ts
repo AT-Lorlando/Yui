@@ -11,12 +11,11 @@ import type { PresenceState } from '../presence';
 // YUI_DATA_DIR posé AVANT de résoudre les modules : leurs dataPath() sont
 // figés au chargement (même contrainte que engine-action.test.ts).
 process.env.YUI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-es-'));
-const { ProactiveEngine } = require('./index') as typeof import('./index');
+const { ProactiveEngine, DASHBOARD_MAIL_QUERY } =
+    require('./index') as typeof import('./index');
 const { Dedup } = require('./dedup') as typeof import('./dedup');
 const { HeldQueue } = require('./held') as typeof import('./held');
 const { ProactiveJournal } = require('./journal') as typeof import('./journal');
-const { DEFAULT_MAIL_QUERY } =
-    require('./connectors/mail') as typeof import('./connectors/mail');
 
 function cfg(over: Partial<ProactiveConfig> = {}): ProactiveConfig {
     return {
@@ -72,8 +71,8 @@ function run(): void {
         'legacy-q',
     );
 
-    // 3. ni l'une ni l'autre → défaut déclaré par le connecteur
-    assert.strictEqual(engine(cfg()).getMailQuery(), DEFAULT_MAIL_QUERY);
+    // 3. ni l'une ni l'autre → défaut de la tuile du dashboard
+    assert.strictEqual(engine(cfg()).getMailQuery(), DASHBOARD_MAIL_QUERY);
 
     // 4. cadence : le réglage de brique est bien celui passé au runner
     const tuned = engine(

@@ -1,7 +1,7 @@
 // Journal de situation — la « mémoire de travail » de la proactivité.
 //
 // Un instantané compact de la vie de la maison (présence, agenda proche,
-// lumières, porte, colis, tri courrier) est reconstruit périodiquement à
+// lumières, porte, colis, courrier) est reconstruit périodiquement à
 // partir des sources existantes, persisté, et surtout DIFFÉRENCIÉ : le juge
 // LLM raisonne sur « qu'est-ce qui a changé » plutôt que sur un dump complet
 // à chaque évaluation — moins de tokens, moins de radotage.
@@ -31,7 +31,10 @@ export interface Situation {
     agenda: SituationEvent[];
     /** Colis actifs (pas encore livrés/archivés). */
     parcels: Array<{ label: string; status: string }>;
-    /** Tri courrier : mails « action requise » en attente (si concierge actif). */
+    /** Héritage du concierge v2 (mails « action ») — plus alimenté : l'état
+     *  du courrier (inconnus, ordres actifs) vit dans `sections.mail`, posé
+     *  par le connecteur ; les mails signalés sont des événements retenus.
+     *  Gardé pour les instantanés persistés et les lecteurs existants. */
     mailActions: string[];
     musicPlaying: boolean;
     /** État courant par connecteur (`snapshot()`), une section par source. */
@@ -54,23 +57,6 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
         return await fn();
     } catch {
         return fallback;
-    }
-}
-
-/** Mails « action » en attente d'après l'état du concierge (best-effort). */
-function readMailActions(): string[] {
-    try {
-        const raw = JSON.parse(
-            fs.readFileSync(dataPath('mail-triage.json'), 'utf-8'),
-        );
-        const proposals = Array.isArray(raw?.proposals) ? raw.proposals : [];
-        return proposals
-            .filter((p: any) => p?.category === 'action')
-            .map((p: any) => String(p.subject ?? ''))
-            .filter(Boolean)
-            .slice(0, 10);
-    } catch {
-        return [];
     }
 }
 
@@ -134,7 +120,7 @@ export async function buildSituation(
                 label: String(p.content ?? p.label ?? p.tracking ?? 'colis'),
                 status: String(p.status ?? '?'),
             })),
-        mailActions: readMailActions(),
+        mailActions: [],
         musicPlaying: playback?.playing === true,
         sections: snapshots,
     };

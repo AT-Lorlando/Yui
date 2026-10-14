@@ -7,7 +7,8 @@ import type { PresenceState } from '../presence';
 import type { BrickSetting } from './bricks';
 import type { Event, Fact } from './events';
 import type { ConnectorState } from './connectorState';
-import type { MailConcierge } from './mail/concierge';
+import type { MailConnectorServices } from './connectors/mail';
+import type { OrderStore } from './mail/orders';
 import type { ProactiveConfig, ProactiveDeps } from './types';
 
 export interface ConnectorContext {
@@ -35,7 +36,10 @@ export interface ConnectorDef {
 
 /** Services que certains connecteurs empruntent au moteur. */
 export interface ConnectorServices {
-    concierge: MailConcierge;
+    /** Courrier v3 : facteur, ordres et files du moteur. */
+    mail: MailConnectorServices;
+    /** Ordres de lecture — les livraisons y posent leurs ordres automatiques. */
+    orders: OrderStore;
     complete: (system: string, user: string) => Promise<string>;
     subscribePresence: ProactiveDeps['subscribePresence'];
     /** Sections historiques de proactive.json (weather/calendar/mail/deliveries).

@@ -1,18 +1,17 @@
-// Intégration moteur + concierge courrier : une correction qui sort un mail
-// de « action » referme le sujet proactif qu'il avait ouvert (retenu + « dit »),
-// via `closeMailSubject` — sinon Yui continuerait de rappeler un mail que
-// Jérémy a déjà reclassé lui-même.
+// Intégration moteur + courrier v3 : migration des règles v2 au démarrage,
+// alerte immédiate d'un mail lu (notifyMail) relayée au connecteur, ordres
+// de lecture à la voix (mail_watch) et résumé du dashboard.
 import assert from 'assert';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ProactiveConfig, ProactiveDeps } from './types';
 import type { PresenceState } from '../presence';
-import type { Event } from './events';
 
 // Même contrainte que engine-postits.test.ts : YUI_DATA_DIR posé AVANT que
 // les modules ne résolvent leurs dataPath() au chargement.
 process.env.YUI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-em-'));
+const { dataPath } = require('@yui/shared') as typeof import('@yui/shared');
 const { ProactiveEngine } = require('./index') as typeof import('./index');
 const { Dedup } = require('./dedup') as typeof import('./dedup');
 const { HeldQueue } = require('./held') as typeof import('./held');
@@ -38,108 +37,139 @@ function cfg(): ProactiveConfig {
 }
 
 async function run(): Promise<void> {
+    // ── Migration au démarrage : mail-rules.json → mail-senders.json ─────
+    const rulesFile = dataPath('mail-rules.json');
+    fs.mkdirSync(path.dirname(rulesFile), { recursive: true });
+    const rule = (id: string, from: string, category: string | null) => ({
+        id,
+        when: { from },
+        then: { category },
+        origin: 'user',
+        confirmed: true,
+        hits: 0,
+        createdAt: 1000,
+    });
+    fs.writeFileSync(
+        rulesFile,
+        JSON.stringify({
+            version: 1,
+            rules: [
+                rule('r1', 'qonto.com', 'finance'),
+                rule('r2', 'promo.shop.com', 'promo'),
+                rule('r3', 'ami.fr', null),
+            ],
+        }),
+    );
+
+    let now = NOW;
+    let presence: PresenceState = 'home';
+    const notified: string[] = [];
+    const spoken: string[] = [];
     const deps: ProactiveDeps = {
         complete: async () => '{"channel":"skip","reason":"test"}',
-        notify: async () => {},
-        speak: async () => {},
-        presenceState: () => 'home' as PresenceState,
+        notify: async (t) => {
+            notified.push(t);
+        },
+        speak: async (t) => {
+            spoken.push(t);
+        },
+        presenceState: () => presence,
         subscribePresence: () => () => {},
         deviceHandler: async () => null,
         runScene: async () => ({ success: true }),
-        now: () => NOW,
+        now: () => now,
     };
-    const held = new HeldQueue();
-    const said = new SaidMemory();
-    const engine = new ProactiveEngine(cfg(), deps, {
-        dedup: new Dedup(),
-        journal: new ProactiveJournal(tmpFile('journal.json')),
-        held,
-        said,
-        postits: new PostitRegistry(tmpFile('postits.json')),
-    });
+    const journal = new ProactiveJournal(tmpFile('journal.json'));
+    const build = () =>
+        new ProactiveEngine(cfg(), deps, {
+            dedup: new Dedup(),
+            journal,
+            held: new HeldQueue(),
+            said: new SaidMemory(),
+            postits: new PostitRegistry(tmpFile('postits.json')),
+        });
+    const engine = build();
 
-    // ── closeMailSubject : retire du retenu ET de la mémoire « dit » ─────
-    const heldEvent: Event = {
-        source: 'mail',
-        key: 'mail-action-m9',
-        kind: 'request',
-        importance: 'utile',
-        subject: 'Mail à traiter — X : « Sujet »',
-        facts: ['détail'],
-        at: NOW,
+    assert.ok(fs.existsSync(dataPath('mail-senders.json')), 'listes écrites');
+    assert.ok(!fs.existsSync(rulesFile), 'mail-rules.json renommé');
+    const bak = path.join(path.dirname(rulesFile), 'mail-rules.v2.bak.json');
+    assert.ok(fs.existsSync(bak), 'sauvegarde v2 gardée');
+    assert.deepStrictEqual(
+        engine.mailSenders.keep().map((k) => k.match),
+        ['qonto.com'],
+    );
+    assert.deepStrictEqual(
+        engine.mailSenders.spam().map((s) => s.match),
+        ['promo.shop.com'],
+    );
+    const report = JSON.parse(
+        fs.readFileSync(dataPath('mail-migration.json'), 'utf-8'),
+    );
+    assert.strictEqual(report.keep, 1);
+    assert.strictEqual(report.spam, 1);
+    assert.strictEqual(report.dropped, 1);
+
+    // Un second démarrage ne remigre rien (listes déjà là, même si un
+    // mail-rules.json réapparaît).
+    fs.writeFileSync(rulesFile, JSON.stringify({ version: 1, rules: [] }));
+    const again = build();
+    assert.strictEqual(again.mailSenders.keep().length, 1);
+    assert.ok(fs.existsSync(rulesFile), 'rien renommé au second démarrage');
+
+    // ── notifyMail : sortie immédiate + journal + file du connecteur ─────
+    const ref = {
+        mailId: 'm1',
+        from: '"Michel Dupont" <michel@exemple.fr>',
+        subject: 'Devis cuisine',
     };
-    held.add(heldEvent, NOW);
-    said.markSaid(
-        [
-            {
-                subject: 'mail:mail-action-m9',
-                fingerprint: 'fp',
-                nature: 'request',
-            },
-        ],
-        'brief',
-        NOW,
-    );
-    assert.strictEqual(held.has('mail:mail-action-m9'), true);
-    assert.strictEqual(said.isSaid('mail:mail-action-m9', 'fp', NOW), true);
+    const item = {
+        notify: true,
+        urgency: 'now' as const,
+        reason: 'Michel répond à ta demande de devis',
+        facts: ['Devis : 1 240 €'],
+    };
+    await engine.notifyMail(ref, item);
+    const text =
+        'Courrier : « Devis cuisine » de Michel Dupont — Michel répond à ta demande de devis';
+    assert.deepStrictEqual(notified, [text]);
+    assert.deepStrictEqual(spoken, [text], 'présent, hors nuit → parlé');
+    const entry = journal.list(1)[0]!;
+    assert.strictEqual(entry.source, 'mail-reader');
+    assert.strictEqual(entry.reason, item.reason);
+    assert.strictEqual(entry.channel, 'speak');
+    assert.strictEqual(entry.subject, 'm1');
 
-    engine.closeMailSubject('m9');
+    // Absent → notification seule ; la nuit → notification seule.
+    presence = 'away' as PresenceState;
+    await engine.notifyMail({ ...ref, mailId: 'm2' }, item);
+    presence = 'home';
+    now = new Date('2026-09-28T02:00:00').getTime();
+    await engine.notifyMail({ ...ref, mailId: 'm3' }, item);
+    now = NOW;
+    assert.strictEqual(notified.length, 3);
+    assert.strictEqual(spoken.length, 1);
 
-    assert.strictEqual(held.has('mail:mail-action-m9'), false, 'retenu retiré');
-    assert.strictEqual(
-        said.isSaid('mail:mail-action-m9', 'fp', NOW),
-        false,
-        'mémoire "dit" refermée',
+    // Les trois mails attendent le connecteur, qui vide la file.
+    const taken = engine.takeMailNotified();
+    assert.deepStrictEqual(
+        taken.map((n) => n.mailId),
+        ['m1', 'm2', 'm3'],
     );
+    assert.strictEqual(taken[0]!.item.reason, item.reason);
+    assert.deepStrictEqual(engine.takeMailNotified(), [], 'file vidée');
 
-    // ── Câblage réel : correct() vers une catégorie ≠ action referme le
-    // sujet ; correct() vers "action" le laisse intact ────────────────────
-    const held2: Event = { ...heldEvent, key: 'mail-action-m10' };
-    held.add(held2, NOW);
-    said.markSaid(
-        [
-            {
-                subject: 'mail:mail-action-m10',
-                fingerprint: 'fp',
-                nature: 'request',
-            },
-        ],
-        'brief',
-        NOW,
-    );
-    engine.concierge.getState().proposals.push({
-        mailId: 'm10',
-        from: 'X <x@y.fr>',
-        subject: 'Sujet',
-        category: 'action',
-        via: 'llm',
-        stage: 'llm',
-        proposeArchive: false,
-    } as any);
-    await engine.concierge.correct('m10', 'lire');
-    assert.strictEqual(
-        held.has('mail:mail-action-m10'),
-        false,
-        'correction vers "lire" referme le sujet',
-    );
+    // ── mail_watch : ordre à la voix ─────────────────────────────────────
+    const reply = await engine.mailWatch('Réponse de Michel sur le devis', 14);
+    assert.strictEqual(reply, "D'accord, je guette ça jusqu'au 12/10.");
+    const order = engine.mailOrders.active(NOW)[0]!;
+    assert.strictEqual(order.text, 'Réponse de Michel sur le devis');
+    assert.strictEqual(order.source, 'voice');
 
-    const held3: Event = { ...heldEvent, key: 'mail-action-m11' };
-    held.add(held3, NOW);
-    engine.concierge.getState().proposals.push({
-        mailId: 'm11',
-        from: 'X <x@y.fr>',
-        subject: 'Sujet',
-        category: 'lire',
-        via: 'llm',
-        stage: 'llm',
-        proposeArchive: false,
-    } as any);
-    await engine.concierge.correct('m11', 'action');
-    assert.strictEqual(
-        held.has('mail:mail-action-m11'),
-        true,
-        'correction vers "action" ne referme rien',
-    );
+    // ── Résumé du dashboard ──────────────────────────────────────────────
+    const summary = engine.getTriageSummary();
+    assert.strictEqual(summary.ordersCount, 1);
+    assert.strictEqual(summary.unknownCount, 0);
+    assert.strictEqual(summary.pendingCount, 0);
 
     console.log('All engine-mail tests passed');
 }

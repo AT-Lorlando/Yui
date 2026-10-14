@@ -38,10 +38,15 @@ import {
 } from './situation';
 import type { Situation } from './situation';
 import { detectMoments, returnMomentFacts } from './moments';
-import { MailConcierge } from './mail/concierge';
-import type { MailCategory } from './mail/concierge';
-import { RuleStore, migrateRulesOnce } from './mail/rules';
+import { MailCourier } from './mail/courier';
+import { SenderStore } from './mail/senders';
+import { OrderStore } from './mail/orders';
+import { loadReaderPrompt } from './mail/reader';
+import type { ReaderItem } from './mail/reader';
 import { MailJournal } from './mail/journal';
+import { migrateMailRulesAtBoot } from './mail/bootMigration';
+import { senderName } from './connectors/mail';
+import type { MailNotice } from './connectors/mail';
 import { saveConfig } from './config';
 import type { MomentKind, MomentState } from './moments';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
@@ -57,6 +62,17 @@ const DEFAULT_MAX_PER_HOUR = 6;
 /** Sections historiques de proactive.json fusionnées dans les réglages du
  *  connecteur de même id (config d'avant les briques ; jamais étendu). */
 const LEGACY_SECTIONS = new Set(['weather', 'calendar', 'mail', 'deliveries']);
+/** Tuile « mails importants » du dashboard, sans réglage hérité. */
+export const DASHBOARD_MAIL_QUERY = 'is:important is:unread newer_than:1d';
+/** Files courrier moteur → connecteur : bornées si le connecteur ne poll
+ *  plus (brique coupée) alors qu'un scan est lancé à la demande. */
+const MAIL_QUEUE_MAX = 100;
+
+function pushBounded<T>(queue: T[], item: T): void {
+    queue.push(item);
+    if (queue.length > MAIL_QUEUE_MAX)
+        queue.splice(0, queue.length - MAIL_QUEUE_MAX);
+}
 
 export class ProactiveEngine {
     private dedup: Dedup;
@@ -68,7 +84,15 @@ export class ProactiveEngine {
     private now: () => number;
     private situationTimer?: ReturnType<typeof setInterval>;
     readonly journal: ProactiveJournal;
-    readonly concierge: MailConcierge;
+    readonly courier: MailCourier;
+    readonly mailSenders: SenderStore;
+    readonly mailOrders: OrderStore;
+    readonly mailJournal: MailJournal;
+    /** Mails signalés tout de suite (notifyMail), en attente de leur
+     *  événement `request` (post-it, plafond d'urgences) au poll du connecteur. */
+    private pendingMailNotify: MailNotice[] = [];
+    /** Faits de mails lus sans alerte, en attente de leur événement `info`. */
+    private pendingMailFacts: MailNotice[] = [];
     private judge: Judge;
     private said: SaidMemory;
     private postits: PostitRegistry;
@@ -143,57 +167,33 @@ export class ProactiveEngine {
             now: this.now,
             quiet: () => this.isQuiet(),
         });
-        // Les règles vivent dans mail-rules.json ; `concierge.rules` de la
-        // config n'est relu qu'une fois, pour peupler un store encore absent.
-        const rules = new RuleStore();
-        const migrated = migrateRulesOnce(
-            rules,
-            this.cfg.concierge?.rules,
-            this.now(),
-        );
-        if (migrated > 0) {
-            Logger.info(
-                `concierge: ${migrated} règle(s) legacy migrée(s) vers mail-rules.json`,
-            );
-        }
-        this.concierge = new MailConcierge({
-            onAlert: (m) => void this.alertMail(m),
+        // Courrier v3 : listes d'expéditeurs (migrées une fois des règles v2),
+        // ordres de lecture, facteur.
+        this.mailSenders = new SenderStore();
+        migrateMailRulesAtBoot(this.mailSenders, this.now());
+        this.mailOrders = new OrderStore();
+        this.mailJournal = new MailJournal();
+        this.courier = new MailCourier({
             deviceHandler: (t, a) => this.deps.deviceHandler(t, a),
             complete: (sys, user) => this.deps.complete(sys, user),
-            rules,
-            journal: new MailJournal(),
-            getAutoCategories: () =>
-                (this.cfg.concierge?.autoCategories ?? []) as MailCategory[],
-            getPromptRules: () => this.cfg.concierge?.promptRules ?? [],
-            addPromptRule: (text) => {
-                const promptRules = [
-                    ...(this.cfg.concierge?.promptRules ?? []).filter(
-                        (r) => r !== text,
-                    ),
-                    text,
-                ];
-                this.patchConcierge({ promptRules });
-            },
-            getCustomCategories: () =>
-                this.cfg.concierge?.customCategories ?? [],
-            addCustomCategory: (c) => {
-                const customCategories = [
-                    ...(this.cfg.concierge?.customCategories ?? []).filter(
-                        (x) => x.id !== c.id,
-                    ),
-                    c,
-                ];
-                this.patchConcierge({ customCategories });
-            },
-            // Un mail corrigé hors « action » n'attend plus rien de Jérémy :
-            // le sujet proactif qu'il avait ouvert (retenu + « dit ») se referme.
-            onCorrected: (id, _previous, next) => {
-                if (next !== 'action') this.closeMailSubject(id);
+            senders: this.mailSenders,
+            orders: this.mailOrders,
+            journal: this.mailJournal,
+            readerPrompt: () => loadReaderPrompt(),
+            onNotify: (m, item) => void this.notifyMail(m, item),
+            onFacts: (m, item) => {
+                pushBounded(this.pendingMailFacts, { ...m, item });
             },
             now: this.now,
         });
         this.connectors = buildConnectors({
-            concierge: this.concierge,
+            mail: {
+                courier: this.courier,
+                orders: this.mailOrders,
+                takeNotified: () => this.takeMailNotified(),
+                takeFacts: () => this.pendingMailFacts.splice(0),
+            },
+            orders: this.mailOrders,
             complete: (sys, user) => this.deps.complete(sys, user),
             subscribePresence: (cb) => this.deps.subscribePresence(cb),
             legacy: {
@@ -247,47 +247,58 @@ export class ProactiveEngine {
         }
     }
 
-    private patchConcierge(
-        patch: Partial<NonNullable<ProactiveConfig['concierge']>>,
-    ): void {
-        this.cfg.concierge = { ...this.cfg.concierge, ...patch };
-        try {
-            saveConfig({ concierge: this.cfg.concierge });
-        } catch (err) {
-            Logger.warn(`concierge: config non persistée — ${err}`);
-        }
-    }
-
-    /** Résumé du tri courrier pour le dashboard (tuile Briefing). */
+    /** Résumé du courrier pour le dashboard (tuile Briefing). Les champs
+     *  historiques `pendingCount`/`doubtCount` restent remplis pour l'app
+     *  (inconnus / aucun doute) jusqu'à sa refonte. */
     getTriageSummary(): {
+        unknownCount: number;
+        ordersCount: number;
         pendingCount: number;
         doubtCount: number;
         actions: Array<{ subject: string; from: string }>;
         classifiedToday: number;
     } {
-        const st = this.concierge.getState();
-        const today = new Date(this.now()).toDateString();
+        const now = this.now();
+        const today = new Date(now).toDateString();
+        const decisions = this.mailJournal.list(200);
+        const unknownCount = this.courier.unknown().length;
         return {
-            pendingCount: this.concierge.pending().length,
-            doubtCount: this.concierge.openDoubts().length,
-            actions: st.proposals
-                .filter((p) => p.category === 'action')
-                .slice(-8)
-                .map((p) => ({ subject: p.subject, from: p.from })),
-            classifiedToday: st.proposals.filter(
-                (p) =>
-                    p.appliedAt &&
-                    new Date(p.appliedAt).toDateString() === today,
+            unknownCount,
+            ordersCount: this.mailOrders.active(now).length,
+            pendingCount: unknownCount,
+            doubtCount: 0,
+            actions: decisions
+                .filter((d) => d.notify)
+                .slice(0, 8)
+                .map((d) => ({ subject: d.subject, from: d.from })),
+            classifiedToday: decisions.filter(
+                (d) =>
+                    d.applied &&
+                    d.stage !== 'trash' &&
+                    new Date(d.at).toDateString() === today,
             ).length,
         };
     }
 
-    /** Referme le sujet proactif d'un mail « à traiter » (retenu + « dit ») —
-     *  appelé quand une correction sort le mail de la catégorie « action ». */
-    closeMailSubject(mailId: string): void {
-        const key = `mail:mail-action-${mailId}`;
-        this.held.remove([key]);
-        this.said.close(key);
+    /** Vide la file des mails signalés (consommée par le connecteur `mail`). */
+    takeMailNotified(): MailNotice[] {
+        return this.pendingMailNotify.splice(0);
+    }
+
+    /**
+     * Ordre de lecture à la voix (tool `mail_watch`) : `days` est déjà borné
+     * par le tool. Une erreur du store (texte, plafond) remonte telle quelle.
+     */
+    async mailWatch(text: string, days: number): Promise<string> {
+        const o = this.mailOrders.add(
+            { text, days, source: 'voice' },
+            this.now(),
+        );
+        const d = new Date(o.expiresAt);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        return `D'accord, je guette ça jusqu'au ${pad(d.getDate())}/${pad(
+            d.getMonth() + 1,
+        )}.`;
     }
 
     getBricks() {
@@ -722,26 +733,29 @@ export class ProactiveEngine {
         return speak ? 'speak' : 'notify';
     }
 
-    /** Règle courrier avec `alert` : prévenir tout de suite. */
-    private async alertMail(m: {
-        mailId: string;
-        from: string;
-        subject: string;
-        category: string;
-        alert: 'notify' | 'speak';
-        ruleId: string;
-    }): Promise<void> {
-        const who = m.from.replace(/<[^>]*>/, '').trim() || m.from;
-        const text = `Courrier : « ${m.subject} » de ${who}.`;
+    /**
+     * Mail que le lecteur IA juge à signaler : sortie immédiate (notification,
+     * parole si présent et hors nuit), puis mise en file pour l'événement du
+     * connecteur (post-it, plafond d'urgences, prochain point).
+     */
+    async notifyMail(
+        m: { mailId: string; from: string; subject: string; box?: string },
+        item: ReaderItem,
+    ): Promise<void> {
+        pushBounded(this.pendingMailNotify, { ...m, item });
+        const who = senderName(m.from);
+        const text = `Courrier : « ${m.subject} » de ${who}${
+            item.reason ? ` — ${item.reason}` : ''
+        }`;
         try {
-            const channel = await this.pushNow(text, m.alert === 'speak');
+            const channel = await this.pushNow(text, true);
             this.journal.record({
                 at: this.now(),
-                source: 'mail-rule',
+                source: 'mail-reader',
                 subject: m.mailId,
                 channel,
                 message: text,
-                reason: `règle ${m.ruleId} (${m.category}) : alerte immédiate`,
+                reason: item.reason,
             });
         } catch (err) {
             Logger.warn(`proactive: alerte courrier ${m.mailId} — ${err}`);
@@ -852,15 +866,16 @@ export class ProactiveEngine {
         return this.dedup.latest();
     }
 
-    /** Requête Gmail des mails « importants » — résolue EXACTEMENT comme le
-     *  poll du connecteur (défaut déclaré ← section legacy ← brique), sinon le
-     *  dashboard chercherait une autre requête que celle réellement pollée. */
+    /** Requête Gmail des mails « importants » de la tuile du dashboard. Le
+     *  connecteur courrier ne la déclare plus (le facteur lit la boîte de
+     *  réception) : un `query` hérité (section legacy ← brique) gagne encore,
+     *  sinon le défaut historique. */
     getMailQuery(): string | undefined {
         const def = this.connectors.find((c) => c.id === 'mail');
         const q = def
             ? this.connectorSettings(def).query
             : brickSetting(this.cfg, 'mail', 'query', this.cfg.mail?.query);
-        return typeof q === 'string' && q ? q : undefined;
+        return typeof q === 'string' && q ? q : DASHBOARD_MAIL_QUERY;
     }
 
     /** Re-read config from disk, rebuild the runner, and restart. Used by

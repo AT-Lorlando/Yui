@@ -45,7 +45,10 @@ import {
 } from './orchestrator/storyArchive';
 import type { ConversationsHandler } from './input/InputSource';
 import { createDashboardProvider } from './orchestrator/dashboard';
-import { setSecretaryBriefProvider } from './orchestrator/virtualTools';
+import {
+    setMailWatchProvider,
+    setSecretaryBriefProvider,
+} from './orchestrator/virtualTools';
 
 // JSON console (Vector → ClickHouse côté Koya) : avant tout log, et seulement
 // pour ce process — les MCP spawné héritent de l'env mais pas de cet appel,
@@ -176,6 +179,8 @@ async function main() {
             .brief(scope as 'since-last' | 'today' | 'pending' | undefined)
             .then((r) => r.text),
     );
+    // mail_watch (LLM) : un ordre de lecture posé à la voix.
+    setMailWatchProvider((text, days) => proactive.mailWatch(text, days));
 
     // Hue remotes — listen to bridge SSE for button + dial events
     const hueRemotes = await initHueRemotes({
@@ -256,54 +261,17 @@ async function main() {
                 feedback: (id: string, value: 'up' | 'down') =>
                     proactive.setFeedback(id, value),
                 situation: () => proactive.getSituation(),
-                triage: () => ({
-                    ...proactive.concierge.getState(),
-                    pending: proactive.concierge.pending(),
-                    openDoubts: proactive.concierge.openDoubts(),
-                    categories: proactive.concierge.categories(),
-                }),
-                triageResolveDoubt: (id, opts) =>
-                    proactive.concierge.resolveDoubt(id, opts),
-                triageScan: (query?: string, max?: number) =>
-                    proactive.concierge.scan(query, max),
-                triageApply: (filter?: {
-                    category?: string;
-                    mailIds?: string[];
-                }) => proactive.concierge.apply(filter),
-                triageCorrect: (mailId: string, category: string) =>
-                    proactive.concierge.correct(mailId, category),
-                mailRules: () => proactive.concierge.rules(),
-                mailRuleSave: (raw: unknown) =>
-                    proactive.concierge.saveRule(raw),
-                mailRuleDelete: (id: string) =>
-                    proactive.concierge.deleteRule(id),
-                mailQuarantine: () => proactive.concierge.quarantine(),
-                mailQuarantineAct: (
-                    id: string,
-                    action: string,
-                    opts: { category?: string },
-                ) =>
-                    proactive.concierge.quarantineAct(
-                        id,
-                        action as 'confirm' | 'correct' | 'reject',
-                        opts,
-                    ),
-                mailReading: () => proactive.concierge.reading(),
-                mailMarkRead: (id: string) => proactive.concierge.markRead(id),
+                // Courrier v3 : les routes v2 (tri, règles, quarantaine, à
+                // lire) ne sont plus servies ; les nouvelles (listes, ordres)
+                // arrivent avec la refonte de /mail.
                 mailJournal: (limit?: number, scope?: 'actions') =>
-                    proactive.concierge.listJournal(limit, scope),
+                    proactive.mailJournal
+                        .list(200)
+                        .filter((d) => scope !== 'actions' || d.notify)
+                        .slice(0, limit ?? 50),
                 mailDryRun: (query?: string, max?: number) =>
-                    proactive.concierge.dryRun(query, max),
-                mailClassify: (mailIds: string[]) =>
-                    proactive.concierge.classifyMails(mailIds),
-                mailRulesRaw: () => proactive.concierge.rulesFile(),
-                mailRulesReplace: (raw: unknown) =>
-                    proactive.concierge.replaceRules(raw),
-                mailSenders: (days?: number, max?: number) =>
-                    proactive.concierge.recentSenders(days, max),
-                mailRuleApply: (id: string, max?: number) =>
-                    proactive.concierge.applyRule(id, max),
-                mailStats: (days?: number) => proactive.concierge.stats(days),
+                    proactive.courier.dryRun(query, max),
+                mailStats: (days?: number) => proactive.courier.stats(days),
                 ingest: (events) => proactive.ingestAll(events),
                 brief: (scope?: string) =>
                     proactive.brief(
