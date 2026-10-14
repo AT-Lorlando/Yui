@@ -9,7 +9,7 @@ import { dataPath } from '@yui/shared';
 import Logger from '../../../logger';
 import { cleanBody } from './bodyClean';
 import { MailJournal, MailDecision, MAIL_JOURNAL_MAX } from './journal';
-import { OrderStore } from './orders';
+import { MailOrder, OrderStore } from './orders';
 import {
     buildReaderSystem,
     buildReaderUser,
@@ -45,6 +45,8 @@ export interface CourierDeps {
     readerPrompt: () => string;
     onNotify: (m: MailRef, item: ReaderItem) => void;
     onFacts?: (m: MailRef, item: ReaderItem) => void;
+    /** Le lecteur a satisfait un ordre actif (`orderId` + `fulfilled`). */
+    onFulfilled?: (m: MailRef, item: ReaderItem, order: MailOrder) => void;
     now?: () => number;
 }
 
@@ -338,9 +340,10 @@ export class MailCourier {
                 orderId: item.orderId,
             };
             out.push(this.conclude(mail, c));
-            if (item.orderId && item.fulfilled) {
-                orders.fulfill(item.orderId, mail.id, item.reason, now);
-            }
+            const fulfilled =
+                item.orderId && item.fulfilled
+                    ? orders.fulfill(item.orderId, mail.id, item.reason, now)
+                    : null;
             const ref: MailRef = {
                 mailId: mail.id,
                 from: mail.from,
@@ -348,6 +351,7 @@ export class MailCourier {
             };
             if (box) ref.box = box;
             try {
+                if (fulfilled) this.deps.onFulfilled?.(ref, item, fulfilled);
                 if (item.notify) this.deps.onNotify(ref, item);
                 else if (item.facts.length) this.deps.onFacts?.(ref, item);
             } catch (e) {

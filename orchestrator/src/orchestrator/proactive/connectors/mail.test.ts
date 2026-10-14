@@ -5,12 +5,11 @@ import * as path from 'path';
 // ConnectorState/OrderStore résolvent dataPath() : isoler YUI_DATA_DIR AVANT
 // de charger les modules.
 process.env.YUI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-mailc-'));
-const { mailConnector, MAIL_URGENT_PER_DAY } =
-    require('./mail') as typeof import('./mail');
+const { mailConnector } = require('./mail') as typeof import('./mail');
 const { ConnectorState } =
     require('../connectorState') as typeof import('../connectorState');
 import type { ConnectorContext } from '../connector';
-import type { MailNotice } from './mail';
+import type { FulfilledNotice, MailNotice } from './mail';
 import type { MailOrder } from '../mail/orders';
 
 const NOW = new Date('2026-10-14T10:00:00').getTime();
@@ -36,11 +35,12 @@ function notice(
 }
 
 async function run(): Promise<void> {
-    let now = NOW;
+    const now = NOW;
     let scans = 0;
     let sweeps = 0;
     let notified: MailNotice[] = [];
     let factsQ: MailNotice[] = [];
+    let fulfilledQ: FulfilledNotice[] = [];
     let unknownList: Array<{ address: string }> = [];
     let orders: MailOrder[] = [];
 
@@ -59,6 +59,7 @@ async function run(): Promise<void> {
         orders: { active: () => orders },
         takeNotified: () => notified.splice(0),
         takeFacts: () => factsQ.splice(0),
+        takeFulfilled: () => fulfilledQ.splice(0),
     });
 
     // Réglages : poll 15 min et plafond horaire, plus de `query` ni `triage`.
@@ -85,20 +86,19 @@ async function run(): Promise<void> {
         'balayage à chaque poll (borné par le courier)',
     );
 
-    // ── notify + urgency now → urgent, plafond 2/jour puis utile ─────────
+    // ── notify → toujours utile (la sortie immédiate du moteur est LE
+    // canal d'alerte : le juge ne doit pas pousser une seconde fois) ──────
     notified = [
         notice('m1', 'now'),
-        notice('m2', 'now'),
-        notice('m3', 'now'),
-        notice('m4', 'soon'),
+        notice('m2', 'soon'),
+        { ...notice('m3', 'now'), capped: true },
     ];
     const evs = await c.events!(ctx);
-    assert.strictEqual(evs.length, 4);
-    assert.strictEqual(MAIL_URGENT_PER_DAY, 2);
+    assert.strictEqual(evs.length, 3);
     assert.deepStrictEqual(
         evs.map((e) => e.importance),
-        ['urgent', 'urgent', 'utile', 'utile'],
-        'deux urgents par jour, le reste en utile',
+        ['utile', 'utile', 'utile'],
+        'jamais urgent, même en urgency now',
     );
     const e1 = evs[0]!;
     assert.strictEqual(e1.source, 'mail');
@@ -117,18 +117,14 @@ async function run(): Promise<void> {
             'De Michel Dupont <michel@exemple.fr> — gmail:m1 — Michel répond à ta demande de devis',
     });
     assert.ok(
-        evs[2]!.facts.includes('Urgence plafonnée pour aujourd’hui.'),
-        'le plafond est dit dans les faits',
+        !e1.facts.some((f) => f.includes('plafonnée')),
+        'pas de mention de plafond sans plafond',
     );
-
-    // Même jour : le compteur est persisté, plus d'urgent possible.
-    notified = [notice('m5', 'now')];
-    assert.strictEqual((await c.events!(ctx))[0]!.importance, 'utile');
-
-    // Le lendemain : le compteur repart.
-    now = NOW + DAY;
-    notified = [notice('m6', 'now')];
-    assert.strictEqual((await c.events!(ctx))[0]!.importance, 'urgent');
+    assert.ok(
+        evs[2]!.facts.includes("Notification plafonnée pour aujourd'hui"),
+        'mail non poussé (plafond) : événement émis avec le fait',
+    );
+    assert.ok(evs[2]!.todo, 'le post-it reste posé');
 
     // Sujet borné à SUBJECT_MAX, une ligne.
     notified = [
@@ -166,6 +162,35 @@ async function run(): Promise<void> {
     assert.deepStrictEqual(info.facts, ['Solde : 3 200 €', 'Frais : 9 €']);
     assert.strictEqual(info.ttlMs, 3 * DAY);
     assert.strictEqual(info.todo, undefined);
+
+    // ── ordre satisfait → événement info, même sans faits ────────────────
+    fulfilledQ = [
+        {
+            mailId: 'm9',
+            from: 'Michel <michel@exemple.fr>',
+            subject: 'Re: devis',
+            item: {
+                notify: false,
+                urgency: 'none',
+                reason: 'Michel a répondu',
+                orderId: 'o-3',
+                fulfilled: true,
+                facts: [],
+            },
+            order: { id: 'o-3', text: 'Réponse de Michel sur le devis' },
+        },
+    ];
+    const done = await c.events!(ctx);
+    assert.strictEqual(done.length, 1);
+    assert.strictEqual(done[0]!.key, 'mail-order-o-3');
+    assert.strictEqual(done[0]!.kind, 'info');
+    assert.strictEqual(done[0]!.importance, 'info');
+    assert.strictEqual(
+        done[0]!.subject,
+        'Ordre satisfait : Réponse de Michel sur le devis',
+    );
+    assert.deepStrictEqual(done[0]!.facts, ['Michel a répondu']);
+    assert.strictEqual(done[0]!.ttlMs, 3 * DAY);
 
     // ── snapshot : inconnus + ordres actifs (≤ 5) ────────────────────────
     assert.deepStrictEqual(await c.snapshot!(ctx), [], 'rien à dire');

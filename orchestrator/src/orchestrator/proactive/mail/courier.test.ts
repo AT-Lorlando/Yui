@@ -535,6 +535,31 @@ async function run() {
         assert.strictEqual(t.journal.list(1)[0].orderId, order.id);
     }
 
+    // (g2) ordre satisfait sans notify ni faits → onFulfilled quand même
+    {
+        const t = setup({
+            list: () => [
+                { id: 'o2', from: 'michel@ex.fr', subject: 'Re: devis' },
+            ],
+            replies: [],
+        });
+        const order = t.orders.add(
+            { text: 'Réponse de Michel', source: 'user' },
+            NOW,
+        );
+        const got: Array<{ mailId: string; text: string; state: string }> = [];
+        t.deps.onFulfilled = (m, _item, o) =>
+            got.push({ mailId: m.mailId, text: o.text, state: o.state });
+        (t.deps as { complete: CourierDeps['complete'] }).complete = async () =>
+            `[{"i":1,"notify":false,"reason":"Michel a répondu","orderId":"${order.id}","fulfilled":true}]`;
+        await t.courier.scan();
+        assert.deepStrictEqual(got, [
+            { mailId: 'o2', text: 'Réponse de Michel', state: 'fulfilled' },
+        ]);
+        assert.strictEqual(t.notified.length, 0);
+        assert.strictEqual(t.facts.length, 0);
+    }
+
     // (h) 30 mails à lire → 24 lus (2 lots de 12), 6 reportés
     {
         const mails = Array.from({ length: 30 }, (_, i) => ({

@@ -1,9 +1,11 @@
 // Courrier v3 : le facteur (MailCourier) range et fait lire chaque mail au
 // poll de ce connecteur, puis balaie les osef une fois par jour. Ce qui est
-// « à prévenir » est déjà parti tout de suite par le moteur (notifyMail) ;
-// le connecteur en fait un événement `request` (post-it Yoji, plafond des
-// urgences, matière du prochain point). Les faits d'un mail lu sans alerte
-// deviennent un événement `info`, retenu sans juge pour le prochain point.
+// « à prévenir » est déjà parti tout de suite par le moteur (notifyMail,
+// plafonné par jour) — c'est LE canal d'alerte : le connecteur en fait un
+// événement `request` toujours `utile` (post-it Yoji, matière du prochain
+// point), jamais `urgent`, pour que le juge ne pousse pas une seconde fois.
+// Les faits d'un mail lu sans alerte et les ordres satisfaits deviennent des
+// événements `info`, retenus sans juge pour le prochain point.
 import {
     SUBJECT_MAX,
     TODO_TITLE_MAX,
@@ -12,14 +14,10 @@ import {
     FACT_MAX_CHARS,
 } from '../events';
 import type { Event, Fact } from '../events';
-import type { Importance } from '../types';
 import type { ConnectorDef } from '../connector';
 import type { ReaderItem } from '../mail/reader';
 import type { MailOrder } from '../mail/orders';
 
-/** Mails "now" traités en urgent par jour — au-delà, importance rabattue en
- *  "utile" (le juge/budget quotidien reste la dernière digue). */
-export const MAIL_URGENT_PER_DAY = 2;
 const DAY_MS = 86_400_000;
 /** Un mail signalé reste pertinent une semaine. */
 const NOTIFY_TTL_MS = 7 * DAY_MS;
@@ -35,7 +33,16 @@ export interface MailNotice {
     subject: string;
     box?: string;
     item: ReaderItem;
+    /** Sortie immédiate refusée par le plafond quotidien du moteur. */
+    capped?: boolean;
 }
+
+/** Mail qui a satisfait un ordre de lecture. */
+export interface FulfilledNotice extends MailNotice {
+    order: { id: string; text: string };
+}
+
+export const NOTIFY_CAPPED_FACT = "Notification plafonnée pour aujourd'hui";
 
 export interface MailConnectorServices {
     courier: {
@@ -48,6 +55,8 @@ export interface MailConnectorServices {
     takeNotified(): MailNotice[];
     /** Vide et rend la file des faits de mails lus sans alerte. */
     takeFacts(): MailNotice[];
+    /** Vide et rend la file des ordres satisfaits par le lecteur. */
+    takeFulfilled(): FulfilledNotice[];
 }
 
 /** Nom affiché d'un expéditeur, sans l'adresse `<…>`. Pur. */
@@ -67,13 +76,6 @@ function clipFacts(facts: string[]): string[] {
         .map((f) => oneLine(f).slice(0, FACT_MAX_CHARS))
         .filter(Boolean)
         .slice(0, FACTS_MAX_LINES);
-}
-
-/** Jour local (YYYY-MM-DD) — assiette du plafond quotidien d'urgences. */
-function localDay(ms: number): string {
-    const d = new Date(ms);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 export function mailConnector(services: MailConnectorServices): ConnectorDef {
@@ -105,34 +107,20 @@ export function mailConnector(services: MailConnectorServices): ConnectorDef {
             const now = ctx.now();
             const out: Event[] = [];
 
-            const today = localDay(now);
-            let urgentDay = ctx.state.get<string>('urgentDay', '');
-            let urgentCount = ctx.state.get<number>('urgentCount', 0);
-            if (urgentDay !== today) {
-                urgentDay = today;
-                urgentCount = 0;
-            }
-
             for (const n of services.takeNotified()) {
                 const who = senderName(n.from);
-                const facts = [n.item.reason, ...n.item.facts];
-                let importance: Importance = 'utile';
-                if (n.item.urgency === 'now') {
-                    if (urgentCount < MAIL_URGENT_PER_DAY) {
-                        importance = 'urgent';
-                        urgentCount++;
-                    } else {
-                        facts.push('Urgence plafonnée pour aujourd’hui.');
-                        ctx.log.info(
-                            `mail: urgence plafonnée (${MAIL_URGENT_PER_DAY}/jour) pour ${n.mailId}`,
-                        );
-                    }
-                }
+                // Le plafond juste après la raison : jamais coupé par la borne
+                // de 10 lignes.
+                const facts = [
+                    n.item.reason,
+                    ...(n.capped ? [NOTIFY_CAPPED_FACT] : []),
+                    ...n.item.facts,
+                ];
                 out.push({
                     source: 'mail',
                     key: `mail-notify-${n.mailId}`,
                     kind: 'request',
-                    importance,
+                    importance: 'utile',
                     subject: oneLine(`Mail — ${who} : « ${n.subject} »`).slice(
                         0,
                         SUBJECT_MAX,
@@ -154,8 +142,6 @@ export function mailConnector(services: MailConnectorServices): ConnectorDef {
                     },
                 });
             }
-            ctx.state.set('urgentDay', urgentDay);
-            ctx.state.set('urgentCount', urgentCount);
 
             for (const n of services.takeFacts()) {
                 const facts = clipFacts(n.item.facts);
@@ -170,6 +156,22 @@ export function mailConnector(services: MailConnectorServices): ConnectorDef {
                         SUBJECT_MAX,
                     ),
                     facts,
+                    at: now,
+                    ttlMs: INFO_TTL_MS,
+                });
+            }
+
+            for (const n of services.takeFulfilled()) {
+                out.push({
+                    source: 'mail',
+                    key: `mail-order-${n.order.id}`,
+                    kind: 'info',
+                    importance: 'info',
+                    subject: oneLine(`Ordre satisfait : ${n.order.text}`).slice(
+                        0,
+                        SUBJECT_MAX,
+                    ),
+                    facts: clipFacts([n.item.reason, ...n.item.facts]),
                     at: now,
                     ttlMs: INFO_TTL_MS,
                 });

@@ -158,6 +158,67 @@ async function run(): Promise<void> {
     assert.strictEqual(taken[0]!.item.reason, item.reason);
     assert.deepStrictEqual(engine.takeMailNotified(), [], 'file vidée');
 
+    // ── Plafond quotidien des sorties immédiates (5/jour) ────────────────
+    // m1–m3 déjà poussés aujourd'hui ; m4, m5 encore ; m6 refusé.
+    await engine.notifyMail({ ...ref, mailId: 'm4' }, item);
+    await engine.notifyMail({ ...ref, mailId: 'm5' }, item);
+    assert.strictEqual(notified.length, 5);
+    await engine.notifyMail({ ...ref, mailId: 'm6' }, item);
+    assert.strictEqual(notified.length, 5, '6e mail du jour : aucune sortie');
+    const capped = engine.takeMailNotified();
+    assert.deepStrictEqual(
+        capped.map((n) => [n.mailId, n.capped === true]),
+        [
+            ['m4', false],
+            ['m5', false],
+            ['m6', true],
+        ],
+        'le mail plafonné reste en file, marqué',
+    );
+    assert.strictEqual(journal.list(1)[0]!.channel, 'hold');
+    assert.strictEqual(journal.list(1)[0]!.subject, 'm6');
+
+    // Le plafond survit au redémarrage (relu du journal) …
+    const restarted = build();
+    await restarted.notifyMail({ ...ref, mailId: 'm7' }, item);
+    assert.strictEqual(notified.length, 5, 'plafond relu après redémarrage');
+    // … et repart le lendemain.
+    now = NOW + 86_400_000;
+    await restarted.notifyMail({ ...ref, mailId: 'm8' }, item);
+    assert.strictEqual(notified.length, 6, 'nouveau jour, nouvelle sortie');
+    now = NOW;
+
+    // Appels concurrents (un lot du lecteur) : le plafond est réservé
+    // avant tout await.
+    const burst = build();
+    now = NOW + 2 * 86_400_000;
+    await Promise.all(
+        Array.from({ length: 7 }, (_, i) =>
+            burst.notifyMail({ ...ref, mailId: `b${i}` }, item),
+        ),
+    );
+    assert.strictEqual(notified.length, 11, '5 sorties sur 7 mails simultanés');
+    now = NOW;
+
+    // ── Ordre satisfait → file du connecteur ─────────────────────────────
+    engine.mailOrderFulfilled(
+        { mailId: 'm9', from: 'Michel <m@x.fr>', subject: 'Re: devis' },
+        { ...item, notify: false, facts: [] },
+        {
+            id: 'o-1',
+            text: 'Réponse de Michel',
+            createdAt: NOW,
+            expiresAt: NOW,
+            source: 'voice',
+            state: 'fulfilled',
+        },
+    );
+    assert.deepStrictEqual(
+        engine.takeMailFulfilled().map((n) => [n.mailId, n.order]),
+        [['m9', { id: 'o-1', text: 'Réponse de Michel' }]],
+    );
+    assert.deepStrictEqual(engine.takeMailFulfilled(), []);
+
     // ── mail_watch : ordre à la voix ─────────────────────────────────────
     const reply = await engine.mailWatch('Réponse de Michel sur le devis', 14);
     assert.strictEqual(reply, "D'accord, je guette ça jusqu'au 12/10.");

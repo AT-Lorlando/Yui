@@ -46,7 +46,8 @@ import type { ReaderItem } from './mail/reader';
 import { MailJournal } from './mail/journal';
 import { migrateMailRulesAtBoot } from './mail/bootMigration';
 import { senderName } from './connectors/mail';
-import type { MailNotice } from './connectors/mail';
+import type { FulfilledNotice, MailNotice } from './connectors/mail';
+import type { MailOrder } from './mail/orders';
 import { saveConfig } from './config';
 import type { MomentKind, MomentState } from './moments';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
@@ -67,6 +68,9 @@ export const DASHBOARD_MAIL_QUERY = 'is:important is:unread newer_than:1d';
 /** Files courrier moteur → connecteur : bornées si le connecteur ne poll
  *  plus (brique coupée) alors qu'un scan est lancé à la demande. */
 const MAIL_QUEUE_MAX = 100;
+/** Sorties immédiates du courrier par jour local — au-delà, rien n'est
+ *  poussé (l'événement du connecteur porte le fait du plafond). */
+export const MAIL_NOTIFY_PER_DAY = 5;
 
 function pushBounded<T>(queue: T[], item: T): void {
     queue.push(item);
@@ -93,6 +97,13 @@ export class ProactiveEngine {
     private pendingMailNotify: MailNotice[] = [];
     /** Faits de mails lus sans alerte, en attente de leur événement `info`. */
     private pendingMailFacts: MailNotice[] = [];
+    /** Ordres satisfaits par le lecteur, en attente de leur événement `info`. */
+    private pendingMailFulfilled: FulfilledNotice[] = [];
+    /** Plafond quotidien des sorties immédiates : jour local courant et
+     *  sorties réservées. Réamorcé depuis le journal à chaque nouveau jour
+     *  (donc aussi après un redémarrage) — le journal est la persistance. */
+    private mailNotifyDay = '';
+    private mailNotifyCount = 0;
     private judge: Judge;
     private said: SaidMemory;
     private postits: PostitRegistry;
@@ -184,6 +195,8 @@ export class ProactiveEngine {
             onFacts: (m, item) => {
                 pushBounded(this.pendingMailFacts, { ...m, item });
             },
+            onFulfilled: (m, item, order) =>
+                this.mailOrderFulfilled(m, item, order),
             now: this.now,
         });
         this.connectors = buildConnectors({
@@ -192,6 +205,7 @@ export class ProactiveEngine {
                 orders: this.mailOrders,
                 takeNotified: () => this.takeMailNotified(),
                 takeFacts: () => this.pendingMailFacts.splice(0),
+                takeFulfilled: () => this.takeMailFulfilled(),
             },
             orders: this.mailOrders,
             complete: (sys, user) => this.deps.complete(sys, user),
@@ -278,6 +292,46 @@ export class ProactiveEngine {
                     new Date(d.at).toDateString() === today,
             ).length,
         };
+    }
+
+    /** Ordre de lecture satisfait : fait « Ordre satisfait » pour le prochain
+     *  point, même sans alerte ni faits (spec §3.1). */
+    mailOrderFulfilled(
+        m: { mailId: string; from: string; subject: string; box?: string },
+        item: ReaderItem,
+        order: MailOrder,
+    ): void {
+        pushBounded(this.pendingMailFulfilled, {
+            ...m,
+            item,
+            order: { id: order.id, text: order.text },
+        });
+    }
+
+    /** Vide la file des ordres satisfaits (consommée par le connecteur `mail`). */
+    takeMailFulfilled(): FulfilledNotice[] {
+        return this.pendingMailFulfilled.splice(0);
+    }
+
+    /** Réserve une sortie immédiate du courrier sous le plafond du jour —
+     *  synchrone : un lot du lecteur appelle notifyMail en rafale. */
+    private reserveMailNotify(): boolean {
+        const now = this.now();
+        const day = new Date(now).toDateString();
+        if (day !== this.mailNotifyDay) {
+            this.mailNotifyDay = day;
+            this.mailNotifyCount = this.journal
+                .list(300)
+                .filter(
+                    (e) =>
+                        e.source === 'mail-reader' &&
+                        (e.channel === 'speak' || e.channel === 'notify') &&
+                        new Date(e.at).toDateString() === day,
+                ).length;
+        }
+        if (this.mailNotifyCount >= MAIL_NOTIFY_PER_DAY) return false;
+        this.mailNotifyCount++;
+        return true;
     }
 
     /** Vide la file des mails signalés (consommée par le connecteur `mail`). */
@@ -735,18 +789,38 @@ export class ProactiveEngine {
 
     /**
      * Mail que le lecteur IA juge à signaler : sortie immédiate (notification,
-     * parole si présent et hors nuit), puis mise en file pour l'événement du
-     * connecteur (post-it, plafond d'urgences, prochain point).
+     * parole si présent et hors nuit) — LE canal d'alerte, plafonné à
+     * MAIL_NOTIFY_PER_DAY par jour —, puis mise en file pour l'événement
+     * `utile` du connecteur (post-it, prochain point).
      */
     async notifyMail(
         m: { mailId: string; from: string; subject: string; box?: string },
         item: ReaderItem,
     ): Promise<void> {
-        pushBounded(this.pendingMailNotify, { ...m, item });
+        const allowed = this.reserveMailNotify();
+        pushBounded(this.pendingMailNotify, {
+            ...m,
+            item,
+            ...(allowed ? {} : { capped: true }),
+        });
         const who = senderName(m.from);
         const text = `Courrier : « ${m.subject} » de ${who}${
             item.reason ? ` — ${item.reason}` : ''
         }`;
+        if (!allowed) {
+            Logger.info(
+                `proactive: courrier ${m.mailId} non poussé (plafond ${MAIL_NOTIFY_PER_DAY}/jour)`,
+            );
+            this.journal.record({
+                at: this.now(),
+                source: 'mail-reader',
+                subject: m.mailId,
+                channel: 'hold',
+                message: text,
+                reason: `Notification plafonnée (${MAIL_NOTIFY_PER_DAY}/jour) — ${item.reason}`,
+            });
+            return;
+        }
         try {
             const channel = await this.pushNow(text, true);
             this.journal.record({
