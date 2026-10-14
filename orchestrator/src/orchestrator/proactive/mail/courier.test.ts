@@ -346,6 +346,39 @@ async function run() {
         assert.deepStrictEqual(t.courier.getState().processedIds, ['k1']);
         assert.strictEqual(t.notified.length, 1);
         assert.strictEqual(t.journal.list(1)[0].stage, 'keep');
+        // rangé une seule fois sur les deux polls
+        assert.deepStrictEqual(
+            byTool(t.calls, 'modify_labels').map((c) => c.args),
+            [{ messageId: 'k1', add: ['Boîtes/Qonto'], archive: true }],
+        );
+        assert.strictEqual(t.senders.keep()[0].hits, 1);
+    }
+
+    // inconnu en attente de lecture, devenu gardé avant la relecture → rangé quand même
+    {
+        const t = setup({
+            list: () => [{ id: 'j1', from: 'boss@newco.fr', subject: 'Hello' }],
+            replies: [new Error('down'), '[{"i":1,"notify":false}]'],
+        });
+        await t.courier.scan();
+        assert.strictEqual(byTool(t.calls, 'modify_labels').length, 0);
+        assert.strictEqual(t.courier.getState().pending?.j1?.kind, 'inbox');
+        t.senders.upsertKeep(
+            newKeepSender(
+                { match: 'newco.fr', name: 'Newco', read: 'always' },
+                NOW,
+            ),
+        );
+        await t.courier.scan();
+        assert.deepStrictEqual(
+            byTool(t.calls, 'modify_labels').map((c) => c.args),
+            [{ messageId: 'j1', add: ['Boîtes/Newco'], archive: true }],
+        );
+        const d = t.journal.list(1)[0];
+        assert.strictEqual(d.stage, 'keep');
+        assert.strictEqual(d.box, 'Newco');
+        assert.deepStrictEqual(t.courier.getState().processedIds, ['j1']);
+        assert.deepStrictEqual(t.courier.getState().pending, {});
     }
 
     // corps : échec get_email → snippet
@@ -440,7 +473,13 @@ async function run() {
             byTool(t.calls, 'modify_labels').map((c) => c.args),
             [
                 { messageId: 'r1', add: [SPAM_LABEL], archive: true },
-                { messageId: 'r3', add: ['Boîtes/Qonto'], archive: true },
+                // gardé l'emporte sur osef : Yui/Spam retiré (sinon le balayage le jetterait)
+                {
+                    messageId: 'r3',
+                    add: ['Boîtes/Qonto'],
+                    remove: [SPAM_LABEL],
+                    archive: true,
+                },
             ],
         );
         assert.strictEqual(byTool(t.calls, 'trash_email').length, 0);
@@ -461,6 +500,8 @@ async function run() {
             out.map((o) => o.verdict.kind),
             ['spam', 'keep', 'inbox'],
         );
+        // défaut 100 = plafond réel de list_messages_meta côté GmailClient
+        assert.strictEqual(t.calls[0].args.maxResults, 100);
         assert.deepStrictEqual(
             t.calls.map((c) => c.tool),
             ['list_messages_meta'],

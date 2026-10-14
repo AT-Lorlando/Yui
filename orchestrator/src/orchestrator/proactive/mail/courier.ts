@@ -76,9 +76,15 @@ export interface CourierState {
     /**
      * Mails « à lire » pas encore conclus (lot reporté ou lecture en échec).
      * Un gardé est archivé AVANT lecture : sans cette file, il sortirait de
-     * `in:inbox` et ne serait jamais relu.
+     * `in:inbox` et ne serait jamais relu. `kind` = verdict au moment du
+     * rangement : un inconnu devenu gardé entre-temps doit encore être rangé.
      */
-    pending?: Record<string, CourierMail>;
+    pending?: Record<string, PendingMail>;
+}
+
+export interface PendingMail {
+    mail: CourierMail;
+    kind: 'keep' | 'inbox';
 }
 
 export const LLM_BATCH = 12;
@@ -97,6 +103,22 @@ const SWEEP_QUERY = `label:"${SPAM_LABEL}" older_than:${TRASH_AFTER_DAYS}d`;
 function chunks<T>(arr: T[], size: number): T[][] {
     const out: T[][] = [];
     for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+}
+
+function loadPending(raw: unknown): Record<string, PendingMail> {
+    const out: Record<string, PendingMail> = {};
+    if (!raw || typeof raw !== 'object') return out;
+    for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+        const p = v as Partial<PendingMail> | null;
+        if (
+            p?.mail &&
+            typeof p.mail.id === 'string' &&
+            (p.kind === 'keep' || p.kind === 'inbox')
+        ) {
+            out[id] = { mail: p.mail, kind: p.kind };
+        }
+    }
     return out;
 }
 
@@ -176,7 +198,10 @@ export class MailCourier {
         res.scanned = listed.length;
         const pending = this.state.pending ?? (this.state.pending = {});
         const byId = new Map<string, CourierMail>();
-        for (const m of [...Object.values(pending), ...listed]) {
+        for (const m of [
+            ...Object.values(pending).map((p) => p.mail),
+            ...listed,
+        ]) {
             if (!byId.has(m.id)) byId.set(m.id, m);
         }
         const fresh = [...byId.values()].filter(
@@ -186,11 +211,11 @@ export class MailCourier {
         const toRead: Array<{ mail: CourierMail; verdict: SenderVerdict }> = [];
         for (const m of fresh) {
             // déjà rangé / compté au poll précédent : seule la lecture reste à faire
-            const again = !!pending[m.id];
+            const before = pending[m.id]?.kind;
             const v = resolveSender(senders.file(), m);
             try {
                 if (v.kind === 'keep') {
-                    if (!again) {
+                    if (before !== 'keep') {
                         senders.recordHit(v.sender.id, now);
                         await deviceHandler('modify_labels', {
                             messageId: m.id,
@@ -216,7 +241,7 @@ export class MailCourier {
                     });
                     tally(this.conclude(m, { stage: 'spam', read: false }));
                 } else {
-                    if (!again) this.rememberUnknown(m, now);
+                    if (!before) this.rememberUnknown(m, now);
                     toRead.push({ mail: m, verdict: v });
                 }
             } catch (e) {
@@ -226,7 +251,12 @@ export class MailCourier {
         }
 
         // lecteur : LLM_PER_POLL max, le reste revient au poll suivant (non processed)
-        for (const { mail } of toRead) pending[mail.id] = mail;
+        for (const { mail, verdict } of toRead) {
+            pending[mail.id] = {
+                mail,
+                kind: verdict.kind === 'keep' ? 'keep' : 'inbox',
+            };
+        }
         for (const batch of chunks(toRead.slice(0, LLM_PER_POLL), LLM_BATCH)) {
             for (const c of await this.readBatch(batch, now)) tally(c);
         }
@@ -379,9 +409,15 @@ export class MailCourier {
     private trimPending(): void {
         const p = this.state.pending ?? {};
         const ids = Object.keys(p);
-        for (const id of ids.slice(0, Math.max(0, ids.length - PENDING_MAX))) {
+        const dropped = ids.slice(0, Math.max(0, ids.length - PENDING_MAX));
+        for (const id of dropped) {
             delete p[id];
             delete this.state.readTries[id];
+        }
+        if (dropped.length) {
+            Logger.warn(
+                `courrier : file de lecture pleine, ${dropped.length} mail(s) abandonné(s) sans lecture`,
+            );
         }
     }
 
@@ -486,9 +522,12 @@ export class MailCourier {
         let applied = 0;
         for (const m of mails) {
             try {
+                // « à garder » l'emporte sur osef : retirer Yui/Spam, sinon le
+                // balayage mettrait ces mails à la corbeille 15 jours plus tard
                 await this.deps.deviceHandler('modify_labels', {
                     messageId: m.id,
                     add: [label],
+                    ...(keep ? { remove: [SPAM_LABEL] } : {}),
                     archive: true,
                 });
                 applied++;
@@ -502,7 +541,7 @@ export class MailCourier {
     /** Verdict des listes sur une requête, sans aucune écriture. */
     async dryRun(
         query = 'newer_than:30d',
-        max = 200,
+        max = 100,
     ): Promise<
         Array<{
             mailId: string;
@@ -576,10 +615,7 @@ export class MailCourier {
                     raw.unknown && typeof raw.unknown === 'object'
                         ? raw.unknown
                         : {},
-                pending:
-                    raw.pending && typeof raw.pending === 'object'
-                        ? raw.pending
-                        : {},
+                pending: loadPending(raw.pending),
                 stats: { ...base.stats, ...(raw.stats ?? {}) },
             };
         } catch (e) {
