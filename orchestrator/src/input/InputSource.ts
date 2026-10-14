@@ -131,48 +131,34 @@ export interface ProactiveHandler {
     saidForgetAll?: () => number;
     feedback?: (id: string, value: 'up' | 'down') => boolean;
     situation?: () => unknown;
-    /** Concierge courrier : état, scan, application, correction. */
-    triage?: () => unknown;
-    triageScan?: (query?: string, max?: number) => Promise<unknown>;
-    triageApply?: (filter?: {
-        category?: string;
-        mailIds?: string[];
-    }) => Promise<number>;
-    triageCorrect?: (mailId: string, category: string) => Promise<boolean>;
-    triageResolveDoubt?: (
-        id: string,
-        opts: { category?: string; accept?: number[] },
-    ) => Promise<boolean>;
-    /** Règles manuelles (page /mail) : lecture (tri déjà fait), écriture, suppression. */
-    mailRules?: () => unknown;
-    mailRuleSave?: (raw: unknown) => unknown;
-    mailRuleDelete?: (id: string) => boolean;
-    /** Quarantaine (signaux non confirmés) : liste + décision humaine. */
-    mailQuarantine?: () => unknown;
-    mailQuarantineAct?: (
-        id: string,
-        action: string,
-        opts: { category?: string },
-    ) => Promise<boolean>;
-    /** Pile à lire côté Gmail + accusé de lecture (page /mail). */
-    mailReading?: () => Promise<unknown>;
-    mailMarkRead?: (id: string) => Promise<void>;
-    /** Journal des décisions de tri (page /mail). */
-    mailJournal?: (limit?: number, scope?: 'actions') => unknown;
-    /** Essai à blanc des règles déterministes, sans aucune écriture (page /mail, onglet Règles). */
+    /** Courrier v3 : listes d'expéditeurs, inconnus, ordres de lecture (page /mail). */
+    mailSendersFile?: () => unknown;
+    mailSendersReplace?: (raw: unknown) => unknown;
+    mailSenderKeep?: (input: {
+        match: string;
+        name: string;
+        read?: 'always' | 'never' | 'rules';
+        rules?: Array<{ subject: string; read: boolean }>;
+        readDefault?: boolean;
+    }) => unknown;
+    mailSenderSpam?: (match: string) => unknown;
+    mailSenderDelete?: (id: string) => boolean;
+    /** Rangement rétroactif d'un expéditeur ; lève « introuvable » si l'id est inconnu. */
+    mailSenderApply?: (id: string, max?: number) => Promise<unknown>;
+    mailUnknown?: () => unknown;
+    mailOrders?: () => unknown;
+    mailOrderAdd?: (text: string, days: number) => unknown;
+    mailOrderDelete?: (id: string) => boolean;
+    /** Essai à blanc des listes sur une requête, sans aucune écriture. */
     mailDryRun?: (query?: string, max?: number) => Promise<unknown>;
-    /** Classement à la demande d'un lot d'ids issus du dernier `mailDryRun` (bouton « Classer par l'IA »). */
-    mailClassify?: (mailIds: string[]) => Promise<unknown>;
-    /** Fichier de règles complet, y compris les signaux non confirmés (édition JSON brut). */
-    mailRulesRaw?: () => unknown;
-    /** Remplace le fichier de règles en bloc (édition JSON brut, tout-ou-rien). */
-    mailRulesReplace?: (raw: unknown) => unknown;
-    /** Expéditeurs récents agrégés + verdict actuel (page /mail), sans écriture. */
-    mailSenders?: (days?: number, max?: number) => Promise<unknown>;
-    /** Rattrapage rétroactif d'une règle ; `refused` = règle inconnue / non applicable. */
-    mailRuleApply?: (id: string, max?: number) => Promise<unknown>;
+    /** Journal des décisions de tri (scope `actions` = notifiées). */
+    mailJournal?: (limit?: number, scope?: 'actions') => unknown;
     /** Bilan du tri sur les N derniers jours. */
     mailStats?: (days?: number) => unknown;
+    /** Scan à la demande de la boîte. */
+    mailScan?: () => Promise<unknown>;
+    /** Rapport de migration v2 → v3 (null si aucun). */
+    mailMigration?: () => unknown;
     /** `POST /events` : le bus reçoit, filtre (péremption/dédup/cooldown) et compte. */
     ingest?: (
         events: import('../orchestrator/proactive/events').Event[],

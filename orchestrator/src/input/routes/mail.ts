@@ -1,45 +1,87 @@
-// Page /mail : règles manuelles, quarantaine des signaux, pile à lire,
-// journal de tri. `GET /mail/triage` et les actions de scan/apply/correct
-// restent dans config.ts (chemin historique) — ce fichier ne couvre que ce
-// qu'ajoute la quarantaine.
+// Page /mail (Courrier v3) : listes d'expéditeurs (à garder / osef), inconnus,
+// ordres de lecture, essai à blanc, journal, bilan, scan et rapport de
+// migration.
 //
 // ⚠️ Monté sur '/' : auth PAR ROUTE, jamais en `router.use` (cf. events.ts).
+// Les bornes d'entrée sont vérifiées ici (400 propre) ; les stores
+// revalident et leurs erreurs de validation remontent aussi en 400.
 import express from 'express';
+import * as fs from 'fs';
+import { dataPath } from '@yui/shared';
 import type { ProactiveHandler } from '../InputSource';
 import type { RequireAuth } from './helpers';
 
 export type MailHandler = Pick<
     ProactiveHandler,
-    | 'mailRules'
-    | 'mailRuleSave'
-    | 'mailRuleDelete'
-    | 'mailQuarantine'
-    | 'mailQuarantineAct'
-    | 'mailReading'
-    | 'mailMarkRead'
-    | 'mailJournal'
+    | 'mailSendersFile'
+    | 'mailSendersReplace'
+    | 'mailSenderKeep'
+    | 'mailSenderSpam'
+    | 'mailSenderDelete'
+    | 'mailSenderApply'
+    | 'mailUnknown'
+    | 'mailOrders'
+    | 'mailOrderAdd'
+    | 'mailOrderDelete'
     | 'mailDryRun'
-    | 'mailClassify'
-    | 'mailRulesRaw'
-    | 'mailRulesReplace'
-    | 'mailSenders'
-    | 'mailRuleApply'
+    | 'mailJournal'
     | 'mailStats'
+    | 'mailScan'
+    | 'mailMigration'
 >;
 
 const UNAVAILABLE = { error: 'proactivité indisponible' };
-const QUARANTINE_ACTIONS = new Set(['confirm', 'correct', 'reject']);
-const JOURNAL_DEFAULT_LIMIT = 50;
-const JOURNAL_MAX_LIMIT = 200;
-// Bornes de l'essai à blanc et du classement à la demande — mêmes plafonds
-// que le poll automatique côté concierge (`LLM_PER_POLL`), pour éviter
-// qu'un appel direct dépasse ce que le concierge accepterait lui-même.
-const DRY_RUN_MAX_LIMIT = 200;
-const CLASSIFY_MAX_IDS = 24;
-// Le concierge lève cette erreur précise quand `correct` reçoit une
-// catégorie qui n'existe pas — la route la distingue d'un id de règle
-// inconnu (404) pour répondre 400 (requête mal formée) à la place.
-const UNKNOWN_CATEGORY_MESSAGE = 'catégorie inconnue';
+const MATCH_MIN = 2;
+const NAME_MAX = 40;
+const ORDER_DAYS_MAX = 60;
+const ORDER_DEFAULT_DAYS = 14;
+const APPLY_MAX = 200;
+const APPLY_DEFAULT = 100;
+const DRY_RUN_MAX = 100;
+const JOURNAL_DEFAULT = 50;
+const JOURNAL_MAX = 200;
+const STATS_DAYS_MAX = 90;
+const STATS_DAYS_DEFAULT = 7;
+
+class BadRequest extends Error {}
+
+/** Entier dans [min, max], `def` si absent ; hors bornes → 400 (pas de clamp silencieux). */
+function boundedInt(
+    raw: unknown,
+    name: string,
+    min: number,
+    max: number,
+    def: number,
+): number {
+    if (raw === undefined || raw === null || raw === '') return def;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < min || n > max) {
+        throw new BadRequest(
+            `${name} doit être un entier entre ${min} et ${max}`,
+        );
+    }
+    return n;
+}
+
+function cleanMatch(raw: unknown): string {
+    const match = typeof raw === 'string' ? raw.trim() : '';
+    if (match.length < MATCH_MIN) {
+        throw new BadRequest(
+            `match doit faire au moins ${MATCH_MIN} caractères`,
+        );
+    }
+    return match;
+}
+
+function cleanName(raw: unknown): string {
+    const name = typeof raw === 'string' ? raw.trim() : '';
+    if (!name || name.length > NAME_MAX || name.includes('/')) {
+        throw new BadRequest(
+            `name doit faire 1 à ${NAME_MAX} caractères, sans "/"`,
+        );
+    }
+    return name;
+}
 
 export function mailRoutes(
     requireAuth: RequireAuth,
@@ -47,330 +89,180 @@ export function mailRoutes(
 ): express.Router {
     const r = express.Router();
 
-    r.get('/mail/rules', requireAuth, (_req: any, res: any) => {
-        if (!h?.mailRules) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
+    /** 503 sans handler, 400 sur entrée invalide ou erreur de validation du store, sinon 500. */
+    const route = (
+        method: 'get' | 'post' | 'put' | 'delete',
+        path: string,
+        needs: keyof MailHandler,
+        fn: (req: any, res: any) => unknown | Promise<unknown>,
+    ) => {
+        r[method](path, requireAuth, async (req: any, res: any) => {
+            if (!h?.[needs]) {
+                res.status(503).json(UNAVAILABLE);
+                return;
+            }
+            try {
+                await fn(req, res);
+            } catch (e: any) {
+                const msg = e instanceof Error ? e.message : String(e);
+                if (e instanceof BadRequest || e?.name === 'ValidationError') {
+                    res.status(400).json({ error: msg });
+                } else if (/introuvable/i.test(msg)) {
+                    res.status(404).json({ error: msg });
+                } else {
+                    res.status(500).json({ error: msg });
+                }
+            }
+        });
+    };
+
+    route('get', '/mail/senders', 'mailSendersFile', (_req, res) => {
+        res.json(h!.mailSendersFile!());
+    });
+
+    // Le store lève une Error ordinaire sur fichier invalide : sur ce PUT,
+    // toute erreur est une erreur de validation (400).
+    route('put', '/mail/senders', 'mailSendersReplace', (req, res) => {
         try {
-            const rules =
-                (h.mailRules() as Array<{
-                    origin: string;
-                    confirmed: boolean;
-                }>) ?? [];
-            // les signaux non confirmés vivent dans la quarantaine (page
-            // dédiée) — les montrer aussi ici doublonnerait la même décision
-            // à deux endroits
-            res.json(
-                rules.filter(
-                    (rule) => !(rule.origin === 'signal' && !rule.confirmed),
-                ),
+            res.json(h!.mailSendersReplace!(req.body));
+        } catch (e: any) {
+            res.status(400).json({ error: e.message });
+        }
+    });
+
+    route('post', '/mail/senders/keep', 'mailSenderKeep', (req, res) => {
+        const b = req.body ?? {};
+        const input: Record<string, unknown> = {
+            match: cleanMatch(b.match),
+            name: cleanName(b.name),
+        };
+        for (const k of ['read', 'rules', 'readDefault']) {
+            if (b[k] !== undefined) input[k] = b[k];
+        }
+        if (
+            input.read !== undefined &&
+            !['always', 'never', 'rules'].includes(input.read as string)
+        ) {
+            throw new BadRequest('read doit valoir always, never ou rules');
+        }
+        res.status(201).json(h!.mailSenderKeep!(input as any));
+    });
+
+    route('post', '/mail/senders/spam', 'mailSenderSpam', (req, res) => {
+        res.status(201).json(h!.mailSenderSpam!(cleanMatch(req.body?.match)));
+    });
+
+    route('delete', '/mail/senders/:id', 'mailSenderDelete', (req, res) => {
+        if (h!.mailSenderDelete!(String(req.params.id))) res.status(204).end();
+        else res.status(404).json({ error: 'expéditeur introuvable' });
+    });
+
+    route(
+        'post',
+        '/mail/senders/:id/apply',
+        'mailSenderApply',
+        async (req, res) => {
+            const max = boundedInt(
+                req.body?.max,
+                'max',
+                1,
+                APPLY_MAX,
+                APPLY_DEFAULT,
             );
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
-    });
-
-    r.post('/mail/rules', requireAuth, (req: any, res: any) => {
-        if (!h?.mailRuleSave) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        try {
-            const result = h.mailRuleSave(req.body) as
-                | { ok: true; rule: unknown }
-                | { ok: false; error: string };
-            if (!result.ok) {
-                res.status(400).json({ error: result.error });
-                return;
-            }
-            res.json(result.rule);
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
-    });
-
-    r.delete('/mail/rules/:id', requireAuth, (req: any, res: any) => {
-        if (!h?.mailRuleDelete) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        try {
-            const ok = h.mailRuleDelete(String(req.params.id));
-            if (!ok) {
-                res.status(404).json({ error: 'règle inconnue' });
-                return;
-            }
-            res.json({ ok: true });
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
-    });
-
-    r.get('/mail/quarantine', requireAuth, (_req: any, res: any) => {
-        if (!h?.mailQuarantine) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        try {
-            res.json(h.mailQuarantine());
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
-    });
-
-    r.post(
-        '/mail/quarantine/:id/:action',
-        requireAuth,
-        async (req: any, res: any) => {
-            const action = String(req.params.action);
-            if (!QUARANTINE_ACTIONS.has(action)) {
-                res.status(400).json({ error: 'action inconnue' });
-                return;
-            }
-            if (!h?.mailQuarantineAct) {
-                res.status(503).json(UNAVAILABLE);
-                return;
-            }
-            // catégorie requise pour corriger : requête mal formée, refusée
-            // avant même de savoir si la règle existe (404 réservé à ça).
-            if (
-                action === 'correct' &&
-                typeof req.body?.category !== 'string'
-            ) {
-                res.status(400).json({
-                    error: 'catégorie requise pour corriger',
-                });
-                return;
-            }
-            try {
-                const ok = await h.mailQuarantineAct(
-                    String(req.params.id),
-                    action,
-                    { category: req.body?.category },
-                );
-                if (!ok) {
-                    res.status(404).json({ error: 'règle inconnue' });
-                    return;
-                }
-                res.json({ ok: true });
-            } catch (e: any) {
-                if (e?.message === UNKNOWN_CATEGORY_MESSAGE) {
-                    res.status(400).json({ error: e.message });
-                    return;
-                }
-                res.status(500).json({ error: e.message });
-            }
+            res.json(await h!.mailSenderApply!(String(req.params.id), max));
         },
     );
 
-    r.get('/mail/reading', requireAuth, async (_req: any, res: any) => {
-        if (!h?.mailReading) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        try {
-            res.json(await h.mailReading());
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
+    route('get', '/mail/unknown', 'mailUnknown', (_req, res) => {
+        res.json(h!.mailUnknown!());
     });
 
-    r.post(
-        '/mail/reading/:id/read',
-        requireAuth,
-        async (req: any, res: any) => {
-            if (!h?.mailMarkRead) {
-                res.status(503).json(UNAVAILABLE);
-                return;
-            }
-            try {
-                await h.mailMarkRead(String(req.params.id));
-                res.json({ ok: true });
-            } catch (e: any) {
-                res.status(500).json({ error: e.message });
-            }
-        },
-    );
+    route('get', '/mail/orders', 'mailOrders', (_req, res) => {
+        res.json(h!.mailOrders!());
+    });
 
-    r.get('/mail/journal', requireAuth, (req: any, res: any) => {
-        if (!h?.mailJournal) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        const raw = Number(req.query?.limit ?? JOURNAL_DEFAULT_LIMIT);
-        const limit = Math.min(
-            JOURNAL_MAX_LIMIT,
-            Math.max(1, Number.isFinite(raw) ? raw : JOURNAL_DEFAULT_LIMIT),
+    route('post', '/mail/orders', 'mailOrderAdd', (req, res) => {
+        const text =
+            typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+        if (!text) throw new BadRequest('text est requis');
+        const days = boundedInt(
+            req.body?.days,
+            'days',
+            1,
+            ORDER_DAYS_MAX,
+            ORDER_DEFAULT_DAYS,
         );
         try {
-            const scope =
-                req.query?.scope === 'actions' ? 'actions' : undefined;
-            res.json(h.mailJournal(limit, scope));
+            res.status(201).json(h!.mailOrderAdd!(text, days));
         } catch (e: any) {
-            res.status(500).json({ error: e.message });
+            // texte trop long, plafond d'ordres actifs : erreurs du store
+            res.status(400).json({ error: e.message });
         }
     });
 
-    r.post('/mail/rules/dry-run', requireAuth, async (req: any, res: any) => {
-        if (!h?.mailDryRun) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        const { query, max } = req.body ?? {};
-        if (query !== undefined && typeof query !== 'string') {
-            res.status(400).json({ error: 'query doit être une chaîne' });
-            return;
-        }
-        if (
-            max !== undefined &&
-            (typeof max !== 'number' || max > DRY_RUN_MAX_LIMIT)
-        ) {
-            res.status(400).json({
-                error: `max doit être un nombre ≤ ${DRY_RUN_MAX_LIMIT}`,
-            });
-            return;
-        }
-        try {
-            res.json(await h.mailDryRun(query, max));
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
+    route('delete', '/mail/orders/:id', 'mailOrderDelete', (req, res) => {
+        if (h!.mailOrderDelete!(String(req.params.id))) res.status(204).end();
+        else res.status(404).json({ error: 'ordre introuvable' });
     });
 
-    r.post('/mail/triage/classify', requireAuth, async (req: any, res: any) => {
-        if (!h?.mailClassify) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        const mailIds = req.body?.mailIds;
-        if (
-            !Array.isArray(mailIds) ||
-            mailIds.length < 1 ||
-            mailIds.length > CLASSIFY_MAX_IDS ||
-            !mailIds.every((id: unknown) => typeof id === 'string')
-        ) {
-            res.status(400).json({
-                error: `mailIds doit contenir de 1 à ${CLASSIFY_MAX_IDS} identifiants`,
-            });
-            return;
-        }
-        try {
-            res.json(await h.mailClassify(mailIds));
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
+    route('post', '/mail/dry-run', 'mailDryRun', async (req, res) => {
+        const query =
+            typeof req.body?.query === 'string' && req.body.query.trim()
+                ? req.body.query.trim()
+                : undefined;
+        const max = boundedInt(
+            req.body?.max,
+            'max',
+            1,
+            DRY_RUN_MAX,
+            DRY_RUN_MAX,
+        );
+        res.json(await h!.mailDryRun!(query, max));
     });
 
-    r.get('/mail/rules/raw', requireAuth, (_req: any, res: any) => {
-        if (!h?.mailRulesRaw) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        try {
-            res.json(h.mailRulesRaw());
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
+    route('get', '/mail/journal', 'mailJournal', (req, res) => {
+        // limite hors bornes : plafonnée (lecture seule, comportement historique)
+        const n = Number(req.query.limit);
+        const limit =
+            Number.isInteger(n) && n > 0
+                ? Math.min(n, JOURNAL_MAX)
+                : JOURNAL_DEFAULT;
+        const scope = req.query.scope === 'actions' ? 'actions' : undefined;
+        res.json(h!.mailJournal!(limit, scope));
     });
 
-    r.put('/mail/rules', requireAuth, (req: any, res: any) => {
-        if (!h?.mailRulesReplace) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        try {
-            const result = h.mailRulesReplace(req.body) as
-                | { ok: true; count: number }
-                | { ok: false; errors: unknown };
-            if (!result.ok) {
-                res.status(400).json({ errors: result.errors });
-                return;
-            }
-            res.json(result);
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
+    route('get', '/mail/stats', 'mailStats', (req, res) => {
+        const days = boundedInt(
+            req.query.days,
+            'days',
+            1,
+            STATS_DAYS_MAX,
+            STATS_DAYS_DEFAULT,
+        );
+        res.json(h!.mailStats!(days));
     });
 
-    r.get('/mail/senders', requireAuth, async (req: any, res: any) => {
-        if (!h?.mailSenders) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        const days = Number(req.query?.days ?? 30);
-        const max = Number(req.query?.max ?? 200);
-        if (!Number.isInteger(days) || days < 1 || days > 90) {
-            res.status(400).json({
-                error: 'days doit être compris entre 1 et 90',
-            });
-            return;
-        }
-        if (!Number.isInteger(max) || max < 1 || max > 200) {
-            res.status(400).json({
-                error: 'max doit être compris entre 1 et 200',
-            });
-            return;
-        }
-        try {
-            res.json(await h.mailSenders(days, max));
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
+    route('post', '/mail/scan', 'mailScan', async (_req, res) => {
+        res.json(await h!.mailScan!());
     });
 
-    r.post('/mail/rules/:id/apply', requireAuth, async (req: any, res: any) => {
-        if (!h?.mailRuleApply) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        const max = req.body?.max;
-        if (
-            max !== undefined &&
-            (!Number.isInteger(max) || max < 1 || max > 100)
-        ) {
-            res.status(400).json({
-                error: 'max doit être compris entre 1 et 100',
-            });
-            return;
-        }
-        try {
-            const result = (await h.mailRuleApply(
-                String(req.params.id),
-                max,
-            )) as { applied: number; archived: number; refused?: string };
-            if (result.refused === 'unknown') {
-                res.status(404).json({ error: 'règle inconnue' });
-                return;
-            }
-            if (result.refused) {
-                res.status(400).json({ error: 'règle non applicable' });
-                return;
-            }
-            res.json({ applied: result.applied, archived: result.archived });
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
-    });
-
-    r.get('/mail/stats', requireAuth, (req: any, res: any) => {
-        if (!h?.mailStats) {
-            res.status(503).json(UNAVAILABLE);
-            return;
-        }
-        const days = Number(req.query?.days ?? 7);
-        if (!Number.isInteger(days) || days < 1 || days > 90) {
-            res.status(400).json({
-                error: 'days doit être compris entre 1 et 90',
-            });
-            return;
-        }
-        try {
-            res.json(h.mailStats(days));
-        } catch (e: any) {
-            res.status(500).json({ error: e.message });
-        }
+    route('get', '/mail/migration', 'mailMigration', (_req, res) => {
+        const report = h!.mailMigration!();
+        if (report === null || report === undefined) {
+            res.status(404).json({ error: 'aucune migration' });
+        } else res.json(report);
     });
 
     return r;
+}
+
+/** Contenu de `mail-migration.json`, ou null (absent / illisible). */
+export function readMigrationReport(): unknown | null {
+    try {
+        return JSON.parse(
+            fs.readFileSync(dataPath('mail-migration.json'), 'utf8'),
+        );
+    } catch {
+        return null;
+    }
 }

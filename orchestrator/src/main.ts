@@ -1,4 +1,9 @@
 import './bootstrap'; // load .env + settings.json and patch process.env — must be first
+import {
+    addKeepSender,
+    addSpamSender,
+} from './orchestrator/proactive/mail/senderOps';
+import { readMigrationReport } from './input/routes/mail';
 import { startBackupSchedule } from './orchestrator/dataBackup';
 import './env';
 import { Orchestrator, buildServerConfigs } from './orchestrator';
@@ -261,17 +266,46 @@ async function main() {
                 feedback: (id: string, value: 'up' | 'down') =>
                     proactive.setFeedback(id, value),
                 situation: () => proactive.getSituation(),
-                // Courrier v3 : les routes v2 (tri, règles, quarantaine, à
-                // lire) ne sont plus servies ; les nouvelles (listes, ordres)
-                // arrivent avec la refonte de /mail.
+                mailSendersFile: () => proactive.mailSenders.file(),
+                mailSendersReplace: (raw: unknown) =>
+                    proactive.mailSenders.replace(raw),
+                mailSenderKeep: (input) =>
+                    addKeepSender(
+                        proactive.mailSenders,
+                        proactive.courier,
+                        input,
+                        Date.now(),
+                    ),
+                mailSenderSpam: (match: string) =>
+                    addSpamSender(
+                        proactive.mailSenders,
+                        proactive.courier,
+                        match,
+                        Date.now(),
+                    ),
+                mailSenderDelete: (id: string) =>
+                    proactive.mailSenders.remove(id),
+                mailSenderApply: (id: string, max?: number) =>
+                    proactive.courier.applySender(id, max),
+                mailUnknown: () => proactive.courier.unknown(),
+                mailOrders: () => proactive.mailOrders.all(),
+                mailOrderAdd: (text: string, days: number) =>
+                    proactive.mailOrders.add(
+                        { text, days, source: 'user' },
+                        Date.now(),
+                    ),
+                mailOrderDelete: (id: string) =>
+                    proactive.mailOrders.remove(id),
+                mailDryRun: (query?: string, max?: number) =>
+                    proactive.courier.dryRun(query, max),
                 mailJournal: (limit?: number, scope?: 'actions') =>
                     proactive.mailJournal
                         .list(200)
                         .filter((d) => scope !== 'actions' || d.notify)
                         .slice(0, limit ?? 50),
-                mailDryRun: (query?: string, max?: number) =>
-                    proactive.courier.dryRun(query, max),
                 mailStats: (days?: number) => proactive.courier.stats(days),
+                mailScan: () => proactive.courier.scan(),
+                mailMigration: () => readMigrationReport(),
                 ingest: (events) => proactive.ingestAll(events),
                 brief: (scope?: string) =>
                     proactive.brief(
