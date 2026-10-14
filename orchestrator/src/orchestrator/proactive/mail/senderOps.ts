@@ -7,6 +7,7 @@ import {
     newKeepSender,
     newSpamSender,
     senderAddress,
+    validateKeepFields,
     type ContentRule,
     type KeepSender,
     type ReadMode,
@@ -23,18 +24,22 @@ export function forgetMatchedUnknowns(courier: Courier, match: string): void {
         courier.forgetUnknown(senderAddress(m));
         return;
     }
+    // domaine : frontière « @ » (x.fr ne couvre pas a@notx.fr) ou sous-domaine
+    const domain = m.replace(/^@/, '');
     for (const u of courier.unknown()) {
-        if (u.address.toLowerCase().endsWith(m)) {
+        const a = u.address.toLowerCase();
+        if (a.endsWith('@' + domain) || a.endsWith('.' + domain)) {
             courier.forgetUnknown(u.address);
         }
     }
 }
 
-function dropSameMatch(senders: SenderStore, match: string): void {
+/** Ids des entrées de même `match` (casse ignorée), à retirer APRÈS l'ajout du nouveau. */
+function sameMatchIds(senders: SenderStore, match: string, except: string) {
     const m = match.toLowerCase();
-    for (const s of [...senders.keep(), ...senders.spam()]) {
-        if (s.match.toLowerCase() === m) senders.remove(s.id);
-    }
+    return [...senders.keep(), ...senders.spam()]
+        .filter((s) => s.match.toLowerCase() === m && s.id !== except)
+        .map((s) => s.id);
 }
 
 export function addKeepSender(
@@ -49,9 +54,14 @@ export function addKeepSender(
     },
     now: number,
 ): KeepSender {
+    // valider AVANT toute écriture : rien n'est touché si l'entrée est invalide
+    validateKeepFields(
+        { ...input, read: input.read ?? 'never' } as Record<string, unknown>,
+        'expéditeur',
+    );
     const s = newKeepSender(input, now);
-    dropSameMatch(senders, s.match);
     senders.upsertKeep(s);
+    for (const id of sameMatchIds(senders, s.match, s.id)) senders.remove(id);
     forgetMatchedUnknowns(courier, s.match);
     return s;
 }
@@ -63,8 +73,8 @@ export function addSpamSender(
     now: number,
 ): SpamSender {
     const s = newSpamSender(match, now);
-    dropSameMatch(senders, s.match);
     senders.upsertSpam(s);
+    for (const id of sameMatchIds(senders, s.match, s.id)) senders.remove(id);
     forgetMatchedUnknowns(courier, s.match);
     return s;
 }

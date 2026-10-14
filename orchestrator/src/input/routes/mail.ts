@@ -9,6 +9,7 @@ import express from 'express';
 import * as fs from 'fs';
 import { dataPath } from '@yui/shared';
 import type { ProactiveHandler } from '../InputSource';
+import { NotFoundError } from '../../orchestrator/proactive/mail/errors';
 import type { RequireAuth } from './helpers';
 
 export type MailHandler = Pick<
@@ -105,9 +106,9 @@ export function mailRoutes(
                 await fn(req, res);
             } catch (e: any) {
                 const msg = e instanceof Error ? e.message : String(e);
-                if (e instanceof BadRequest || e?.name === 'ValidationError') {
+                if (e instanceof BadRequest) {
                     res.status(400).json({ error: msg });
-                } else if (/introuvable/i.test(msg)) {
+                } else if (e instanceof NotFoundError) {
                     res.status(404).json({ error: msg });
                 } else {
                     res.status(500).json({ error: msg });
@@ -145,7 +146,12 @@ export function mailRoutes(
         ) {
             throw new BadRequest('read doit valoir always, never ou rules');
         }
-        res.status(201).json(h!.mailSenderKeep!(input as any));
+        try {
+            res.status(201).json(h!.mailSenderKeep!(input as any));
+        } catch (e: any) {
+            // validation des règles/champs par le store : rien n'a été écrit
+            res.status(400).json({ error: e.message });
+        }
     });
 
     route('post', '/mail/senders/spam', 'mailSenderSpam', (req, res) => {

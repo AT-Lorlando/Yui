@@ -147,6 +147,58 @@ function checkCommon(
     }
 }
 
+export const RULES_MAX = 20;
+
+/** Champs propres à un « à garder » (nom, read, readDefault, rules) ; lève une Error française. */
+export function validateKeepFields(
+    k: Record<string, unknown>,
+    where: string,
+): void {
+    if (
+        typeof k.name !== 'string' ||
+        k.name.length < 1 ||
+        k.name.length > 40 ||
+        k.name.includes('/')
+    ) {
+        throw new Error(
+            `${where} : le nom doit faire 1 à 40 caractères, sans "/"`,
+        );
+    }
+    if (k.read !== 'always' && k.read !== 'never' && k.read !== 'rules') {
+        throw new Error(`${where} : read doit valoir always, never ou rules`);
+    }
+    if (k.readDefault !== undefined && typeof k.readDefault !== 'boolean') {
+        throw new Error(`${where} : readDefault doit être un booléen`);
+    }
+    if (k.rules !== undefined) {
+        if (Array.isArray(k.rules) && k.rules.length > RULES_MAX) {
+            throw new Error(`${where} : au plus ${RULES_MAX} règles`);
+        }
+        if (!Array.isArray(k.rules)) {
+            throw new Error(`${where} : rules doit être un tableau`);
+        }
+        k.rules.forEach((r: unknown, j: number) => {
+            const rw = `${where}.rules[${j}]`;
+            if (
+                !isObj(r) ||
+                typeof r.subject !== 'string' ||
+                typeof r.read !== 'boolean'
+            ) {
+                throw new Error(`${rw} : {subject, read} attendu`);
+            }
+            try {
+                new RegExp(r.subject, 'i');
+            } catch (e) {
+                throw new Error(
+                    `${rw} : expression régulière invalide "${r.subject}" (${
+                        (e as Error).message
+                    })`,
+                );
+            }
+        });
+    }
+}
+
 /** Valide un fichier brut (tout-ou-rien) ; lève une Error au message français. */
 export function validateSendersFile(raw: unknown): SendersFile {
     if (!isObj(raw)) throw new Error('Le fichier doit être un objet JSON');
@@ -161,48 +213,7 @@ export function validateSendersFile(raw: unknown): SendersFile {
         const where = `keep[${i}]`;
         if (!isObj(k)) throw new Error(`${where} : objet attendu`);
         checkCommon(k, where, ids);
-        if (
-            typeof k.name !== 'string' ||
-            k.name.length < 1 ||
-            k.name.length > 40 ||
-            k.name.includes('/')
-        ) {
-            throw new Error(
-                `${where} : le nom doit faire 1 à 40 caractères, sans "/"`,
-            );
-        }
-        if (k.read !== 'always' && k.read !== 'never' && k.read !== 'rules') {
-            throw new Error(
-                `${where} : read doit valoir always, never ou rules`,
-            );
-        }
-        if (k.readDefault !== undefined && typeof k.readDefault !== 'boolean') {
-            throw new Error(`${where} : readDefault doit être un booléen`);
-        }
-        if (k.rules !== undefined) {
-            if (!Array.isArray(k.rules)) {
-                throw new Error(`${where} : rules doit être un tableau`);
-            }
-            k.rules.forEach((r: unknown, j: number) => {
-                const rw = `${where}.rules[${j}]`;
-                if (
-                    !isObj(r) ||
-                    typeof r.subject !== 'string' ||
-                    typeof r.read !== 'boolean'
-                ) {
-                    throw new Error(`${rw} : {subject, read} attendu`);
-                }
-                try {
-                    new RegExp(r.subject, 'i');
-                } catch (e) {
-                    throw new Error(
-                        `${rw} : expression régulière invalide "${
-                            r.subject
-                        }" (${(e as Error).message})`,
-                    );
-                }
-            });
-        }
+        validateKeepFields(k, where);
     });
     raw.spam.forEach((s: unknown, i: number) => {
         const where = `spam[${i}]`;

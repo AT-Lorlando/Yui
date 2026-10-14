@@ -3,6 +3,7 @@
 // fait lire par l'IA les mails « à lire » (ordres de lecture compris), et
 // met à la corbeille les osef de plus de 15 jours. Jamais de suppression
 // définitive ; seul le balayage appelle trash_email.
+import { NotFoundError } from './errors';
 import * as fs from 'fs';
 import * as path from 'path';
 import { dataPath } from '@yui/shared';
@@ -515,7 +516,7 @@ export class MailCourier {
         const keep = senders.keep().find((s) => s.id === id);
         const spam = keep ? undefined : senders.spam().find((s) => s.id === id);
         const match = keep?.match ?? spam?.match;
-        if (!match) throw new Error(`Expéditeur introuvable : ${id}`);
+        if (!match) throw new NotFoundError(`Expéditeur introuvable : ${id}`);
         const label = keep ? labelFor(keep) : SPAM_LABEL;
         const mails = parseMetaList(
             await this.deps.deviceHandler('list_messages_meta', {

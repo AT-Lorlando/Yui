@@ -5,6 +5,7 @@ import http from 'http';
 import os from 'os';
 import path from 'path';
 import { mailRoutes, type MailHandler } from './mail';
+import { NotFoundError } from '../../orchestrator/proactive/mail/errors';
 import { SenderStore } from '../../orchestrator/proactive/mail/senders';
 import {
     addKeepSender,
@@ -72,7 +73,8 @@ async function run(): Promise<void> {
         mailSenderDelete: (id) => senders.remove(id),
         mailSenderApply: async (id, max) => {
             seen.apply = { id, max };
-            if (id === 'zz') throw new Error('Expéditeur introuvable : zz');
+            if (id === 'zz')
+                throw new NotFoundError('Expéditeur introuvable : zz');
             return { matched: 1, applied: 1 };
         },
         mailUnknown: () => unknown,
@@ -121,6 +123,31 @@ async function run(): Promise<void> {
     }
     assert.strictEqual(senders.keep().length, 0, 'rien créé sur 400');
 
+    // règles invalides : 400 et rien d'écrit
+    for (const rules of [
+        [{ subject: '(', read: true }],
+        'x',
+        [{ subject: 'a' }],
+    ]) {
+        const bad = await call('POST', '/mail/senders/keep', {
+            match: 'z@z.fr',
+            name: 'Z',
+            rules,
+        });
+        assert.strictEqual(bad.status, 400, JSON.stringify(rules));
+    }
+    assert.strictEqual(
+        (
+            await call('POST', '/mail/senders/keep', {
+                match: 'z@z.fr',
+                name: 'Z',
+                readDefault: 'oui',
+            })
+        ).status,
+        400,
+    );
+    assert.strictEqual(senders.keep().length, 0, 'rien écrit');
+
     // keep : 201, trim, inconnu oublié
     let r = await call('POST', '/mail/senders/keep', {
         match: '  a@x.fr ',
@@ -150,6 +177,33 @@ async function run(): Promise<void> {
     await call('POST', '/mail/senders/spam', { match: 'a@x.fr' });
     assert.strictEqual(senders.keep().length, 0);
     assert.strictEqual(senders.spam().length, 2);
+
+    // domaine : x.fr n'oublie pas a@notx.fr
+    unknown = [{ address: 'a@notx.fr' }, { address: 'b@x.fr' }];
+    await call('POST', '/mail/senders/spam', { match: 'x.fr' });
+    assert.deepStrictEqual(
+        unknown.map((u) => u.address),
+        ['a@notx.fr'],
+    );
+
+    // un échec d'ajout ne supprime rien : spam présent, keep invalide
+    await call('POST', '/mail/senders/spam', { match: 'dup@y.fr' });
+    const before = senders.spam().length;
+    await call('POST', '/mail/senders/keep', {
+        match: 'dup@y.fr',
+        name: 'a/b',
+    });
+    await call('POST', '/mail/senders/keep', {
+        match: 'dup@y.fr',
+        name: 'Y',
+        rules: 'x',
+    });
+    assert.strictEqual(senders.spam().length, before);
+    // ... et un ajout réussi déplace de spam vers keep
+    await call('POST', '/mail/senders/keep', { match: 'dup@y.fr', name: 'Y' });
+    assert.strictEqual(senders.spam().length, before - 1);
+    assert.ok(senders.keep().some((k) => k.match === 'dup@y.fr'));
+    senders.remove(senders.keep().find((k) => k.match === 'dup@y.fr')!.id);
 
     // delete
     assert.strictEqual(
