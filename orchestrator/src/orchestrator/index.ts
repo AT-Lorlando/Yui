@@ -45,6 +45,7 @@ import { buildServerConfigs } from './serverConfigs';
 import { toolAudience, isLlmVisible } from './toolAudience';
 import { logActivity } from './activityLog';
 import { resolveLlm } from './llmRouter';
+import { capToolResult, fitMessagesToBudget } from './contextBudget';
 
 /** Max messages kept in the rolling conversation buffer (user + assistant pairs). */
 const HISTORY_MAX = 10;
@@ -293,6 +294,22 @@ export class Orchestrator {
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
+    /** Fait tenir la requête dans la fenêtre du modèle (contextBudget.ts) et le journalise. */
+    private fitContext(
+        messages: OpenAI.Chat.ChatCompletionMessageParam[],
+        baseChars: number,
+        protectedFrom: number,
+    ): void {
+        const fit = fitMessagesToBudget(messages, { baseChars, protectedFrom });
+        if (fit.actions.length) {
+            Logger.warn(
+                `[context] requête ${fit.before} → ${
+                    fit.after
+                } caractères : ${fit.actions.join(', ')}`,
+            );
+        }
+    }
+
     private buildContext(order: string): {
         tools: OpenAI.Chat.ChatCompletionTool[];
         activeGroups: string[];
@@ -347,9 +364,17 @@ export class Orchestrator {
             }),
         );
         for (const { toolName, result, args } of toolResults) {
+            // Garde-fou : un résultat trop gros (list_tasks Yoji = 440 Ko)
+            // faisait déborder la fenêtre du modèle (contextBudget.ts).
+            const content = capToolResult(result.content);
+            if (content !== result.content) {
+                Logger.warn(
+                    `[context] ${toolName}: résultat plafonné ${result.content.length} → ${content.length} caractères`,
+                );
+            }
             story?.add({
                 role: 'tool',
-                content: result.content,
+                content,
                 toolCallId: result.id,
                 toolName,
                 toolArgs: args,
@@ -357,7 +382,7 @@ export class Orchestrator {
             messages.push({
                 role: 'tool',
                 tool_call_id: result.id,
-                content: result.content,
+                content,
             });
         }
     }
@@ -426,11 +451,17 @@ export class Orchestrator {
         let finalResponse = '';
 
         const llm = await resolveLlm(order);
+        const toolsChars = JSON.stringify(allTools).length;
         for (let turn = 0; turn < MAX_TURNS; turn++) {
             Logger.debug(
                 `LLM turn ${turn + 1}/${MAX_TURNS} (${llm.profile}:${
                     llm.model
                 })`,
+            );
+            this.fitContext(
+                messages,
+                systemPrompt.length + toolsChars,
+                1 + state.history.length,
             );
 
             const response = await llm.client.chat.completions.create({
@@ -548,6 +579,7 @@ export class Orchestrator {
             order.length > 80 ? order.slice(0, 80) + '…' : order,
             `LLM ${llm.profile}${llm.category ? ` (${llm.category})` : ''}`,
         );
+        const toolsChars = JSON.stringify(allTools).length;
         for (let turn = 0; turn < MAX_TURNS; turn++) {
             Logger.debug(
                 `LLM turn ${turn + 1}/${MAX_TURNS} (stream, ${llm.profile}:${
@@ -555,6 +587,11 @@ export class Orchestrator {
                 })`,
             );
             const tTurn = Date.now();
+            this.fitContext(
+                messages,
+                systemPrompt.length + toolsChars,
+                1 + state.history.length,
+            );
 
             const stream = await llm.client.chat.completions.create({
                 model: llm.model,
@@ -926,7 +963,13 @@ export class Orchestrator {
 
         const MAX_TURNS = 10;
         let finalResponse = '';
+        const toolsChars = JSON.stringify(allTools).length;
         for (let turn = 0; turn < MAX_TURNS; turn++) {
+            this.fitContext(
+                messages,
+                systemPrompt.length + toolsChars,
+                1 + priorHistory.length,
+            );
             const response = await this.openai.chat.completions.create({
                 model: env.LLM_MODEL,
                 messages,

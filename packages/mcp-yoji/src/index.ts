@@ -12,6 +12,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { YojiClient } from './YojiClient';
 import { YOJI_TOOLS } from './tools';
+import { listTaskView } from './taskView';
 import Logger from './logger';
 
 const baseUrl = process.env.YOJI_API_URL ?? 'http://localhost:3000/api/v1';
@@ -74,13 +75,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 return msg(`Folder created: ${a.path}`);
             case 'sync_vault':
                 return json(await yoji.syncVault());
-            case 'list_tasks':
-                return json(
-                    await yoji.listTasks({
-                        state: a.state,
-                        project: a.project,
-                    }),
-                );
+            case 'list_tasks': {
+                // Vue compacte (taskView.ts) : le JSON brut de /todos faisait
+                // déborder le contexte du LLM. Sortie compacte, sans indentation.
+                const view = listTaskView(await yoji.listTasks(), {
+                    state: a.state,
+                    project: a.project,
+                    limit: a.limit,
+                    detail: a.detail === true,
+                });
+                return msg(JSON.stringify(view));
+            }
             case 'create_task': {
                 const task = await yoji.createTask({
                     title: String(a.title),

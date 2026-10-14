@@ -120,18 +120,29 @@ export const YOJI_TOOLS = [
     },
     {
         name: 'list_tasks',
-        description: 'List tasks. Optionally filter by state or project.',
+        description:
+            'List tasks, compact: open tasks (in_progress, todo, backlog) unless a state is given, ' +
+            'at most `limit` (default 40). Returns {total, shown, tasks[{id,title,state,project,priority,tags}]}; ' +
+            'descriptions only with detail=true. Filter by project or state when the list is cut.',
         inputSchema: {
             type: 'object' as const,
             properties: {
                 state: {
                     type: 'string',
                     enum: STATE_ENUM,
-                    description: 'Filter by state',
+                    description: 'Filter by state (default: every open state)',
                 },
                 project: {
                     type: 'string',
-                    description: 'Filter by project folder, e.g. todos/Work',
+                    description: 'Filter by project slug, e.g. yui',
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Max tasks returned (default 40, max 100)',
+                },
+                detail: {
+                    type: 'boolean',
+                    description: 'Include a short description per task',
                 },
             },
             required: [],
