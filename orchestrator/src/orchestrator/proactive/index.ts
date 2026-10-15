@@ -431,6 +431,7 @@ export class ProactiveEngine {
                     ? `attente : ${order.text} — sortie en échec : ${failure}`
                     : `attente : ${order.text}`,
                 kind: 'event',
+                requested: true,
             });
             if (!failure && order.origin?.startsWith('watch:')) {
                 const id = order.origin.slice('watch:'.length);
@@ -732,10 +733,37 @@ export class ProactiveEngine {
             reason: `attente : ${w.text}`,
             kind: 'event',
             event: e,
+            requested: true,
         });
         this.watches.fulfill(w.id, { key: e.key, subject: e.subject }, now);
         this.dedup.record(key, now, text, factsFingerprint(e));
         if (w.mailOrderId) this.mailOrders.remove(w.mailOrderId);
+    }
+
+    /**
+     * Un critique déjà sorti par son propre chemin satisfait les attentes
+     * actives qu'il couvre : marquées satisfaites, ordre courrier lié retiré,
+     * sans seconde sortie (le journal garde l'entrée « critique »).
+     */
+    private fulfilWatchesFor(e: Event, channel: 'speak' | 'notify'): void {
+        const now = this.now();
+        try {
+            this.watches.expire(now);
+            for (const w of this.watches.active(now)) {
+                if (!matchWatch(w, e)) continue;
+                Logger.info(
+                    `proactive: ★ attente « ${w.text} » satisfaite par le critique ${e.key} (${channel})`,
+                );
+                this.watches.fulfill(
+                    w.id,
+                    { key: e.key, subject: e.subject },
+                    now,
+                );
+                if (w.mailOrderId) this.mailOrders.remove(w.mailOrderId);
+            }
+        } catch (err) {
+            Logger.warn(`proactive: attentes du critique ${e.key} — ${err}`);
+        }
     }
 
     saidList() {
@@ -1033,6 +1061,7 @@ export class ProactiveEngine {
                 event: e,
             });
             this.dedup.record(dedupKey, nowMs, text, fp);
+            this.fulfilWatchesFor(e, channel);
             return;
         }
         if (isBrickEnabled(this.cfg, 'judge')) {
@@ -1153,8 +1182,17 @@ export class ProactiveEngine {
             } « ${text.slice(0, 80)} »`,
         );
         await this.deps.notify(text);
-        if (speak) await this.deps.speak(text);
-        return speak ? 'speak' : 'notify';
+        if (!speak) return 'notify';
+        try {
+            await this.deps.speak(text);
+            return 'speak';
+        } catch (err) {
+            // La notification est partie : la sortie a eu lieu.
+            Logger.warn(
+                `proactive: parole en échec, notification seule — ${err}`,
+            );
+            return 'notify';
+        }
     }
 
     /**

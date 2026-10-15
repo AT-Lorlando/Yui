@@ -61,7 +61,15 @@ export function normalizeText(s: string): string {
 /** Pur : source égale si l'attente en porte une ; TOUS les mots-clés
  *  (normalisés) présents dans clé + sujet + faits normalisés. */
 export function matchWatch(w: Watch, e: Event): boolean {
-    if (w.source && w.source !== e.source) return false;
+    // Les événements de POST /events gardent leur source brute (`koya`) ;
+    // seule la brique est préfixée `external:`.
+    if (
+        w.source &&
+        w.source !== e.source &&
+        w.source !== `external:${e.source}`
+    ) {
+        return false;
+    }
     const keywords = w.keywords.map(normalizeText).filter(Boolean);
     if (!keywords.length) return false;
     const hay = normalizeText([e.key, e.subject, ...(e.facts ?? [])].join(' '));
@@ -169,7 +177,7 @@ export class WatchStore {
         now: number,
     ): Watch | undefined {
         const w = this.find(id);
-        if (!w) return undefined;
+        if (!w || w.state !== 'active') return undefined;
         w.state = 'fulfilled';
         w.fulfilledAt = now;
         w.matchedKey = matched.key;

@@ -53,7 +53,11 @@ function ev(key: string, at: number, over: Partial<Event> = {}): Event {
     };
 }
 
-function harness(presence: PresenceState, now: number) {
+function harness(
+    presence: PresenceState,
+    now: number,
+    opts: { speakFails?: boolean } = {},
+) {
     const notified: string[] = [];
     const spoken: string[] = [];
     let llm = 0;
@@ -63,7 +67,10 @@ function harness(presence: PresenceState, now: number) {
             return '';
         },
         notify: async (t) => void notified.push(t),
-        speak: async (t) => void spoken.push(t),
+        speak: async (t) => {
+            if (opts.speakFails) throw new Error('enceinte injoignable');
+            spoken.push(t);
+        },
         presenceState: () => presence,
         subscribePresence: () => () => {},
         deviceHandler: async () => null,
@@ -267,6 +274,98 @@ async function run(): Promise<void> {
         await h.engine.ingest(ev('m-1', DAYTIME));
         assert.strictEqual(h.notified.length, 1);
         assert.deepStrictEqual(h.spoken, [], 'absent : pas de parole');
+    }
+
+    // ── Hors budget du juge : l'attente satisfaite est `requested` ────
+    {
+        const h = harness('home', DAYTIME);
+        h.engine.watchAdd({
+            what: 'la réponse de Michel',
+            keywords: ['michel'],
+            origin: 'app',
+        });
+        await h.engine.ingest(ev('m-1', DAYTIME));
+        const [entry] = h.journal.list(1);
+        assert.strictEqual(entry?.requested, true);
+        assert.strictEqual(entry?.channel, 'speak');
+        assert.strictEqual(h.journal.spentToday(DAYTIME), 0, 'budget intact');
+    }
+
+    // ── Source externe : `external:koya` couvre un événement `koya` ───
+    {
+        const h = harness('home', DAYTIME);
+        const w = h.engine.watchAdd({
+            what: 'le déploiement Koya',
+            source: 'external:koya',
+            keywords: ['deploiement'],
+            origin: 'app',
+        });
+        assert.strictEqual(w.mailOrderId, undefined);
+        await h.engine.ingest(
+            ev('d-1', DAYTIME, {
+                source: 'koya',
+                subject: 'Déploiement terminé',
+                facts: [],
+            }),
+        );
+        assert.strictEqual(h.watches.find(w.id)?.state, 'fulfilled');
+        assert.strictEqual(h.notified.length, 1);
+    }
+
+    // ── Critique + attente, la nuit, présent → chemin critique ────────
+    {
+        const h = harness('home', NIGHT);
+        const w = h.engine.watchAdd({
+            what: 'la prod de Koya',
+            keywords: ['koya'],
+            origin: 'app',
+        });
+        const out = await h.engine.ingest(
+            ev('prod-down:koya', NIGHT, {
+                source: 'koya',
+                kind: 'alert',
+                importance: 'critique',
+                subject: 'Prod Koya tombée',
+                facts: [],
+            }),
+        );
+        assert.strictEqual(out, 'accepted');
+        assert.deepStrictEqual(h.spoken, ['Prod Koya tombée'], 'parole forcée');
+        assert.deepStrictEqual(h.notified, ['Prod Koya tombée']);
+        assert.strictEqual(h.held.size(), 0);
+        const done = h.watches.find(w.id);
+        assert.strictEqual(done?.state, 'fulfilled');
+        assert.strictEqual(done?.matchedKey, 'prod-down:koya');
+        assert.ok(
+            !h.engine.mailOrders.all().some((x) => x.id === w.mailOrderId),
+            'ordre courrier lié retiré',
+        );
+        const entries = h.journal.list(10);
+        assert.strictEqual(entries.length, 1, 'une seule sortie');
+        assert.ok(entries[0]!.reason?.startsWith('critique'));
+    }
+
+    // ── Parole en échec après la notification → 'notify', sans throw ──
+    {
+        const h = harness('home', DAYTIME, { speakFails: true });
+        const w = h.engine.watchAdd({
+            what: 'la réponse de Michel',
+            keywords: ['michel'],
+            origin: 'app',
+        });
+        assert.strictEqual(
+            await h.engine.ingest(ev('m-1', DAYTIME)),
+            'accepted',
+        );
+        assert.strictEqual(h.notified.length, 1);
+        const [entry] = h.journal.list(1);
+        assert.strictEqual(
+            entry?.channel,
+            'notify',
+            'la notification est partie',
+        );
+        assert.strictEqual(entry?.reason, 'attente : la réponse de Michel');
+        assert.strictEqual(h.watches.find(w.id)?.state, 'fulfilled');
     }
 
     console.log('All engine-watches tests passed');

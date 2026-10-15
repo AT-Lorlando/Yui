@@ -90,8 +90,10 @@ export class Ingest {
         }
 
         // Une attente satisfaite passe avant la retenue : c'est tout son sens.
-        // Ni retenu, ni jugé, ni compté dans le quota de sa source.
-        const w = this.deps.watches?.match(e);
+        // Ni retenu, ni jugé, ni compté dans le quota de sa source. Un
+        // critique garde son chemin (action + parole forcée) : le moteur
+        // satisfait les attentes qu'il couvre après sa sortie.
+        const w = critical ? undefined : this.deps.watches?.match(e);
         if (w) {
             Logger.info(
                 `proactive: ★ attente « ${w.text} » satisfaite par ${key}`,

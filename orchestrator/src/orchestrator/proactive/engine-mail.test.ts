@@ -282,6 +282,7 @@ async function run(): Promise<void> {
     assert.strictEqual(hit.subject, `mail-order-${order.id}`);
     assert.strictEqual(hit.reason, 'attente : Réponse de Michel sur le devis');
     assert.strictEqual(hit.kind, 'event');
+    assert.strictEqual(hit.requested, true, 'hors budget du juge');
     assert.strictEqual(hit.channel, 'speak');
     assert.deepStrictEqual(engine.takeMailFulfilled(), [], 'pas de file');
     assert.deepStrictEqual(engine.takeMailNotified(), [], 'pas de notifyMail');

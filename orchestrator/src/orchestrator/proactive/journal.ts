@@ -40,6 +40,9 @@ export interface JournalEntry {
     event?: Event;
     /** Décision prise à la main par Jérémy depuis l'app (réinjectée au juge). */
     manual?: true;
+    /** Sortie demandée explicitement par Jérémy (attente satisfaite, ordre
+     *  courrier voix/app) : hors budget du juge. */
+    requested?: true;
 }
 
 const MANUAL_WINDOW_MS = 14 * 24 * 3600_000;
@@ -123,7 +126,7 @@ export class ProactiveJournal {
         for (const e of this.entries) {
             if (e.kind === 'moment' || e.kind === 'brief') continue;
             // Décision manuelle : le choix de Jérémy, pas une interruption du juge.
-            if (e.manual) continue;
+            if (e.manual || e.requested) continue;
             if (new Date(e.at).toDateString() !== day) continue;
             if (e.channel === 'speak') spent += 1;
             else if (e.channel === 'notify') spent += 0.5;

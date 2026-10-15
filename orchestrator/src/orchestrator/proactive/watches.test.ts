@@ -88,6 +88,28 @@ function run(): void {
         ),
         'source filtrante',
     );
+    // Événements externes : source brute (`koya`), brique `external:koya`.
+    assert.ok(
+        matchWatch(
+            watch({ source: 'external:koya', keywords: ['michel'] }),
+            ev({ source: 'koya' }),
+        ),
+        'external:<app> couvre la source brute',
+    );
+    assert.ok(
+        matchWatch(
+            watch({ source: 'koya', keywords: ['michel'] }),
+            ev({ source: 'koya' }),
+        ),
+        'source brute égale',
+    );
+    assert.ok(
+        !matchWatch(
+            watch({ source: 'mail', keywords: ['michel'] }),
+            ev({ source: 'koya' }),
+        ),
+        'mail ≠ koya',
+    );
 
     // ── Store : bornes ────────────────────────────────────────────────
     const s = new WatchStore(tmpFile());
@@ -156,6 +178,12 @@ function run(): void {
     assert.strictEqual(f?.matchedKey, 'm-9');
     assert.strictEqual(f?.matchedSubject, 'Re: devis');
     assert.strictEqual(f?.fulfilledAt, NOW + 10);
+    assert.strictEqual(
+        s2.fulfill(b.id, { key: 'm-10', subject: 'autre' }, NOW + 20),
+        undefined,
+        'déjà satisfaite : rien ne change',
+    );
+    assert.strictEqual(s2.find(b.id)?.matchedKey, 'm-9');
     assert.strictEqual(
         s2.fulfill('w-nope', { key: 'k', subject: 's' }, NOW),
         undefined,

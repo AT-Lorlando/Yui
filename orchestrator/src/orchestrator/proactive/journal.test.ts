@@ -107,6 +107,16 @@ async function run(): Promise<void> {
         kind: 'event',
     });
     assert.strictEqual(jb.spentToday(NOW), 1, 'verdict du juge compté');
+    jb.record({
+        at: NOW,
+        source: 'mail',
+        subject: 'mail-order-o1',
+        channel: 'speak',
+        message: 'Ce que tu attendais : …',
+        kind: 'event',
+        requested: true,
+    });
+    assert.strictEqual(jb.spentToday(NOW), 1, 'attente demandée hors budget');
 
     // `event` et `manual` persistés puis relus.
     const reread = new ProactiveJournal(file);

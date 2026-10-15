@@ -71,7 +71,7 @@ Lit les mails des **inconnus** et des « à garder » dont la lecture est active
 
 - `notify: true` → **sortie immédiate** (`notifyMail` → `pushNow`) : notification, parole si Jérémy est présent et hors heures de silence. Plafond **`MAIL_NOTIFY_PER_DAY` = 5** par jour (relu du journal au redémarrage) ; au-delà, rien n'est poussé, une seule entrée `hold` « Notification plafonnée » est écrite au journal proactif pour la journée, et les mails suivants sont seulement comptés. Dans tous les cas le connecteur émet ensuite un événement `utile` `mail-notify-<id>` (raison + faits, fait « Notification plafonnée pour aujourd'hui » si plafonné) avec un post-it Yoji « Répondre : … ».
 - `notify: false` avec des `facts` → événement `info` `mail-info-<id>` retenu (`held-events`) pour le **prochain point** de la secrétaire.
-- `fulfilled: true` sur un ordre → ordre passé `fulfilled`, événement `info` « **Ordre satisfait** : <texte de l'ordre> » pour le prochain point, même sans alerte ni faits.
+- `fulfilled: true` sur un ordre → ordre passé `fulfilled`. Ordre `voice`/`user` (voix, app, attente) : poussé tout de suite (« Ce que tu attendais : … »), une seule sortie pour le mail (ni `notifyMail` ni faits retenus), hors plafond quotidien. Ordre `connector` (colis) seulement : événement `info` « **Ordre satisfait** : <texte de l'ordre> » retenu pour le prochain point, même sans alerte ni faits.
 
 > Avec la brique `judge` coupée, l'ancien pipeline (chattiness + phrase) peut pousser une seconde fois un mail déjà notifié (l'événement `utile` y passe comme un autre).
 
