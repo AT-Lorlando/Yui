@@ -46,8 +46,15 @@ export interface CourierDeps {
     readerPrompt: () => string;
     onNotify: (m: MailRef, item: ReaderItem) => void;
     onFacts?: (m: MailRef, item: ReaderItem) => void;
-    /** Le lecteur a satisfait un ordre actif (`orderId` + `fulfilled`). */
-    onFulfilled?: (m: MailRef, item: ReaderItem, order: MailOrder) => void;
+    /** Le lecteur a satisfait un ordre actif (`orderId` + `fulfilled`).
+     *  Rend `true` quand le mail est déjà sorti (attente de Jérémy poussée
+     *  tout de suite) : il ne repasse alors ni par onNotify ni par onFacts —
+     *  une seule sortie par mail. */
+    onFulfilled?: (
+        m: MailRef,
+        item: ReaderItem,
+        order: MailOrder,
+    ) => boolean | void;
     now?: () => number;
 }
 
@@ -399,7 +406,10 @@ export class MailCourier {
             };
             if (box) ref.box = box;
             try {
-                if (fulfilled) this.deps.onFulfilled?.(ref, item, fulfilled);
+                const pushed = fulfilled
+                    ? this.deps.onFulfilled?.(ref, item, fulfilled) === true
+                    : false;
+                if (pushed) return;
                 if (item.notify) this.deps.onNotify(ref, item);
                 else if (item.facts.length) this.deps.onFacts?.(ref, item);
             } catch (e) {

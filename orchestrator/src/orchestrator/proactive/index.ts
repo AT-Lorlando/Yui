@@ -374,18 +374,58 @@ export class ProactiveEngine {
         };
     }
 
-    /** Ordre de lecture satisfait : fait « Ordre satisfait » pour le prochain
-     *  point, même sans alerte ni faits (spec §3.1). */
+    /**
+     * Ordre de lecture satisfait. Un ordre posé par Jérémy (voix, app,
+     * attente) est une demande explicite : sortie immédiate, déterministe,
+     * hors plafond MAIL_NOTIFY_PER_DAY, attente liée marquée satisfaite — et
+     * rend `true` pour que le facteur ne repousse pas le même mail via
+     * notifyMail. Un ordre de connecteur (colis) garde le chemin du fait
+     * « Ordre satisfait » pour le prochain point (spec §3.1).
+     */
     mailOrderFulfilled(
         m: { mailId: string; from: string; subject: string; box?: string },
         item: ReaderItem,
         order: MailOrder,
-    ): void {
-        pushBounded(this.pendingMailFulfilled, {
-            ...m,
-            item,
-            order: { id: order.id, text: order.text },
-        });
+    ): boolean {
+        if (order.source === 'connector') {
+            pushBounded(this.pendingMailFulfilled, {
+                ...m,
+                item,
+                order: { id: order.id, text: order.text },
+            });
+            return false;
+        }
+        void this.pushFulfilledOrder(m, order);
+        return true;
+    }
+
+    private async pushFulfilledOrder(
+        m: { mailId: string; from: string; subject: string },
+        order: MailOrder,
+    ): Promise<void> {
+        const now = this.now();
+        const key = `mail-order-${order.id}`;
+        const text = `Ce que tu attendais : ${order.text}. ${
+            m.subject
+        }, de ${senderName(m.from)}`;
+        try {
+            const channel = await this.pushNow(text, true);
+            this.journal.record({
+                at: now,
+                source: 'mail',
+                subject: key,
+                channel,
+                message: text,
+                reason: `attente : ${order.text}`,
+                kind: 'event',
+            });
+        } catch (err) {
+            Logger.warn(`proactive: attente courrier ${order.id} — ${err}`);
+        }
+        if (order.origin?.startsWith('watch:')) {
+            const id = order.origin.slice('watch:'.length);
+            this.watches.fulfill(id, { key, subject: m.subject }, now);
+        }
     }
 
     /** Vide la file des ordres satisfaits (consommée par le connecteur `mail`). */
@@ -430,19 +470,21 @@ export class ProactiveEngine {
     }
 
     /**
-     * Ordre de lecture à la voix (tool `mail_watch`) : `days` est déjà borné
-     * par le tool. Une erreur du store (texte, plafond) remonte telle quelle.
+     * Attente posée à la voix (tool `watch_for`) : les bornes sont déjà
+     * appliquées par le tool. Une erreur de validation remonte telle quelle.
      */
-    async mailWatch(text: string, days: number): Promise<string> {
-        const o = this.mailOrders.add(
-            { text, days, source: 'voice' },
-            this.now(),
-        );
-        const d = new Date(o.expiresAt);
+    async watchFor(input: {
+        what: string;
+        keywords: string[];
+        source?: string;
+        days: number;
+    }): Promise<string> {
+        const w = this.watchAdd({ ...input, origin: 'voice' });
+        const d = new Date(w.expiresAt);
         const pad = (n: number) => String(n).padStart(2, '0');
-        return `D'accord, je guette ça jusqu'au ${pad(d.getDate())}/${pad(
-            d.getMonth() + 1,
-        )}.`;
+        return `D'accord, je te préviens dès que ça arrive, jusqu'au ${pad(
+            d.getDate(),
+        )}/${pad(d.getMonth() + 1)}.`;
     }
 
     getBricks() {

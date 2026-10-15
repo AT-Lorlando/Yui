@@ -63,7 +63,8 @@ export interface MailConnectorServices {
     takeNotified(): MailNotice[];
     /** Vide et rend la file des faits de mails lus sans alerte. */
     takeFacts(): MailNotice[];
-    /** Vide et rend la file des ordres satisfaits par le lecteur. */
+    /** Vide et rend la file des ordres de connecteur (colis) satisfaits par
+     *  le lecteur — ceux de Jérémy sont poussés tout de suite par le moteur. */
     takeFulfilled(): FulfilledNotice[];
 }
 

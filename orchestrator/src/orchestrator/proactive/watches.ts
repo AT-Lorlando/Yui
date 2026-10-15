@@ -87,7 +87,7 @@ export class WatchStore {
     }
 
     all(): Watch[] {
-        return this.data;
+        return [...this.data];
     }
 
     active(now: number): Watch[] {

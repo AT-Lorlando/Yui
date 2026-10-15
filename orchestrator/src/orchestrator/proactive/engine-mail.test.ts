@@ -1,6 +1,7 @@
 // Intégration moteur + courrier v3 : migration des règles v2 au démarrage,
 // alerte immédiate d'un mail lu (notifyMail) relayée au connecteur, ordres
-// de lecture à la voix (mail_watch) et résumé du dashboard.
+// satisfaits (attentes poussées tout de suite), watch_for et résumé du
+// dashboard.
 import assert from 'assert';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -218,35 +219,104 @@ async function run(): Promise<void> {
     assert.strictEqual(notified.length, 11, '5 sorties sur 7 mails simultanés');
     now = NOW;
 
-    // ── Ordre satisfait → file du connecteur ─────────────────────────────
-    engine.mailOrderFulfilled(
+    // ── Ordre de connecteur satisfait → file du connecteur (inchangé) ────
+    const before = notified.length;
+    const viaQueue = engine.mailOrderFulfilled(
         { mailId: 'm9', from: 'Michel <m@x.fr>', subject: 'Re: devis' },
         { ...item, notify: false, facts: [] },
         {
             id: 'o-1',
-            text: 'Réponse de Michel',
+            text: 'Colis Amazon',
             createdAt: NOW,
             expiresAt: NOW,
-            source: 'voice',
+            source: 'connector',
+            origin: 'parcel:p1',
             state: 'fulfilled',
         },
     );
+    assert.strictEqual(viaQueue, false, 'le facteur garde son chemin');
     assert.deepStrictEqual(
         engine.takeMailFulfilled().map((n) => [n.mailId, n.order]),
-        [['m9', { id: 'o-1', text: 'Réponse de Michel' }]],
+        [['m9', { id: 'o-1', text: 'Colis Amazon' }]],
     );
     assert.deepStrictEqual(engine.takeMailFulfilled(), []);
+    assert.strictEqual(notified.length, before, 'aucune sortie immédiate');
 
-    // ── mail_watch : ordre à la voix ─────────────────────────────────────
-    const reply = await engine.mailWatch('Réponse de Michel sur le devis', 14);
-    assert.strictEqual(reply, "D'accord, je guette ça jusqu'au 12/10.");
+    // ── watch_for : attente à la voix + ordre courrier lié ───────────────
+    const reply = await engine.watchFor({
+        what: 'Réponse de Michel sur le devis',
+        keywords: ['Michel', 'devis'],
+        days: 14,
+    });
+    assert.strictEqual(
+        reply,
+        "D'accord, je te préviens dès que ça arrive, jusqu'au 12/10.",
+    );
     const order = engine.mailOrders.active(NOW)[0]!;
     assert.strictEqual(order.text, 'Réponse de Michel sur le devis');
     assert.strictEqual(order.source, 'voice');
+    const w = engine.watches.active(NOW)[0]!;
+    assert.strictEqual(order.origin, `watch:${w.id}`);
+
+    // ── Ordre voix satisfait → sortie immédiate unique, hors plafond ─────
+    // Le plafond du jour est déjà atteint (m1–m5) : une attente satisfaite
+    // passe quand même, c'est une demande explicite.
+    const flush = () => new Promise((r) => setImmediate(r));
+    const pushed = engine.mailOrderFulfilled(
+        {
+            mailId: 'm10',
+            from: '"Michel Dupont" <michel@exemple.fr>',
+            subject: 'Re: devis cuisine',
+        },
+        { ...item, notify: true },
+        { ...order, state: 'fulfilled' },
+    );
+    await flush();
+    assert.strictEqual(pushed, true, 'le facteur ne repousse pas ce mail');
+    const expected =
+        'Ce que tu attendais : Réponse de Michel sur le devis. Re: devis cuisine, de Michel Dupont';
+    assert.deepStrictEqual(notified.slice(before), [expected], 'une sortie');
+    assert.strictEqual(spoken[spoken.length - 1], expected, 'présent → parlé');
+    const hit = journal.list(1)[0]!;
+    assert.strictEqual(hit.source, 'mail');
+    assert.strictEqual(hit.subject, `mail-order-${order.id}`);
+    assert.strictEqual(hit.reason, 'attente : Réponse de Michel sur le devis');
+    assert.strictEqual(hit.kind, 'event');
+    assert.strictEqual(hit.channel, 'speak');
+    assert.deepStrictEqual(engine.takeMailFulfilled(), [], 'pas de file');
+    assert.deepStrictEqual(engine.takeMailNotified(), [], 'pas de notifyMail');
+    const done = engine.watches.find(w.id)!;
+    assert.strictEqual(done.state, 'fulfilled');
+    assert.strictEqual(done.matchedKey, `mail-order-${order.id}`);
+    assert.strictEqual(done.matchedSubject, 'Re: devis cuisine');
+
+    // Ordre posé depuis /mail (source user, sans attente) : même sortie.
+    const userPushed = engine.mailOrderFulfilled(
+        { mailId: 'm11', from: 'a@b.fr', subject: 'Offre' },
+        { ...item, notify: false, facts: [] },
+        {
+            id: 'o-u',
+            text: 'Offre DevOps',
+            createdAt: NOW,
+            expiresAt: NOW,
+            source: 'user',
+            state: 'fulfilled',
+        },
+    );
+    await flush();
+    assert.strictEqual(userPushed, true);
+    assert.strictEqual(
+        notified[notified.length - 1],
+        'Ce que tu attendais : Offre DevOps. Offre, de a@b.fr',
+    );
+    assert.deepStrictEqual(engine.takeMailFulfilled(), []);
+
+    // L'ordre lié satisfait n'est plus actif.
+    engine.mailOrders.fulfill(order.id, 'm10', 'ok', NOW);
 
     // ── Résumé du dashboard ──────────────────────────────────────────────
     const summary = engine.getTriageSummary();
-    assert.strictEqual(summary.ordersCount, 1);
+    assert.strictEqual(summary.ordersCount, 0);
     assert.strictEqual(summary.unknownCount, 0);
     assert.strictEqual(summary.pendingCount, 0);
 

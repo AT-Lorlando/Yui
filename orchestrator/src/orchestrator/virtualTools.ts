@@ -51,34 +51,85 @@ export function setSecretaryBriefProvider(
     secretaryBriefProvider = fn;
 }
 
-// Ordres de lecture du courrier (mail_watch) — câblé par main.ts sur le
-// moteur proactif ; `null` tant qu'il n'est pas monté.
-let mailWatchProvider:
-    | ((text: string, days: number) => Promise<string>)
-    | null = null;
-
-export function setMailWatchProvider(
-    fn: (text: string, days: number) => Promise<string>,
-): void {
-    mailWatchProvider = fn;
+// Attentes « j'attends un truc, ping-moi » (watch_for) — câblé par main.ts
+// sur le moteur proactif ; `null` tant qu'il n'est pas monté.
+export interface WatchForInput {
+    what: string;
+    keywords: string[];
+    source?: string;
+    days: number;
 }
 
-export const MAIL_WATCH_TEXT_MIN = 5;
-export const MAIL_WATCH_TEXT_MAX = 300;
-export const MAIL_WATCH_DAYS_MIN = 1;
-export const MAIL_WATCH_DAYS_MAX = 60;
-export const MAIL_WATCH_DAYS_DEFAULT = 14;
+let watchProvider: ((input: WatchForInput) => Promise<string>) | null = null;
 
-/** Durée d'un ordre bornée à 1–60 jours (entier), 14 par défaut. Pur. */
-export function mailWatchDays(value: unknown): number {
+export function setWatchProvider(
+    fn: (input: WatchForInput) => Promise<string>,
+): void {
+    watchProvider = fn;
+}
+
+export const WATCH_TEXT_MIN = 5;
+export const WATCH_TEXT_MAX = 300;
+export const WATCH_KEYWORDS_MIN = 1;
+export const WATCH_KEYWORDS_MAX = 5;
+export const WATCH_DAYS_MIN = 1;
+export const WATCH_DAYS_MAX = 60;
+export const WATCH_DAYS_DEFAULT = 7;
+export const WATCH_SOURCES = ['mail', 'deliveries', 'calendar', 'yoji'];
+
+/** Durée d'une attente bornée à 1–60 jours (entier), 7 par défaut. Pur. */
+export function watchDays(value: unknown): number {
     const n = typeof value === 'string' ? Number(value) : value;
     if (typeof n !== 'number' || !Number.isFinite(n)) {
-        return MAIL_WATCH_DAYS_DEFAULT;
+        return WATCH_DAYS_DEFAULT;
     }
-    return Math.min(
-        MAIL_WATCH_DAYS_MAX,
-        Math.max(MAIL_WATCH_DAYS_MIN, Math.round(n)),
-    );
+    return Math.min(WATCH_DAYS_MAX, Math.max(WATCH_DAYS_MIN, Math.round(n)));
+}
+
+/** Valide les arguments de `watch_for` : l'entrée bornée, ou un message
+ *  d'erreur lisible pour le LLM. Pur. */
+export function parseWatchFor(
+    args: Record<string, unknown>,
+): WatchForInput | string {
+    const what = typeof args.what === 'string' ? args.what.trim() : '';
+    if (what.length < WATCH_TEXT_MIN || what.length > WATCH_TEXT_MAX) {
+        return `Ce qui est attendu (what) doit faire entre ${WATCH_TEXT_MIN} et ${WATCH_TEXT_MAX} caractères.`;
+    }
+    const keywords = Array.isArray(args.keywords)
+        ? args.keywords
+              .filter((k): k is string => typeof k === 'string')
+              .map((k) => k.trim())
+              .filter(Boolean)
+        : [];
+    if (
+        keywords.length < WATCH_KEYWORDS_MIN ||
+        keywords.length > WATCH_KEYWORDS_MAX
+    ) {
+        return `Il faut entre ${WATCH_KEYWORDS_MIN} et ${WATCH_KEYWORDS_MAX} mots-clés (keywords) précis.`;
+    }
+    let source: string | undefined;
+    if (
+        args.source !== undefined &&
+        args.source !== null &&
+        args.source !== ''
+    ) {
+        const s = typeof args.source === 'string' ? args.source.trim() : '';
+        const ok =
+            WATCH_SOURCES.includes(s) ||
+            (s.startsWith('external:') && s.length > 'external:'.length);
+        if (!ok) {
+            return `Source inconnue : ${String(
+                args.source,
+            )} (mail, deliveries, calendar, yoji ou external:<app>).`;
+        }
+        source = s;
+    }
+    return {
+        what,
+        keywords,
+        ...(source ? { source } : {}),
+        days: watchDays(args.days),
+    };
 }
 
 export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
@@ -385,27 +436,41 @@ export function getVirtualTools(): OpenAI.Chat.ChatCompletionTool[] {
         {
             type: 'function',
             function: {
-                name: 'mail_watch',
+                name: 'watch_for',
                 description:
-                    "Demande à la secrétaire de guetter un mail précis et de prévenir quand il arrive (réponse de quelqu'un, offre, promo ciblée…)",
+                    "Pose une attente : Jérémy attend quelque chose (un mail, une réponse, un colis, un événement) et veut être prévenu dès que ça arrive. what = ce qu'il attend, en une phrase ; keywords = 1 à 5 mots précis qu'on retrouvera dans l'événement (noms propres, numéro, sujet) ; source facultative : mail, deliveries, calendar, yoji ou external:<app> ; days = durée (défaut 7). Pour un mail, la lecture IA du courrier guette aussi.",
                 parameters: {
                     type: 'object',
                     properties: {
-                        text: {
+                        what: {
                             type: 'string',
-                            minLength: MAIL_WATCH_TEXT_MIN,
-                            maxLength: MAIL_WATCH_TEXT_MAX,
+                            minLength: WATCH_TEXT_MIN,
+                            maxLength: WATCH_TEXT_MAX,
                             description:
-                                "Ce qu'il faut guetter, en une phrase (ex. « J'attends une réponse de Michel sur le devis »).",
+                                'Ce qui est attendu, en une phrase (ex. « Réponse de Michel sur le devis »).',
+                        },
+                        keywords: {
+                            type: 'array',
+                            items: { type: 'string' },
+                            minItems: WATCH_KEYWORDS_MIN,
+                            maxItems: WATCH_KEYWORDS_MAX,
+                            description:
+                                "1 à 5 mots précis qu'on retrouvera dans l'événement (noms propres, numéro, sujet).",
+                        },
+                        source: {
+                            type: 'string',
+                            description:
+                                'Facultatif : mail, deliveries, calendar, yoji ou external:<app>. Omis = toutes sources (le courrier guette aussi).',
                         },
                         days: {
-                            type: 'number',
-                            minimum: MAIL_WATCH_DAYS_MIN,
-                            maximum: MAIL_WATCH_DAYS_MAX,
-                            description: 'Durée de guet en jours (défaut 14).',
+                            type: 'integer',
+                            minimum: WATCH_DAYS_MIN,
+                            maximum: WATCH_DAYS_MAX,
+                            description:
+                                "Durée de l'attente en jours (défaut 7).",
                         },
                     },
-                    required: ['text'],
+                    required: ['what', 'keywords'],
                 },
             },
         },
@@ -712,38 +777,29 @@ export async function handleVirtualTool(
             }
         }
 
-        case 'mail_watch': {
-            if (!mailWatchProvider) {
+        case 'watch_for': {
+            if (!watchProvider) {
                 return {
                     id: toolCall.id,
                     content: "La secrétaire n'est pas disponible.",
                 };
             }
-            const text = typeof args.text === 'string' ? args.text.trim() : '';
-            if (
-                text.length < MAIL_WATCH_TEXT_MIN ||
-                text.length > MAIL_WATCH_TEXT_MAX
-            ) {
-                return {
-                    id: toolCall.id,
-                    content: `Le texte à guetter doit faire entre ${MAIL_WATCH_TEXT_MIN} et ${MAIL_WATCH_TEXT_MAX} caractères.`,
-                };
+            const input = parseWatchFor(args);
+            if (typeof input === 'string') {
+                return { id: toolCall.id, content: input };
             }
             try {
                 return {
                     id: toolCall.id,
-                    content: await mailWatchProvider(
-                        text,
-                        mailWatchDays(args.days),
-                    ),
+                    content: await watchProvider(input),
                 };
             } catch (err) {
                 const message =
                     err instanceof Error ? err.message : String(err);
-                Logger.warn(`mail_watch en échec: ${message}`);
+                Logger.warn(`watch_for en échec: ${message}`);
                 return {
                     id: toolCall.id,
-                    content: `Je n'ai pas pu enregistrer ce guet : ${message}`,
+                    content: `Je n'ai pas pu poser cette attente : ${message}`,
                 };
             }
         }

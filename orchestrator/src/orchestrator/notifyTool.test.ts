@@ -3,7 +3,7 @@ import {
     getVirtualTools,
     handleVirtualTool,
     setSecretaryBriefProvider,
-    setMailWatchProvider,
+    setWatchProvider,
 } from './virtualTools';
 
 // notify_user : le LLM peut pousser une notification FCM (le _notify des
@@ -54,62 +54,85 @@ async function run(): Promise<void> {
         `contenu inattendu: ${failing?.content}`,
     );
 
-    // mail_watch : exposé au LLM (pas de x-audience), texte requis.
-    const mw = tools.find((x) => x.function.name === 'mail_watch');
-    assert.ok(mw, 'mail_watch doit être exposé au LLM');
-    const mwParams = mw!.function.parameters as any;
-    assert.deepStrictEqual(mwParams.required, ['text']);
-    assert.strictEqual(mwParams['x-audience'], undefined);
+    // watch_for remplace mail_watch : exposé au LLM (pas de x-audience).
+    assert.ok(
+        !tools.some((x) => x.function.name === 'mail_watch'),
+        'mail_watch est retiré',
+    );
+    const wf = tools.find((x) => x.function.name === 'watch_for');
+    assert.ok(wf, 'watch_for doit être exposé au LLM');
+    const wfParams = wf!.function.parameters as any;
+    assert.deepStrictEqual(wfParams.required, ['what', 'keywords']);
+    assert.strictEqual(wfParams['x-audience'], undefined);
+    assert.strictEqual(wfParams.properties.keywords.maxItems, 5);
     const watch = (args: Record<string, unknown>) =>
         handleVirtualTool({
             id: 'call-w',
             type: 'function',
-            function: { name: 'mail_watch', arguments: JSON.stringify(args) },
+            function: { name: 'watch_for', arguments: JSON.stringify(args) },
         } as any);
+    const ok = { what: 'Réponse de Michel', keywords: ['Michel'] };
     assert.strictEqual(
-        (await watch({ text: 'Réponse de Michel' }))?.content,
+        (await watch(ok))?.content,
         "La secrétaire n'est pas disponible.",
     );
-    const calls: Array<[string, number]> = [];
-    setMailWatchProvider(async (text, days) => {
-        calls.push([text, days]);
-        return `ok ${days}`;
+    const calls: any[] = [];
+    setWatchProvider(async (input) => {
+        calls.push(input);
+        return `ok ${input.days}`;
     });
     assert.strictEqual(
-        (await watch({ text: '  Réponse de Michel  ' }))?.content,
-        'ok 14',
+        (
+            await watch({
+                what: '  Réponse de Michel  ',
+                keywords: [' Michel ', '', 'devis', 3],
+            })
+        )?.content,
+        'ok 7',
     );
-    assert.deepStrictEqual(calls[0], ['Réponse de Michel', 14], 'défaut 14 j');
-    await watch({ text: 'Offre DevOps', days: 200 });
-    await watch({ text: 'Offre DevOps', days: 0 });
-    await watch({ text: 'Offre DevOps', days: 'abc' });
-    await watch({ text: 'Offre DevOps', days: 7.6 });
     assert.deepStrictEqual(
-        calls.slice(1).map((c) => c[1]),
-        [60, 1, 14, 8],
+        calls[0],
+        { what: 'Réponse de Michel', keywords: ['Michel', 'devis'], days: 7 },
+        'texte et mots-clés nettoyés, défaut 7 j, pas de source',
+    );
+    await watch({ ...ok, days: 200 });
+    await watch({ ...ok, days: 0 });
+    await watch({ ...ok, days: 'abc' });
+    await watch({ ...ok, days: 7.6 });
+    assert.deepStrictEqual(
+        calls.slice(1).map((c) => c.days),
+        [60, 1, 7, 8],
         'jours bornés 1–60',
     );
-    const n = calls.length;
-    const short = await watch({ text: 'abc' });
-    const long = await watch({ text: 'x'.repeat(301) });
-    const none = await watch({});
-    assert.strictEqual(
-        calls.length,
-        n,
-        'texte invalide : provider jamais appelé',
+    await watch({ ...ok, source: 'deliveries' });
+    await watch({ ...ok, source: 'external:koya' });
+    assert.deepStrictEqual(
+        calls.slice(-2).map((c) => c.source),
+        ['deliveries', 'external:koya'],
     );
-    for (const r of [short, long, none]) {
+    const n = calls.length;
+    const short = await watch({ what: 'abc', keywords: ['x'] });
+    const none = await watch({ what: 'Réponse de Michel' });
+    const many = await watch({
+        what: 'Réponse de Michel',
+        keywords: ['a', 'b', 'c', 'd', 'e', 'f'],
+    });
+    const badSource = await watch({ ...ok, source: 'sms' });
+    assert.strictEqual(calls.length, n, 'invalide : provider jamais appelé');
+    assert.ok(short?.content.includes('5 et 300'), `${short?.content}`);
+    for (const r of [none, many]) {
         assert.ok(
-            r?.content.includes('5 et 300'),
+            r?.content.includes('mots-clés'),
             `message de validation attendu: ${r?.content}`,
         );
     }
-    setMailWatchProvider(async () => {
-        throw new Error("Trop d'ordres actifs (maximum 40)");
+    assert.ok(badSource?.content.includes('Source inconnue'));
+    setWatchProvider(async () => {
+        throw new Error("Trop d'attentes actives (maximum 40)");
     });
-    const err = await watch({ text: 'Réponse de Michel' });
+    const err = await watch(ok);
     assert.ok(
-        err?.content.includes("Trop d'ordres actifs"),
+        err?.content.includes("Trop d'attentes actives"),
         `erreur relayée au LLM: ${err?.content}`,
     );
 

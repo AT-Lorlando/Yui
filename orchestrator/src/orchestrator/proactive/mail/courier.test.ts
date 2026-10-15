@@ -587,8 +587,9 @@ async function run() {
             NOW,
         );
         const got: Array<{ mailId: string; text: string; state: string }> = [];
-        t.deps.onFulfilled = (m, _item, o) =>
+        t.deps.onFulfilled = (m, _item, o) => {
             got.push({ mailId: m.mailId, text: o.text, state: o.state });
+        };
         (t.deps as { complete: CourierDeps['complete'] }).complete = async () =>
             `[{"i":1,"notify":false,"reason":"Michel a répondu","orderId":"${order.id}","fulfilled":true}]`;
         await t.courier.scan();
@@ -596,6 +597,32 @@ async function run() {
             { mailId: 'o2', text: 'Réponse de Michel', state: 'fulfilled' },
         ]);
         assert.strictEqual(t.notified.length, 0);
+        assert.strictEqual(t.facts.length, 0);
+    }
+
+    // (g3) ordre satisfait déjà poussé (attente voix/app) → une seule sortie :
+    // ni onNotify ni onFacts, même avec notify:true et des faits.
+    {
+        const t = setup({
+            list: () => [
+                { id: 'o3', from: 'michel@ex.fr', subject: 'Re: devis' },
+            ],
+            replies: [],
+        });
+        const order = t.orders.add(
+            { text: 'Réponse de Michel', source: 'voice' },
+            NOW,
+        );
+        let fulfilledCalls = 0;
+        t.deps.onFulfilled = () => {
+            fulfilledCalls++;
+            return true;
+        };
+        (t.deps as { complete: CourierDeps['complete'] }).complete = async () =>
+            `[{"i":1,"notify":true,"reason":"Michel a répondu","orderId":"${order.id}","fulfilled":true,"facts":["Devis : 1 240 €"]}]`;
+        await t.courier.scan();
+        assert.strictEqual(fulfilledCalls, 1);
+        assert.strictEqual(t.notified.length, 0, 'pas de second push');
         assert.strictEqual(t.facts.length, 0);
     }
 

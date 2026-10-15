@@ -51,7 +51,7 @@ import {
 import type { ConversationsHandler } from './input/InputSource';
 import { createDashboardProvider } from './orchestrator/dashboard';
 import {
-    setMailWatchProvider,
+    setWatchProvider,
     setSecretaryBriefProvider,
 } from './orchestrator/virtualTools';
 
@@ -186,8 +186,8 @@ async function main() {
             .brief(scope as 'since-last' | 'today' | 'pending' | undefined)
             .then((r) => r.text),
     );
-    // mail_watch (LLM) : un ordre de lecture posé à la voix.
-    setMailWatchProvider((text, days) => proactive.mailWatch(text, days));
+    // watch_for (LLM) : une attente posée à la voix.
+    setWatchProvider((input) => proactive.watchFor(input));
 
     // Hue remotes — listen to bridge SSE for button + dial events
     const hueRemotes = await initHueRemotes({
