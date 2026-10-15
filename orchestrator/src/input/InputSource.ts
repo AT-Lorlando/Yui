@@ -125,6 +125,17 @@ export interface ProactiveHandler {
     /** Réserve : événements retenus ; retrait par `source:key`, sans marquer dit. */
     held?: () => unknown;
     heldRemove?: (key: string) => boolean;
+    /** Décision manuelle sur un retenu (`source:key`) ou une entrée de
+     *  journal — lève `DecisionNotFound` / `DecisionExpired` (mapping HTTP par
+     *  `err.name`) ; rend `{ channel, message }`. */
+    decideHeld?: (
+        key: string,
+        channel: 'speak' | 'notify' | 'skip',
+    ) => Promise<unknown>;
+    decideJournal?: (
+        id: string,
+        channel: 'speak' | 'notify' | 'skip',
+    ) => Promise<unknown>;
     /** Statut des connecteurs + sources externes (`ConnectorStatusView[]`). */
     connectors?: () => unknown;
     /** Relève manuelle — lève `ConnectorNotFound` / `ConnectorNoEvents` /

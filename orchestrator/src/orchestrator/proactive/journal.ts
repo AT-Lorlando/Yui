@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { dataPath } from '@yui/shared';
 import Logger from '../../logger';
+import type { Event } from './events';
 
 /** `brief` = point rendu à la demande (texte retourné à l'appelant, ni push ni
  *  TTS). `hold` n'est plus produit (le juge ne retient plus : le non-urgent
@@ -34,7 +35,14 @@ export interface JournalEntry {
     facts?: string[];
     /** Sujets de la mémoire « dit » couverts par ce point — c'est sur eux que porte un 👎. */
     subjects?: string[];
+    /** Événement d'origine (urgents jugés, critiques, décisions manuelles) —
+     *  c'est lui qu'une décision manuelle depuis le journal rejoue. */
+    event?: Event;
+    /** Décision prise à la main par Jérémy depuis l'app (réinjectée au juge). */
+    manual?: true;
 }
+
+const MANUAL_WINDOW_MS = 14 * 24 * 3600_000;
 
 const MAX_ENTRIES = 300;
 
@@ -135,6 +143,23 @@ export class ProactiveJournal {
                         e.subject
                     } — « ${e.message.slice(0, 80)} »`,
             )
+            .join('\n');
+    }
+
+    /**
+     * Décisions manuelles récentes pour le prompt du juge : ce que Jérémy a
+     * choisi de faire dire, notifier ou taire — plus récentes d'abord.
+     */
+    manualSummary(
+        now: number,
+        limit = 10,
+        windowMs = MANUAL_WINDOW_MS,
+    ): string {
+        return this.entries
+            .filter((e) => e.manual && now - e.at <= windowMs)
+            .slice(-limit)
+            .reverse()
+            .map((e) => `[${e.source}] ${e.subject} → ${e.channel}`)
             .join('\n');
     }
 

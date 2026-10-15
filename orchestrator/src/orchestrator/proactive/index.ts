@@ -36,6 +36,7 @@ import { SaidMemory } from './said';
 import { BriefComposer } from './brief/composer';
 import type { BriefResult } from './brief/composer';
 import type { BriefFact, BriefInputs } from './brief/facts';
+import { heldToFact, visibleFacts } from './brief/facts';
 import {
     buildSituation,
     diffSituation,
@@ -82,6 +83,26 @@ function pushBounded<T>(queue: T[], item: T): void {
     queue.push(item);
     if (queue.length > MAIL_QUEUE_MAX)
         queue.splice(0, queue.length - MAIL_QUEUE_MAX);
+}
+
+/** Au-delà, un événement ne se décide plus à la main (même horizon que la
+ *  file des retenus). */
+export const DECIDE_MAX_AGE_MS = 48 * 3600_000;
+
+export type DecideChannel = 'speak' | 'notify' | 'skip';
+export type DecideTarget = { held: string } | { journal: string };
+
+export class DecisionNotFound extends Error {
+    constructor(what: string) {
+        super(`événement introuvable : ${what}`);
+        this.name = 'DecisionNotFound';
+    }
+}
+export class DecisionExpired extends Error {
+    constructor(what: string) {
+        super(`événement trop ancien pour être décidé : ${what}`);
+        this.name = 'DecisionExpired';
+    }
 }
 
 export class ProactiveEngine {
@@ -490,6 +511,62 @@ export class ProactiveEngine {
         return this.held.remove([key]) > 0;
     }
 
+    /**
+     * Décision manuelle de Jérémy sur un retenu ou une entrée de journal :
+     * texte déterministe (sans LLM), sortie, journal `manual` (réinjecté au
+     * juge), dédup ; `speak`/`notify` marquent dit comme un point le ferait,
+     * `skip` non (c'est l'ancien retrait simple).
+     */
+    async decide(
+        target: DecideTarget,
+        channel: DecideChannel,
+    ): Promise<{ channel: DecideChannel; message: string }> {
+        const now = this.now();
+        const fromHeld = 'held' in target;
+        const label = fromHeld ? target.held : target.journal;
+        const event = fromHeld
+            ? this.held.get(target.held)
+            : this.journal.get(target.journal)?.event;
+        if (!event) throw new DecisionNotFound(label);
+        if (now - event.at > DECIDE_MAX_AGE_MS)
+            throw new DecisionExpired(label);
+        const key = eventKey(event);
+        const first = visibleFacts(event)[0];
+        const message =
+            event.template ??
+            (first ? `${event.subject}. ${first}` : event.subject);
+        if (channel === 'speak') await this.pushNow(message, true, true);
+        else if (channel === 'notify') await this.pushNow(message, false);
+        this.journal.record({
+            at: now,
+            source: event.source,
+            subject: event.key,
+            channel,
+            message,
+            reason: 'décision manuelle',
+            kind: 'event',
+            manual: true,
+            event,
+        });
+        if (fromHeld) this.held.remove([key]);
+        this.dedup.record(key, now, message, factsFingerprint(event));
+        if (channel !== 'skip') {
+            const f = heldToFact(event);
+            this.said.markSaid(
+                [
+                    {
+                        subject: f.subject,
+                        fingerprint: f.fingerprint,
+                        nature: f.nature,
+                    },
+                ],
+                channel,
+                now,
+            );
+        }
+        return { channel, message };
+    }
+
     saidList() {
         return this.said.list();
     }
@@ -680,6 +757,7 @@ export class ProactiveEngine {
             channel: verdict.channel,
             message,
             reason: verdict.reason,
+            event: input.event,
         });
         switch (verdict.channel) {
             case 'speak':
@@ -781,6 +859,7 @@ export class ProactiveEngine {
                 channel,
                 message: text,
                 reason: 'critique : sortie immédiate sans juge',
+                event: e,
             });
             this.dedup.record(dedupKey, nowMs, text, fp);
             return;

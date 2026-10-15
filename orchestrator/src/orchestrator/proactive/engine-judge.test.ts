@@ -102,6 +102,11 @@ async function run(): Promise<void> {
     assert.strictEqual(entries.length, 1);
     assert.strictEqual(entries[0]!.channel, 'notify');
     assert.strictEqual(entries[0]!.source, 'deliveries');
+    assert.strictEqual(
+        entries[0]!.event?.key,
+        'parcel-lost',
+        'verdict journalisé avec son événement',
+    );
     assert.ok(engine.setFeedback(entries[0]!.id, 'down'));
     assert.strictEqual(engine.getJournal()[0]!.feedback, 'down');
 

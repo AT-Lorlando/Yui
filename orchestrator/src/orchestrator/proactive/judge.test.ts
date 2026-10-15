@@ -66,10 +66,20 @@ async function run(): Promise<void> {
     });
     let llmCalls = 0;
     let systemPrompt = '';
+    let userPrompt = '';
+    journal.record({
+        at: now,
+        source: 'koya',
+        subject: 'disk',
+        channel: 'skip',
+        message: 'z',
+        manual: true,
+    });
     const judge = new Judge({
-        complete: async (sys) => {
+        complete: async (sys, user) => {
             llmCalls++;
             systemPrompt = sys;
+            userPrompt = user;
             return '{"channel":"speak","message":"ok","reason":"r"}';
         },
         journal,
@@ -110,6 +120,12 @@ async function run(): Promise<void> {
     assert.ok(!systemPrompt.includes('MOMENT'), 'prompt sans règle MOMENT');
     assert.ok(!systemPrompt.includes('"hold"'), 'prompt sans canal hold');
     assert.ok(systemPrompt.includes('"skip"'));
+    assert.ok(systemPrompt.includes('décisions manuelles de Jérémy'));
+    assert.ok(
+        userPrompt.includes('DÉCISIONS MANUELLES DE JÉRÉMY (à imiter) :'),
+        'evaluate injecte les décisions manuelles',
+    );
+    assert.ok(userPrompt.includes('[koya] disk → skip'));
 
     // ── LLM en panne → repli par importance : l'urgent parle, le reste se tait
     const broken = new Judge({
@@ -162,6 +178,31 @@ async function run(): Promise<void> {
         2,
         journal.recentSummary(now),
         journal.feedbackSummary(),
+        '',
+    );
+    assert.ok(
+        !user.includes('DÉCISIONS MANUELLES'),
+        'pas de section manuelle sans décision',
+    );
+    const withManual = buildJudgeUser(
+        {
+            source: 'weather',
+            subject: 'pluie',
+            facts: 'averse à 18h',
+            importance: 'urgent',
+            kind: 'event',
+        },
+        null,
+        [],
+        2,
+        '',
+        '',
+        '[koya] disk → skip',
+    );
+    assert.ok(
+        withManual.includes(
+            'DÉCISIONS MANUELLES DE JÉRÉMY (à imiter) :\n[koya] disk → skip',
+        ),
     );
     for (const needle of [
         'Réunion',

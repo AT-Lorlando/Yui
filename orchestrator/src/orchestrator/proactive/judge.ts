@@ -51,6 +51,7 @@ Règles :
 - Ne répète JAMAIS ce qui a déjà été dit (voir interventions récentes).
 - Tiens compte des retours 👍/👎 : un type d'intervention régulièrement 👎 doit devenir skip.
 - Si Jérémy est absent, "speak" ne sert à rien → "notify".
+- Tiens compte des décisions manuelles de Jérémy : elles montrent ce qu'il veut entendre, et ce qu'il ignore.
 
 Le message : une à trois phrases ORALES en français, naturelles, sans markdown, sans emoji. Yui tutoie Jérémy.
 
@@ -64,6 +65,7 @@ export function buildJudgeUser(
     remainingBudget: number,
     recent: string,
     feedback: string,
+    manual: string,
 ): string {
     const parts: string[] = [];
     if (situation) parts.push(`SITUATION :\n${summarizeSituation(situation)}`);
@@ -78,6 +80,8 @@ export function buildJudgeUser(
     if (recent)
         parts.push(`INTERVENTIONS RÉCENTES (ne pas répéter) :\n${recent}`);
     if (feedback) parts.push(`RETOURS DE JÉRÉMY :\n${feedback}`);
+    if (manual)
+        parts.push(`DÉCISIONS MANUELLES DE JÉRÉMY (à imiter) :\n${manual}`);
     parts.push(
         `ÉVÉNEMENT À JUGER [${input.source}] (importance annoncée : ${input.importance}) : ${input.facts}`,
     );
@@ -143,6 +147,7 @@ export class Judge {
                 remaining,
                 this.deps.journal.recentSummary(now),
                 this.deps.journal.feedbackSummary(),
+                this.deps.journal.manualSummary(now),
             );
             Logger.info(
                 `proactive: juge [${input.source}] "${input.subject}" (budget restant ${remaining})`,

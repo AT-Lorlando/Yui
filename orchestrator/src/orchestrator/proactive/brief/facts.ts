@@ -51,6 +51,11 @@ const KIND_TO_NATURE: Record<EventKind, SaidNature> = {
 const NATURE_MARKER =
     /^nature:(alert|request|info|digest|agenda-far|agenda-today|postit-stale)$/;
 
+/** Faits lisibles d'un événement : sans le marqueur `nature:` de tête. */
+export function visibleFacts(e: Event): string[] {
+    return NATURE_MARKER.test(e.facts[0] ?? '') ? e.facts.slice(1) : e.facts;
+}
+
 function fingerprintOf(text: string): string {
     return crypto.createHash('sha1').update(text).digest('hex').slice(0, 16);
 }
@@ -59,7 +64,7 @@ function fingerprintOf(text: string): string {
  *  mais ignore la ligne du post-it : le moteur l'ajoute UNE fois, à la
  *  création, et une réémission de la même origine arrive sans elle — elle
  *  doit quand même être reconnue comme déjà dite. Le texte, lui, la garde. */
-function heldToFact(e: Event): BriefFact {
+export function heldToFact(e: Event): BriefFact {
     const key = eventKey(e);
     const marker = NATURE_MARKER.exec(e.facts[0] ?? '');
     const facts = marker ? e.facts.slice(1) : e.facts;

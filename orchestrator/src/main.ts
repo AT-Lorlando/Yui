@@ -262,6 +262,10 @@ async function main() {
                     proactive.getJournal(limit, before),
                 held: () => proactive.heldList(),
                 heldRemove: (key: string) => proactive.heldRemove(key),
+                decideHeld: (key, channel) =>
+                    proactive.decide({ held: key }, channel),
+                decideJournal: (id, channel) =>
+                    proactive.decide({ journal: id }, channel),
                 connectors: () => proactive.connectorsView(),
                 connectorPoll: (id: string) => proactive.pollConnector(id),
                 said: () => proactive.saidList(),

@@ -119,6 +119,69 @@ export function configRoutes(
             res.json({ ok: true });
         else res.status(404).json({ error: 'retenu inconnu' });
     });
+    // Décision manuelle (dire / notifier / taire) sur un retenu ou une
+    // entrée du journal — texte déterministe, sans LLM.
+    const DECIDE_CHANNELS = ['speak', 'notify', 'skip'];
+    const DECIDE_ERRORS: Record<string, number> = {
+        DecisionNotFound: 404,
+        DecisionExpired: 410,
+    };
+    const decideRoute =
+        (
+            pick: (
+                h: ProactiveHandler,
+            ) =>
+                | ((
+                      id: string,
+                      channel: 'speak' | 'notify' | 'skip',
+                  ) => Promise<unknown>)
+                | undefined,
+            param: string,
+        ) =>
+        async (req: any, res: any) => {
+            const decide = proactiveHandler && pick(proactiveHandler);
+            if (!decide) {
+                res.status(503).json(UNAVAILABLE);
+                return;
+            }
+            const channel = req.body?.channel;
+            if (!DECIDE_CHANNELS.includes(channel)) {
+                res.status(400).json({
+                    error: 'channel doit être speak, notify ou skip',
+                });
+                return;
+            }
+            try {
+                const out = (await decide(
+                    String(req.params[param]),
+                    channel,
+                )) as { channel: string; message: string };
+                res.json({
+                    ok: true,
+                    channel: out.channel,
+                    message: out.message,
+                });
+            } catch (err: any) {
+                const status = DECIDE_ERRORS[err?.name] ?? 500;
+                if (status === 500)
+                    Logger.warn(
+                        `proactive: décision ${req.params[param]} — ${
+                            err?.message ?? err
+                        }`,
+                    );
+                res.status(status).json({ error: err?.message ?? String(err) });
+            }
+        };
+    r.post(
+        '/proactive/held/:key/decide',
+        requireAuth,
+        decideRoute((h) => h.decideHeld, 'key'),
+    );
+    r.post(
+        '/proactive/journal/:id/decide',
+        requireAuth,
+        decideRoute((h) => h.decideJournal, 'id'),
+    );
     r.get('/proactive/connectors', requireAuth, (_req: any, res: any) => {
         if (!proactiveHandler?.connectors) {
             res.status(503).json(UNAVAILABLE);

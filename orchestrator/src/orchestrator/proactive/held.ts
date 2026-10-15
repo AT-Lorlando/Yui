@@ -107,6 +107,12 @@ export class HeldQueue {
         return removed;
     }
 
+    /** `key` = `source:key` (cf. `eventKey`) — hors purge : l'appelant
+     *  vérifie l'âge lui-même. */
+    get(key: string): Event | undefined {
+        return this.items.find((e) => eventKey(e) === key);
+    }
+
     /** `key` = `source:key` (cf. `eventKey`). */
     has(key: string): boolean {
         return this.items.some((e) => eventKey(e) === key);
