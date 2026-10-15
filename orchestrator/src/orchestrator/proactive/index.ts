@@ -395,10 +395,14 @@ export class ProactiveEngine {
             });
             return false;
         }
-        void this.pushFulfilledOrder(m, order);
+        void this.pushFulfilledOrder(m, order).catch((err) =>
+            Logger.warn(`proactive: attente courrier ${order.id} — ${err}`),
+        );
         return true;
     }
 
+    /** Sortie d'un ordre satisfait : le journal est TOUJOURS écrit ; l'attente
+     *  liée n'est marquée satisfaite que si la sortie a réussi. */
     private async pushFulfilledOrder(
         m: { mailId: string; from: string; subject: string },
         order: MailOrder,
@@ -408,23 +412,34 @@ export class ProactiveEngine {
         const text = `Ce que tu attendais : ${order.text}. ${
             m.subject
         }, de ${senderName(m.from)}`;
+        let channel: 'speak' | 'notify' = 'notify';
+        let failure: string | null = null;
         try {
-            const channel = await this.pushNow(text, true);
+            channel = await this.pushNow(text, true);
+        } catch (err) {
+            failure = err instanceof Error ? err.message : String(err);
+            Logger.warn(`proactive: attente courrier ${order.id} — ${failure}`);
+        }
+        try {
             this.journal.record({
                 at: now,
                 source: 'mail',
                 subject: key,
                 channel,
                 message: text,
-                reason: `attente : ${order.text}`,
+                reason: failure
+                    ? `attente : ${order.text} — sortie en échec : ${failure}`
+                    : `attente : ${order.text}`,
                 kind: 'event',
             });
+            if (!failure && order.origin?.startsWith('watch:')) {
+                const id = order.origin.slice('watch:'.length);
+                this.watches.fulfill(id, { key, subject: m.subject }, now);
+            }
         } catch (err) {
-            Logger.warn(`proactive: attente courrier ${order.id} — ${err}`);
-        }
-        if (order.origin?.startsWith('watch:')) {
-            const id = order.origin.slice('watch:'.length);
-            this.watches.fulfill(id, { key, subject: m.subject }, now);
+            Logger.warn(
+                `proactive: journal/attente de l'ordre ${order.id} — ${err}`,
+            );
         }
     }
 

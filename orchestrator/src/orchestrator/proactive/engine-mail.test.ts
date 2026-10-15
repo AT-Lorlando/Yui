@@ -311,6 +311,48 @@ async function run(): Promise<void> {
     );
     assert.deepStrictEqual(engine.takeMailFulfilled(), []);
 
+    // Sortie en échec (notify rejette) : entrée de journal quand même,
+    // attente laissée active, aucun rejet non géré.
+    const w2Reply = await engine.watchFor({
+        what: 'Réponse du notaire',
+        keywords: ['notaire'],
+        days: 7,
+    });
+    assert.ok(w2Reply.startsWith("D'accord"));
+    const w2 = engine.watches
+        .active(NOW)
+        .find((x) => x.text === 'Réponse du notaire')!;
+    const o2 = engine.mailOrders
+        .active(NOW)
+        .find((o) => o.origin === `watch:${w2.id}`)!;
+    const realNotify = deps.notify;
+    deps.notify = async () => {
+        throw new Error('FCM down');
+    };
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on('unhandledRejection', onUnhandled);
+    const failedPush = engine.mailOrderFulfilled(
+        { mailId: 'm12', from: 'notaire@etude.fr', subject: 'Acte' },
+        { ...item, notify: true },
+        { ...o2, state: 'fulfilled' },
+    );
+    await flush();
+    await flush();
+    process.off('unhandledRejection', onUnhandled);
+    deps.notify = realNotify;
+    assert.strictEqual(failedPush, true);
+    assert.deepStrictEqual(unhandled, [], 'aucun rejet non géré');
+    const failEntry = journal.list(1)[0]!;
+    assert.strictEqual(failEntry.subject, `mail-order-${o2.id}`);
+    assert.strictEqual(failEntry.channel, 'notify');
+    assert.strictEqual(
+        failEntry.reason,
+        'attente : Réponse du notaire — sortie en échec : FCM down',
+    );
+    assert.strictEqual(engine.watches.find(w2.id)!.state, 'active');
+    engine.watchRemove(w2.id);
+
     // L'ordre lié satisfait n'est plus actif.
     engine.mailOrders.fulfill(order.id, 'm10', 'ok', NOW);
 

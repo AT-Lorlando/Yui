@@ -80,12 +80,12 @@ Lit les mails des **inconnus** et des « à garder » dont la lecture est active
 `data/config/mail-orders.json` (non versionné) — `{id, text ≤ 300, createdAt, expiresAt, source: user|voice|connector, origin?, state: active|fulfilled|expired, fulfilledAt?, fulfilledBy?, result?}`, 40 ordres max.
 
 - **Général** : le prompt `prompts/mail-reader.md` (ce qui est urgent chez Jérémy, ce qui ne l'est jamais).
-- **Temporaires** : posés depuis l'app (carte « Ce que j'attends » de `/mail`, `POST /mail/orders`) ou à la voix par le tool `mail_watch`. Durée par défaut 14 jours (1–60). Un ordre échu passe `expired`.
+- **Temporaires** : posés depuis l'app (carte « Ce que j'attends » de `/mail`, `POST /mail/orders`) ou à la voix par le tool `watch_for` (via une attente). Durée par défaut 14 jours depuis l'app, 7 jours pour une attente (1–60). Un ordre échu passe `expired`.
 - **Automatiques** : posés par un connecteur avec un `origin`. Premier cas, les colis (`connectors/deliveries.ts`) : un colis `shipped`/`in_transit`/`out_for_delivery` pose « Commande <contenu> : extraire la date de livraison estimée, le transporteur et le numéro de suivi » (21 jours, `origin: parcel:<id>`, libellé rogné pour tenir dans 300 caractères), une seule fois par colis ; la livraison le referme.
 
-### Tool `mail_watch`
+### Tool `watch_for`
 
-Tool LLM `mail_watch {text (5–300), days? (1–60, défaut 14)}` — « Yui, préviens-moi quand Michel répond ». Crée un ordre `source: voice` via le moteur proactif (`setMailWatchProvider` dans `main.ts`).
+Tool LLM `watch_for {what (5–300), keywords (1–5), source? (mail|deliveries|calendar|yoji|external:<app>), days? (1–60, défaut 7)}` — « Yui, préviens-moi quand Michel répond ». Pose une attente sur le bus d'événements (`watches.json`) et, sans source ou avec `source: mail`, un ordre de lecture lié (`source: voice`, `origin: watch:<id>`) — provider `setWatchProvider` dans `main.ts`. Un ordre `voice`/`user` satisfait par le lecteur est poussé tout de suite (« Ce que tu attendais : … », notification + parole si présent hors nuit, journal `reason: attente : …`), une seule sortie pour le mail (pas de second passage par `notifyMail`), hors plafond `MAIL_NOTIFY_PER_DAY` ; l'attente liée est marquée satisfaite. Les ordres `connector` (colis) gardent l'événement « Ordre satisfait » du connecteur `mail`.
 
 ## Balayage osef
 
