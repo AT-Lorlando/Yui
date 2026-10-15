@@ -535,22 +535,28 @@ export class ProactiveEngine {
         const message =
             event.template ??
             (first ? `${event.subject}. ${first}` : event.subject);
-        if (channel === 'speak') await this.pushNow(message, true, true);
-        else if (channel === 'notify') await this.pushNow(message, false);
+        // Canal effectif : un `speak` demandé en l'absence de Jérémy n'est
+        // qu'une notification (pushNow tranche).
+        const effective: DecideChannel =
+            channel === 'skip'
+                ? 'skip'
+                : await this.pushNow(message, channel === 'speak', true);
         this.journal.record({
             at: now,
             source: event.source,
             subject: event.key,
-            channel,
+            channel: effective,
             message,
             reason: 'décision manuelle',
             kind: 'event',
             manual: true,
             event,
         });
-        if (fromHeld) this.held.remove([key]);
+        // Même depuis le journal : un retenu de même clé encore en file
+        // ressortirait au prochain point alors que Jérémy vient de trancher.
+        this.held.remove([key]);
         this.dedup.record(key, now, message, factsFingerprint(event));
-        if (channel !== 'skip') {
+        if (effective !== 'skip') {
             const f = heldToFact(event);
             this.said.markSaid(
                 [
@@ -560,11 +566,11 @@ export class ProactiveEngine {
                         nature: f.nature,
                     },
                 ],
-                channel,
+                effective,
                 now,
             );
         }
-        return { channel, message };
+        return { channel: effective, message };
     }
 
     saidList() {

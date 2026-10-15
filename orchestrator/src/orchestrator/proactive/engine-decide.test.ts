@@ -52,7 +52,7 @@ function ev(key: string, over: Partial<Event> = {}): Event {
     };
 }
 
-function harness() {
+function harness(presence: PresenceState = 'home') {
     const notified: string[] = [];
     const spoken: string[] = [];
     let llm = 0;
@@ -63,7 +63,7 @@ function harness() {
         },
         notify: async (t) => void notified.push(t),
         speak: async (t) => void spoken.push(t),
-        presenceState: () => 'home' as PresenceState,
+        presenceState: () => presence,
         subscribePresence: () => () => {},
         deviceHandler: async () => null,
         runScene: async () => ({ success: true }),
@@ -216,7 +216,7 @@ async function run(): Promise<void> {
     {
         const h = harness();
         const e = ev('lost', { importance: 'urgent' });
-        // Même clé en file : la décision depuis le journal ne doit pas la retirer.
+        // Même clé en file : la décision depuis le journal la retire aussi.
         h.held.add(e, NOW);
         const entry = h.journal.record({
             at: NOW - HOUR,
@@ -229,9 +229,50 @@ async function run(): Promise<void> {
         const out = await h.engine.decide({ journal: entry.id }, 'notify');
         assert.strictEqual(out.message, 'Sujet lost. Fait lost');
         assert.deepStrictEqual(h.notified, [out.message]);
-        assert.strictEqual(h.held.size(), 1, 'file intacte');
+        assert.strictEqual(h.held.size(), 0, 'retenu de même clé retiré');
         assert.strictEqual(h.journal.list(1)[0]!.manual, true);
         assert.ok(h.said.isSaid('koya:lost', factsFingerprint(e), NOW));
+    }
+
+    // ── skip depuis le journal, événement encore en file → retiré ────────
+    {
+        const h = harness();
+        const e = ev('ignored');
+        h.held.add(e, NOW);
+        h.held.add(ev('other'), NOW);
+        const entry = h.journal.record({
+            at: NOW - HOUR,
+            source: 'koya',
+            subject: 'ignored',
+            channel: 'skip',
+            message: 'm',
+            event: e,
+        });
+        await h.engine.decide({ journal: entry.id }, 'skip');
+        assert.deepStrictEqual(
+            h.engine.heldList().map((x) => x.key),
+            ['other'],
+            'seul le retenu de même clé est retiré',
+        );
+        assert.strictEqual(h.said.size(), 0);
+    }
+
+    // ── speak demandé, Jérémy absent → notification seule, canal effectif ─
+    {
+        const h = harness('away');
+        const e = ev('away');
+        h.held.add(e, NOW);
+        const out = await h.engine.decide({ held: 'koya:away' }, 'speak');
+        assert.strictEqual(out.channel, 'notify', 'canal effectif rendu');
+        assert.deepStrictEqual(h.notified, [out.message]);
+        assert.deepStrictEqual(h.spoken, [], 'pas de parole absent');
+        assert.strictEqual(h.journal.list(1)[0]!.channel, 'notify');
+        const said = h.said.list().find((x) => x.subject === 'koya:away');
+        assert.ok(said, 'marqué dit');
+        assert.strictEqual(
+            h.journal.manualSummary(NOW),
+            '[koya] away → notify',
+        );
     }
 
     // ── les verdicts du juge et les critiques journalisent leur événement ─

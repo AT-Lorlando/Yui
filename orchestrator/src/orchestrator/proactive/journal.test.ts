@@ -81,6 +81,33 @@ async function run(): Promise<void> {
     assert.ok(!lines.some((l) => l.includes('not-manual')));
     assert.strictEqual(j.manualSummary(NOW, 3).split('\n').length, 3);
 
+    // Les décisions manuelles ne consomment pas le budget du juge.
+    const jb = new ProactiveJournal(
+        path.join(
+            fs.mkdtempSync(path.join(os.tmpdir(), 'yui-journal-')),
+            'j.json',
+        ),
+    );
+    jb.record({
+        at: NOW,
+        source: 'koya',
+        subject: 'm',
+        channel: 'speak',
+        message: 'm',
+        kind: 'event',
+        manual: true,
+    });
+    assert.strictEqual(jb.spentToday(NOW), 0, 'manuel hors budget');
+    jb.record({
+        at: NOW,
+        source: 'koya',
+        subject: 'j',
+        channel: 'speak',
+        message: 'm',
+        kind: 'event',
+    });
+    assert.strictEqual(jb.spentToday(NOW), 1, 'verdict du juge compté');
+
     // `event` et `manual` persistés puis relus.
     const reread = new ProactiveJournal(file);
     const old = reread.list(300).find((e) => e.subject === 'old');

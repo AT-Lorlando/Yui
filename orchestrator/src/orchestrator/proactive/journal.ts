@@ -115,13 +115,15 @@ export class ProactiveJournal {
     }
 
     /** Interruptions déjà émises aujourd'hui (speak = 1, notify = 0.5). Le
-     *  budget ne concerne que les urgents : les points de moment et les points
-     *  à la demande n'y comptent pas. */
+     *  budget ne concerne que les urgents : les points de moment, les points
+     *  à la demande et les décisions manuelles n'y comptent pas. */
     spentToday(now: number): number {
         const day = new Date(now).toDateString();
         let spent = 0;
         for (const e of this.entries) {
             if (e.kind === 'moment' || e.kind === 'brief') continue;
+            // Décision manuelle : le choix de Jérémy, pas une interruption du juge.
+            if (e.manual) continue;
             if (new Date(e.at).toDateString() !== day) continue;
             if (e.channel === 'speak') spent += 1;
             else if (e.channel === 'notify') spent += 0.5;
