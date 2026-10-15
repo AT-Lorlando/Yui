@@ -219,6 +219,63 @@ export function configRoutes(
             }
         },
     );
+    // Attentes « j'attends un truc, ping-moi » (+ ordres courrier de l'app).
+    r.get('/proactive/watches', requireAuth, (_req: any, res: any) => {
+        if (!proactiveHandler?.watches) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        res.json(proactiveHandler.watches());
+    });
+    r.post('/proactive/watches', requireAuth, (req: any, res: any) => {
+        if (!proactiveHandler?.watchAdd) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        const b = req.body ?? {};
+        if (typeof b.what !== 'string') {
+            res.status(400).json({ error: 'what (texte) requis' });
+            return;
+        }
+        if (b.source !== undefined && typeof b.source !== 'string') {
+            res.status(400).json({ error: 'source doit être un texte' });
+            return;
+        }
+        if (
+            !Array.isArray(b.keywords) ||
+            b.keywords.some((k: unknown) => typeof k !== 'string')
+        ) {
+            res.status(400).json({
+                error: 'keywords (liste de textes) requis',
+            });
+            return;
+        }
+        if (b.days !== undefined && typeof b.days !== 'number') {
+            res.status(400).json({ error: 'days doit être un nombre' });
+            return;
+        }
+        try {
+            const w = proactiveHandler.watchAdd({
+                what: b.what,
+                ...(b.source ? { source: b.source } : {}),
+                keywords: b.keywords,
+                ...(b.days !== undefined ? { days: b.days } : {}),
+                origin: 'app',
+            });
+            res.status(201).json(w);
+        } catch (err: any) {
+            res.status(400).json({ error: err?.message ?? String(err) });
+        }
+    });
+    r.delete('/proactive/watches/:id', requireAuth, (req: any, res: any) => {
+        if (!proactiveHandler?.watchRemove) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        if (proactiveHandler.watchRemove(String(req.params.id)))
+            res.json({ ok: true });
+        else res.status(404).json({ error: 'attente inconnue' });
+    });
     r.get('/proactive/said', requireAuth, (_req: any, res: any) => {
         if (!proactiveHandler?.said) {
             res.status(503).json(UNAVAILABLE);

@@ -165,6 +165,61 @@ async function run(): Promise<void> {
         ignored: 0,
     });
 
+    // 4. Attentes : un événement qui matche est accepté même en heures de
+    //    silence et quota dépassé, `onHit` appelé, ni retenu ni jugé.
+    {
+        const hits: string[] = [];
+        const judgedW: string[] = [];
+        const heldW = new HeldQueue();
+        const rate = new RateWindow();
+        const quiet = { start: '00:00', end: '23:59' }; // toujours silence
+        const ingW = new Ingest({
+            dedup: new Dedup(),
+            held: heldW,
+            rate,
+            now: () => NOW,
+            defaultCooldownMs: () => 30 * 60_000,
+            maxPerHour: () => 0, // quota toujours dépassé
+            quietHours: () => quiet,
+            judge: async (e) => void judgedW.push(e.key),
+            watches: {
+                match: (e) =>
+                    e.subject.includes('Michel')
+                        ? {
+                              id: 'w-1',
+                              text: 'réponse de Michel',
+                              keywords: ['michel'],
+                              createdAt: NOW,
+                              expiresAt: NOW + 1,
+                              state: 'active',
+                              origin: 'app',
+                          }
+                        : undefined,
+                onHit: async (w, e) => void hits.push(`${w.id}:${e.key}`),
+            },
+        });
+        assert.strictEqual(
+            await ingW.ingest(ev('m1', { subject: 'Réponse de Michel' })),
+            'accepted',
+        );
+        assert.deepStrictEqual(hits, ['w-1:m1']);
+        assert.strictEqual(heldW.size(), 0, 'pas retenu');
+        assert.deepStrictEqual(judgedW, [], 'pas jugé');
+        assert.strictEqual(rate.count('koya', NOW), 0, 'pas compté au quota');
+        // Sans match → comportement inchangé (silence → retenu).
+        assert.strictEqual(await ingW.ingest(ev('m2')), 'held');
+        assert.deepStrictEqual(hits, ['w-1:m1']);
+        assert.strictEqual(heldW.size(), 1);
+        // Un périmé ne satisfait pas une attente.
+        assert.strictEqual(
+            await ingW.ingest(
+                ev('m3', { subject: 'Michel', at: NOW - 10, ttlMs: 1 }),
+            ),
+            'expired',
+        );
+        assert.deepStrictEqual(hits, ['w-1:m1']);
+    }
+
     console.log('All ingest tests passed');
 }
 

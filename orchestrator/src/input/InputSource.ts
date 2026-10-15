@@ -141,6 +141,18 @@ export interface ProactiveHandler {
     /** Relève manuelle — lève `ConnectorNotFound` / `ConnectorNoEvents` /
      *  `ConnectorBusy` (mapping HTTP par `err.name`). */
     connectorPoll?: (id: string) => Promise<unknown>;
+    /** Attentes : `{ watches, orders }` (ordres courrier actifs hors
+     *  connecteurs) ; ajout (lève une `Error` de validation → 400) ; retrait
+     *  (avec l'ordre courrier lié, false si inconnue). */
+    watches?: () => unknown;
+    watchAdd?: (input: {
+        what: string;
+        source?: string;
+        keywords: string[];
+        days?: number;
+        origin: 'voice' | 'app';
+    }) => unknown;
+    watchRemove?: (id: string) => boolean;
     /** Mémoire « dit » ; oubli par sujet (false si absent) ou total (nombre retiré). */
     said?: () => unknown;
     saidForget?: (subject: string) => boolean;

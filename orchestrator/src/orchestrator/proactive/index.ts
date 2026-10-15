@@ -55,6 +55,8 @@ import { migrateMailRulesAtBoot } from './mail/bootMigration';
 import { senderName } from './connectors/mail';
 import type { FulfilledNotice, MailNotice } from './connectors/mail';
 import type { MailOrder } from './mail/orders';
+import { WatchStore, WATCH_DAYS_DEFAULT, matchWatch } from './watches';
+import type { Watch } from './watches';
 import { saveConfig } from './config';
 import type { MomentKind, MomentState } from './moments';
 import type { CandidateEvent, ProactiveConfig, ProactiveDeps } from './types';
@@ -131,6 +133,8 @@ export class ProactiveEngine {
     readonly mailSenders: SenderStore;
     readonly mailOrders: OrderStore;
     readonly mailJournal: MailJournal;
+    /** Attentes « j'attends un truc, ping-moi » (`watches.json`). */
+    readonly watches: WatchStore;
     /** Mails signalés tout de suite (notifyMail), en attente de leur
      *  événement `request` (post-it, plafond d'urgences) au poll du connecteur. */
     private pendingMailNotify: MailNotice[] = [];
@@ -173,6 +177,7 @@ export class ProactiveEngine {
             held?: HeldQueue;
             said?: SaidMemory;
             postits?: PostitRegistry;
+            watches?: WatchStore;
         } = {},
     ) {
         this.now = deps.now ?? (() => Date.now());
@@ -183,6 +188,7 @@ export class ProactiveEngine {
         this.postits =
             opts.postits ?? new PostitRegistry(PostitRegistry.defaultFile());
         this.situation = loadSituation();
+        this.watches = opts.watches ?? new WatchStore();
         this.ingestGate = new Ingest({
             dedup: this.dedup,
             held: this.held,
@@ -201,6 +207,16 @@ export class ProactiveEngine {
                 isBrickEnabled(this.cfg, this.sourceBrick(source)),
             onNewSource: (source) => this.declareExternal(source),
             judge: (e) => this.consume(e),
+            watches: {
+                match: (e) => {
+                    const now = this.now();
+                    this.watches.expire(now);
+                    return this.watches
+                        .active(now)
+                        .find((w) => matchWatch(w, e));
+                },
+                onHit: (w, e) => this.watchHit(w, e),
+            },
         });
         this.judge = new Judge({
             complete: (sys, user) => this.deps.complete(sys, user),
@@ -571,6 +587,98 @@ export class ProactiveEngine {
             );
         }
         return { channel: effective, message };
+    }
+
+    /** Attentes (actives + 24 h de satisfaites/expirées) et ordres courrier
+     *  actifs posés par Jérémy (pas ceux des connecteurs, colis). */
+    watchesView(now = this.now()): { watches: Watch[]; orders: MailOrder[] } {
+        this.watches.expire(now);
+        return {
+            watches: this.watches.all(),
+            orders: this.mailOrders
+                .active(now)
+                .filter((o) => o.source !== 'connector'),
+        };
+    }
+
+    /**
+     * Pose une attente. Sans source ou pour le courrier, crée aussi l'ordre
+     * de lecture lié (`origin: watch:<id>`) : la correspondance sémantique du
+     * lecteur reste le meilleur détecteur pour un mail. Une erreur de
+     * validation (store d'attentes ou d'ordres) remonte telle quelle, sans
+     * rien laisser derrière elle.
+     */
+    watchAdd(input: {
+        what: string;
+        source?: string;
+        keywords: string[];
+        days?: number;
+        origin: 'voice' | 'app';
+    }): Watch {
+        const now = this.now();
+        const source = input.source?.trim() || undefined;
+        const w = this.watches.add(
+            {
+                text: input.what,
+                ...(source ? { source } : {}),
+                keywords: input.keywords,
+                ...(input.days !== undefined ? { days: input.days } : {}),
+                origin: input.origin,
+            },
+            now,
+        );
+        if (!source || source === 'mail') {
+            try {
+                const o = this.mailOrders.add(
+                    {
+                        text: w.text,
+                        days: input.days ?? WATCH_DAYS_DEFAULT,
+                        source: input.origin === 'voice' ? 'voice' : 'user',
+                        origin: `watch:${w.id}`,
+                    },
+                    now,
+                );
+                w.mailOrderId = o.id;
+                this.watches.save();
+            } catch (err) {
+                this.watches.remove(w.id);
+                throw err;
+            }
+        }
+        return w;
+    }
+
+    /** Retire une attente et son ordre courrier lié. */
+    watchRemove(id: string): boolean {
+        const w = this.watches.find(id);
+        if (!w) return false;
+        if (w.mailOrderId) this.mailOrders.remove(w.mailOrderId);
+        return this.watches.remove(id);
+    }
+
+    /**
+     * Attente satisfaite par un événement du bus : sortie immédiate,
+     * déterministe (notification toujours, parole si présent et hors nuit —
+     * ce n'est pas un critique), journal, dédup, ordre courrier lié retiré.
+     */
+    private async watchHit(w: Watch, e: Event): Promise<void> {
+        const now = this.now();
+        const key = eventKey(e);
+        const text = `Ce que tu attendais : ${w.text}. ${e.subject}`;
+        const channel = await this.pushNow(text, true);
+        this.journal.record({
+            at: now,
+            source: e.source,
+            subject: e.key,
+            channel,
+            message: text,
+            reason: `attente : ${w.text}`,
+            kind: 'event',
+            event: e,
+        });
+        this.watches.fulfill(w.id, { key: e.key, subject: e.subject }, now);
+        this.dedup.record(key, now, text, factsFingerprint(e));
+        if (w.mailOrderId) this.mailOrders.remove(w.mailOrderId);
     }
 
     saidList() {

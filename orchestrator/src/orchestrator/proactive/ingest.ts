@@ -10,6 +10,7 @@ import { isQuietHours } from './gates';
 import type { Dedup } from './dedup';
 import type { HeldQueue } from './held';
 import type { RateWindow } from './rate';
+import type { Watch } from './watches';
 
 /** Plafond des `urgent` : ils ignorent le quota horaire de leur source, mais
  *  pas indéfiniment — une app authentifiée pourrait sinon noyer le foyer en
@@ -42,6 +43,13 @@ export interface IngestDeps {
      *  de faire apparaître une brique `external:<source>` dès le premier
      *  événement reçu. */
     onNewSource?: (source: string) => void;
+    /** Attentes (« j'attends un truc, ping-moi ») : un événement qui en
+     *  satisfait une court-circuite heures de silence, quota de source et
+     *  juge — `onHit` le pousse tout de suite. */
+    watches?: {
+        match(e: Event): Watch | undefined;
+        onHit(w: Watch, e: Event): Promise<void>;
+    };
 }
 
 export class Ingest {
@@ -79,6 +87,23 @@ export class Ingest {
                 )} min)`,
             );
             return 'deduplicated';
+        }
+
+        // Une attente satisfaite passe avant la retenue : c'est tout son sens.
+        // Ni retenu, ni jugé, ni compté dans le quota de sa source.
+        const w = this.deps.watches?.match(e);
+        if (w) {
+            Logger.info(
+                `proactive: ★ attente « ${w.text} » satisfaite par ${key}`,
+            );
+            try {
+                await this.deps.watches!.onHit(w, e);
+            } catch (err) {
+                Logger.error(
+                    `proactive: attente ${w.id} en erreur pour ${key} — ${err}`,
+                );
+            }
+            return 'accepted';
         }
 
         if (!urgent && isQuietHours(new Date(now), this.deps.quietHours())) {

@@ -80,6 +80,16 @@ async function run(): Promise<void> {
             if (id === 'boom') throw new Error('panne');
             return { channel, message: 'M' };
         },
+        watches: () => ({ watches: [{ id: 'w-1' }], orders: [] }),
+        watchAdd: (input) => {
+            seen.watchAdd = input;
+            if (input.what.length < 5) throw new Error('texte trop court');
+            return { id: 'w-2', text: input.what };
+        },
+        watchRemove: (id) => {
+            seen.watchRemove = id;
+            return id === 'w-1';
+        },
         mailJournal: (limit, scope) => {
             seen.mail = { limit, scope };
             return [];
@@ -220,6 +230,73 @@ async function run(): Promise<void> {
         401,
     );
 
+    // ── Attentes ─────────────────────────────────────────────────────
+    r = await call('GET', '/proactive/watches');
+    assert.strictEqual(r.status, 200);
+    assert.deepStrictEqual(r.body, { watches: [{ id: 'w-1' }], orders: [] });
+    assert.strictEqual(
+        (await call('GET', '/proactive/watches', 'x')).status,
+        401,
+    );
+    r = await call('POST', '/proactive/watches', 'Bearer t', {
+        what: 'la réponse de Michel',
+        keywords: ['michel'],
+        days: 3,
+    });
+    assert.strictEqual(r.status, 201);
+    assert.deepStrictEqual(r.body, { id: 'w-2', text: 'la réponse de Michel' });
+    assert.deepStrictEqual(seen.watchAdd, {
+        what: 'la réponse de Michel',
+        keywords: ['michel'],
+        days: 3,
+        origin: 'app',
+    });
+    r = await call('POST', '/proactive/watches', 'Bearer t', {
+        what: 'le colis',
+        source: 'deliveries',
+        keywords: ['amazon'],
+    });
+    assert.strictEqual(r.status, 201);
+    assert.strictEqual(seen.watchAdd.source, 'deliveries');
+    r = await call('POST', '/proactive/watches', 'Bearer t', {
+        what: 'abc',
+        keywords: ['x'],
+    });
+    assert.strictEqual(r.status, 400, 'erreur du store → 400');
+    assert.strictEqual(r.body.error, 'texte trop court');
+    for (const bad of [
+        { keywords: ['x'] },
+        { what: 'assez long', keywords: 'x' },
+        { what: 'assez long', keywords: [1] },
+        { what: 'assez long', keywords: ['x'], days: '3' },
+        { what: 'assez long', keywords: ['x'], source: 4 },
+    ])
+        assert.strictEqual(
+            (await call('POST', '/proactive/watches', 'Bearer t', bad)).status,
+            400,
+            JSON.stringify(bad),
+        );
+    assert.strictEqual(
+        (
+            await call('POST', '/proactive/watches', 'x', {
+                what: 'la réponse',
+                keywords: ['x'],
+            })
+        ).status,
+        401,
+    );
+    r = await call('DELETE', '/proactive/watches/w-1');
+    assert.deepStrictEqual(r.body, { ok: true });
+    assert.strictEqual(seen.watchRemove, 'w-1');
+    assert.strictEqual(
+        (await call('DELETE', '/proactive/watches/w-9')).status,
+        404,
+    );
+    assert.strictEqual(
+        (await call('DELETE', '/proactive/watches/w-1', 'x')).status,
+        401,
+    );
+
     await call('GET', '/mail/journal?scope=actions&limit=5');
     assert.deepStrictEqual(seen.mail, { limit: 5, scope: 'actions' });
     await call('GET', '/mail/journal?scope=autre');
@@ -228,6 +305,15 @@ async function run(): Promise<void> {
 
     // Sans handler : 503.
     const none = await serve(undefined);
+    assert.strictEqual(
+        (
+            await none.call('POST', '/proactive/watches', 'Bearer t', {
+                what: 'la réponse',
+                keywords: ['x'],
+            })
+        ).status,
+        503,
+    );
     for (const u of ['/proactive/held/k/decide', '/proactive/journal/j/decide'])
         assert.strictEqual(
             (await none.call('POST', u, 'Bearer t', { channel: 'skip' }))
@@ -241,6 +327,8 @@ async function run(): Promise<void> {
         ['GET', '/proactive/said'],
         ['DELETE', '/proactive/said/k'],
         ['DELETE', '/proactive/said'],
+        ['GET', '/proactive/watches'],
+        ['DELETE', '/proactive/watches/w-1'],
     ])
         assert.strictEqual((await none.call(m, u)).status, 503, `${m} ${u}`);
     none.close();
