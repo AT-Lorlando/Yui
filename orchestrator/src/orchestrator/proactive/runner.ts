@@ -9,9 +9,87 @@ import type { PresenceState } from '../presence';
 import type { ConnectorContext, ConnectorDef } from './connector';
 import { ConnectorState, connectorStateFile } from './connectorState';
 import type { Event, Fact } from './events';
+import type { IngestOutcome } from './ingest';
 
 export const POLL_TIMEOUT_MS = 60_000;
 const FAILURES_BEFORE_SILENCE = 3;
+/** Derniers sorts d'ingestion gardés par connecteur (plus récent en tête). */
+export const RECENT_MAX = 5;
+const STATUS_KEY = '_status';
+
+export interface RecentEvent {
+    key: string;
+    subject: string;
+    at: number;
+    outcome: IngestOutcome;
+}
+
+export interface ConnectorStatus {
+    lastPollAt?: number;
+    lastOkAt?: number;
+    lastError?: string;
+    lastErrorAt?: number;
+    failures: number;
+    recent: RecentEvent[];
+}
+
+export type ConnectorMode =
+    | 'poll'
+    | 'subscribe'
+    | 'poll+subscribe'
+    | 'snapshot';
+
+export interface ConnectorStatusView extends ConnectorStatus {
+    id: string;
+    name: string;
+    description: string;
+    enabled: boolean;
+    mode: ConnectorMode;
+    pollMinutes?: number;
+    nextPollAt?: number;
+    polling: boolean;
+}
+
+/** Erreurs de `pollNow` — le nom (unique) sert au mapping HTTP de la route. */
+export class ConnectorNotFound extends Error {
+    constructor(id: string) {
+        super(`connecteur inconnu : ${id}`);
+        this.name = 'ConnectorNotFound';
+    }
+}
+export class ConnectorNoEvents extends Error {
+    constructor(id: string) {
+        super(`le connecteur ${id} ne se relève pas (pas de poll)`);
+        this.name = 'ConnectorNoEvents';
+    }
+}
+export class ConnectorBusy extends Error {
+    constructor(id: string) {
+        super(`relève de ${id} déjà en cours`);
+        this.name = 'ConnectorBusy';
+    }
+}
+
+/** Mode d'un connecteur, d'après ce qu'il déclare (cadence effective). */
+export function connectorMode(
+    def: Pick<ConnectorDef, 'events' | 'pollMinutes' | 'subscribe'>,
+): ConnectorMode {
+    const polled = !!(def.events && def.pollMinutes);
+    if (polled && def.subscribe) return 'poll+subscribe';
+    if (polled) return 'poll';
+    if (def.subscribe) return 'subscribe';
+    return 'snapshot';
+}
+
+/** Pousse un sort en tête de `recent`, borné à RECENT_MAX. */
+export function pushRecent(recent: RecentEvent[], r: RecentEvent): void {
+    recent.unshift(r);
+    if (recent.length > RECENT_MAX) recent.length = RECENT_MAX;
+}
+
+function emptyCounts(): Record<IngestOutcome, number> {
+    return { accepted: 0, expired: 0, deduplicated: 0, held: 0, ignored: 0 };
+}
 
 export interface RunnerDeps {
     connectors: ConnectorDef[];
@@ -19,7 +97,7 @@ export interface RunnerDeps {
     settings: (def: ConnectorDef) => Record<string, unknown>;
     callTool: ConnectorContext['callTool'];
     presence: () => PresenceState;
-    ingest: (e: Event) => Promise<unknown>;
+    ingest: (e: Event) => Promise<IngestOutcome>;
     now?: () => number;
     /** undefined = état en mémoire (tests). */
     stateFile?: (id: string) => string | undefined;
@@ -54,7 +132,7 @@ interface Slot {
     def: ConnectorDef;
     ctx: ConnectorContext;
     polling: boolean;
-    failures: number;
+    status: ConnectorStatus;
     timer?: ReturnType<typeof setInterval>;
     unsubscribe?: () => void;
 }
@@ -87,7 +165,24 @@ export class ConnectorRunner {
                     warn: (m) => this.log.warn(`proactive[${def.id}]: ${m}`),
                 },
             };
-            this.slots.set(def.id, { def, ctx, polling: false, failures: 0 });
+            // Dernier poll/succès/erreur relus de l'état persisté : la page
+            // des connecteurs survit au redémarrage. `failures` et `recent`
+            // repartent de zéro (mémoire de process).
+            const saved = ctx.state.get<Partial<ConnectorStatus>>(
+                STATUS_KEY,
+                {},
+            );
+            const status: ConnectorStatus = { failures: 0, recent: [] };
+            for (const k of [
+                'lastPollAt',
+                'lastOkAt',
+                'lastErrorAt',
+            ] as const) {
+                if (typeof saved[k] === 'number') status[k] = saved[k];
+            }
+            if (typeof saved.lastError === 'string')
+                status.lastError = saved.lastError;
+            this.slots.set(def.id, { def, ctx, polling: false, status });
         }
     }
 
@@ -105,11 +200,14 @@ export class ConnectorRunner {
                         // dans un try/catch), l'émission de subscribe est
                         // fire-and-forget : sans ce .catch(), un ingest() qui
                         // rejette deviendrait une unhandled rejection.
-                        this.deps.ingest(e).catch((err) => {
-                            this.log.warn(
-                                `proactive[${def.id}]: ingest — ${err}`,
-                            );
-                        });
+                        this.deps.ingest(e).then(
+                            (outcome) => this.record(slot, e, outcome),
+                            (err) => {
+                                this.log.warn(
+                                    `proactive[${def.id}]: ingest — ${err}`,
+                                );
+                            },
+                        );
                     });
                 } catch (err) {
                     this.log.warn(
@@ -153,34 +251,115 @@ export class ConnectorRunner {
             );
             return;
         }
+        try {
+            await this.runPoll(slot);
+        } catch {
+            /* déjà compté et journalisé par runPoll */
+        }
+    }
+
+    /** Relève manuelle (bouton de l'app) : mêmes garanties que le tick, mais
+     *  les refus sont typés et l'erreur du poll remonte à l'appelant. */
+    async pollNow(id: string): Promise<Record<IngestOutcome, number>> {
+        const slot = this.slots.get(id);
+        if (!slot) throw new ConnectorNotFound(id);
+        if (!slot.def.events) throw new ConnectorNoEvents(id);
+        if (slot.polling) throw new ConnectorBusy(id);
+        return this.runPoll(slot);
+    }
+
+    /** Vue de chaque connecteur actif, dans l'ordre de déclaration. */
+    status(): ConnectorStatusView[] {
+        return [...this.slots.values()].map((slot) => {
+            const { def, status } = slot;
+            const view: ConnectorStatusView = {
+                id: def.id,
+                name: def.name,
+                description: def.description,
+                enabled: true,
+                mode: connectorMode(def),
+                ...status,
+                recent: [...status.recent],
+                polling: slot.polling,
+            };
+            if (def.pollMinutes) view.pollMinutes = def.pollMinutes;
+            if (
+                slot.timer &&
+                status.lastPollAt !== undefined &&
+                def.pollMinutes
+            )
+                view.nextPollAt = status.lastPollAt + def.pollMinutes * 60_000;
+            return view;
+        });
+    }
+
+    private record(slot: Slot, e: Event, outcome: IngestOutcome): void {
+        pushRecent(slot.status.recent, {
+            key: e.key,
+            subject: e.subject,
+            at: this.now(),
+            outcome,
+        });
+    }
+
+    private persistStatus(slot: Slot): void {
+        const { lastPollAt, lastOkAt, lastError, lastErrorAt } = slot.status;
+        slot.ctx.state.set(STATUS_KEY, {
+            lastPollAt,
+            lastOkAt,
+            lastError,
+            lastErrorAt,
+        });
+    }
+
+    /** Le poll lui-même — l'appelant a vérifié `events` et le verrou.
+     *  Lève après avoir compté et journalisé l'échec. */
+    private async runPoll(slot: Slot): Promise<Record<IngestOutcome, number>> {
+        const id = slot.def.id;
+        const st = slot.status;
         slot.polling = true;
+        st.lastPollAt = this.now();
+        this.persistStatus(slot);
         try {
             const events = await withTimeout(
-                slot.def.events(slot.ctx),
+                slot.def.events!(slot.ctx),
                 this.timeoutMs,
                 `poll ${id}`,
             );
-            if (slot.failures >= FAILURES_BEFORE_SILENCE)
-                this.log.info(`proactive[${id}]: de nouveau OK`);
-            slot.failures = 0;
             this.log.info(
                 `proactive[${id}]: poll → ${events.length} événement(s)`,
             );
-            for (const e of events) await this.deps.ingest(e);
+            const counts = emptyCounts();
+            for (const e of events) {
+                const outcome = await this.deps.ingest(e);
+                counts[outcome] = (counts[outcome] ?? 0) + 1;
+                this.record(slot, e, outcome);
+            }
+            if (st.failures >= FAILURES_BEFORE_SILENCE)
+                this.log.info(`proactive[${id}]: de nouveau OK`);
+            st.failures = 0;
+            st.lastOkAt = this.now();
+            delete st.lastError;
+            this.persistStatus(slot);
+            return counts;
         } catch (err) {
-            slot.failures++;
+            st.failures++;
+            st.lastError = String(err).slice(0, 200);
+            st.lastErrorAt = this.now();
+            this.persistStatus(slot);
             // Timeout ou erreur ordinaire : même traitement (spec §5.2).
             // Chaque échec est signalé jusqu'au 3e consécutif inclus (celui-ci
             // avec le suffixe « suspendu »), puis silence — sinon un
             // connecteur qui pend en permanence noierait les logs.
-            if (slot.failures <= FAILURES_BEFORE_SILENCE) {
+            if (st.failures <= FAILURES_BEFORE_SILENCE) {
                 this.log.warn(
                     `proactive[${id}]: ${err}` +
-                        (slot.failures === FAILURES_BEFORE_SILENCE
+                        (st.failures === FAILURES_BEFORE_SILENCE
                             ? ' — en échec, warnings suspendus jusqu’au prochain succès'
                             : ''),
                 );
             }
+            throw err;
         } finally {
             slot.polling = false;
         }

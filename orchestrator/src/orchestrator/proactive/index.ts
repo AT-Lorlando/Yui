@@ -13,7 +13,13 @@ import { isActionBlocked } from './guard';
 import { loadHistory } from '../history';
 import { loadAutomations } from '../automations';
 import { loadConfig, DEFAULT_PHRASE_PROMPT } from './config';
-import { ConnectorRunner } from './runner';
+import {
+    ConnectorNotFound,
+    ConnectorRunner,
+    connectorMode,
+    pushRecent,
+} from './runner';
+import type { ConnectorStatusView, RecentEvent } from './runner';
 import { buildConnectors } from './connectors';
 import type { ConnectorContext, ConnectorDef } from './connector';
 import {
@@ -85,6 +91,18 @@ export class ProactiveEngine {
     private ingestGate: Ingest;
     private runner: ConnectorRunner | null = null;
     private connectors: ConnectorDef[] = [];
+    /** Sources externes (`POST /events`) vues depuis le démarrage — leur
+     *  « statut » pour la page des connecteurs (mémoire de process). */
+    private externalStatus = new Map<
+        string,
+        {
+            lastEventAt: number;
+            lastKey: string;
+            lastSubject: string;
+            lastOutcome: IngestOutcome;
+            recent: RecentEvent[];
+        }
+    >();
     private now: () => number;
     private situationTimer?: ReturnType<typeof setInterval>;
     readonly journal: ProactiveJournal;
@@ -398,6 +416,71 @@ export class ProactiveEngine {
         return this.journal.list(limit, before);
     }
 
+    private recordExternal(e: Event, outcome: IngestOutcome): void {
+        const at = this.now();
+        const cur = this.externalStatus.get(e.source);
+        const recent = cur?.recent ?? [];
+        pushRecent(recent, { key: e.key, subject: e.subject, at, outcome });
+        this.externalStatus.set(e.source, {
+            lastEventAt: at,
+            lastKey: e.key,
+            lastSubject: e.subject,
+            lastOutcome: outcome,
+            recent,
+        });
+    }
+
+    /** Page des connecteurs : les connecteurs actifs (statut du runner), les
+     *  déclarés mais à l'arrêt (brique OFF ou moteur désactivé), puis les
+     *  sources externes vues depuis le démarrage. */
+    connectorsView(): ConnectorStatusView[] {
+        const running = new Map(
+            (this.runner?.status() ?? []).map((v) => [v.id, v]),
+        );
+        const out: ConnectorStatusView[] = this.connectors.map((def) => {
+            const live = running.get(def.id);
+            if (live) return live;
+            const pollMinutes = this.connectorPollMinutes(def.id);
+            const view: ConnectorStatusView = {
+                id: def.id,
+                name: def.name,
+                description: def.description,
+                enabled: false,
+                failures: 0,
+                recent: [],
+                mode: connectorMode({ ...def, pollMinutes }),
+                polling: false,
+            };
+            if (pollMinutes) view.pollMinutes = pollMinutes;
+            return view;
+        });
+        const bricks = bricksView(this.cfg);
+        for (const [src, st] of this.externalStatus) {
+            const id = `external:${src}`;
+            const brick = bricks.find((b) => b.id === id);
+            out.push({
+                id,
+                name: brick?.name ?? src,
+                description:
+                    brick?.description ?? 'Source externe (POST /events).',
+                enabled: brick?.enabled ?? isBrickEnabled(this.cfg, id),
+                mode: 'subscribe',
+                failures: 0,
+                lastOkAt: st.lastEventAt,
+                recent: [...st.recent],
+                polling: false,
+            });
+        }
+        return out;
+    }
+
+    /** Relève manuelle d'un connecteur actif — erreurs typées du runner
+     *  (`ConnectorNotFound` aussi quand le moteur est arrêté). */
+    async pollConnector(id: string) {
+        if (!this.runner) throw new ConnectorNotFound(id);
+        return this.runner.pollNow(id);
+    }
+
     heldList(): Event[] {
         return this.held.peek(this.now());
     }
@@ -622,6 +705,8 @@ export class ProactiveEngine {
      *  porter la ligne qui le dit. */
     async ingest(e: Event): Promise<IngestOutcome> {
         const outcome = await this.ingestGate.ingest(e);
+        if (this.sourceBrick(e.source).startsWith('external:'))
+            this.recordExternal(e, outcome);
         if ((outcome === 'accepted' || outcome === 'held') && e.todo) {
             const r = await createPostitFor(e, {
                 registry: this.postits,

@@ -119,6 +119,43 @@ export function configRoutes(
             res.json({ ok: true });
         else res.status(404).json({ error: 'retenu inconnu' });
     });
+    r.get('/proactive/connectors', requireAuth, (_req: any, res: any) => {
+        if (!proactiveHandler?.connectors) {
+            res.status(503).json(UNAVAILABLE);
+            return;
+        }
+        res.json({ connectors: proactiveHandler.connectors() });
+    });
+    const POLL_ERRORS: Record<string, number> = {
+        ConnectorNotFound: 404,
+        ConnectorNoEvents: 400,
+        ConnectorBusy: 409,
+    };
+    r.post(
+        '/proactive/connectors/:id/poll',
+        requireAuth,
+        async (req: any, res: any) => {
+            if (!proactiveHandler?.connectorPoll) {
+                res.status(503).json(UNAVAILABLE);
+                return;
+            }
+            try {
+                const counts = await proactiveHandler.connectorPoll(
+                    String(req.params.id),
+                );
+                res.json({ ok: true, counts });
+            } catch (err: any) {
+                const status = POLL_ERRORS[err?.name] ?? 500;
+                if (status === 500)
+                    Logger.warn(
+                        `proactive: relève ${req.params.id} — ${
+                            err?.message ?? err
+                        }`,
+                    );
+                res.status(status).json({ error: err?.message ?? String(err) });
+            }
+        },
+    );
     r.get('/proactive/said', requireAuth, (_req: any, res: any) => {
         if (!proactiveHandler?.said) {
             res.status(503).json(UNAVAILABLE);

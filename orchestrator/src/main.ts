@@ -262,6 +262,8 @@ async function main() {
                     proactive.getJournal(limit, before),
                 held: () => proactive.heldList(),
                 heldRemove: (key: string) => proactive.heldRemove(key),
+                connectors: () => proactive.connectorsView(),
+                connectorPoll: (id: string) => proactive.pollConnector(id),
                 said: () => proactive.saidList(),
                 saidForget: (subject: string) => proactive.saidForget(subject),
                 saidForgetAll: () => proactive.saidForgetAll(),

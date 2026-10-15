@@ -125,6 +125,11 @@ export interface ProactiveHandler {
     /** Réserve : événements retenus ; retrait par `source:key`, sans marquer dit. */
     held?: () => unknown;
     heldRemove?: (key: string) => boolean;
+    /** Statut des connecteurs + sources externes (`ConnectorStatusView[]`). */
+    connectors?: () => unknown;
+    /** Relève manuelle — lève `ConnectorNotFound` / `ConnectorNoEvents` /
+     *  `ConnectorBusy` (mapping HTTP par `err.name`). */
+    connectorPoll?: (id: string) => Promise<unknown>;
     /** Mémoire « dit » ; oubli par sujet (false si absent) ou total (nombre retiré). */
     said?: () => unknown;
     saidForget?: (subject: string) => boolean;
