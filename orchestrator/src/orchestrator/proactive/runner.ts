@@ -134,6 +134,8 @@ interface Slot {
     polling: boolean;
     status: ConnectorStatus;
     timer?: ReturnType<typeof setInterval>;
+    /** Prochain tick du timer — une relève manuelle ne le déplace pas. */
+    nextTickAt?: number;
     unsubscribe?: () => void;
 }
 
@@ -216,11 +218,13 @@ export class ConnectorRunner {
                 }
             }
             if (def.events && def.pollMinutes) {
+                const every = def.pollMinutes * 60_000;
                 void this.poll(def.id);
-                slot.timer = this.timers.setInterval(
-                    () => void this.poll(def.id),
-                    def.pollMinutes * 60_000,
-                );
+                slot.nextTickAt = this.now() + every;
+                slot.timer = this.timers.setInterval(() => {
+                    slot.nextTickAt = this.now() + every;
+                    void this.poll(def.id);
+                }, every);
             }
         }
         this.log.info(
@@ -232,6 +236,7 @@ export class ConnectorRunner {
         for (const slot of this.slots.values()) {
             if (slot.timer) this.timers.clearInterval(slot.timer);
             slot.timer = undefined;
+            slot.nextTickAt = undefined;
             try {
                 slot.unsubscribe?.();
             } catch {
@@ -283,12 +288,8 @@ export class ConnectorRunner {
                 polling: slot.polling,
             };
             if (def.pollMinutes) view.pollMinutes = def.pollMinutes;
-            if (
-                slot.timer &&
-                status.lastPollAt !== undefined &&
-                def.pollMinutes
-            )
-                view.nextPollAt = status.lastPollAt + def.pollMinutes * 60_000;
+            if (slot.timer && slot.nextTickAt !== undefined)
+                view.nextPollAt = slot.nextTickAt;
             return view;
         });
     }

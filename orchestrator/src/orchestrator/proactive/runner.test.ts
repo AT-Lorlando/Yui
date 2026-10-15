@@ -257,6 +257,7 @@ async function statusTests(): Promise<void> {
             _status: { lastPollAt: 11, lastOkAt: 10, lastError: 'avant' },
         }),
     );
+    const intervals: Array<() => void> = [];
     const runner = new ConnectorRunner({
         connectors: [ctl, push, snap, both],
         isEnabled: () => true,
@@ -267,7 +268,10 @@ async function statusTests(): Promise<void> {
         now: () => clock,
         stateFile: (id) => (id === 'ctl' ? ctlFile : undefined),
         timers: {
-            setInterval: (() => 1) as any,
+            setInterval: ((fn: () => void) => {
+                intervals.push(fn);
+                return intervals.length as any;
+            }) as any,
             clearInterval: (() => {}) as any,
         },
         pollTimeoutMs: 50,
@@ -363,15 +367,74 @@ async function statusTests(): Promise<void> {
     await running;
     assert.strictEqual(runner.status()[0].polling, false);
 
-    // Timer en marche → prochaine relève annoncée.
+    // Timer en marche → prochaine relève annoncée, calée sur le tick.
     mode = 'ok';
     clock = NOW + 5000;
     runner.start();
     await sleep(5);
     st = runner.status();
     assert.strictEqual(st[0].nextPollAt, NOW + 5000 + 10 * 60_000);
+    // Relève manuelle à mi-intervalle : le timer ne bouge pas, l'annonce non plus.
+    clock = NOW + 5000 + 4 * 60_000;
+    await runner.pollNow('ctl');
+    assert.strictEqual(runner.status()[0].lastPollAt, clock);
+    assert.strictEqual(
+        runner.status()[0].nextPollAt,
+        NOW + 5000 + 10 * 60_000,
+        'pollNow ne décale pas le prochain tick',
+    );
+    // Le tick suivant réarme l'annonce.
+    clock = NOW + 5000 + 10 * 60_000;
+    intervals[0]();
+    await sleep(5);
+    assert.strictEqual(runner.status()[0].nextPollAt, NOW + 5000 + 20 * 60_000);
     runner.stop();
     assert.strictEqual(runner.status()[0].nextPollAt, undefined);
+
+    await subscribeTests();
+}
+
+/** Événements de `subscribe` dans `recent` ; un ingest qui rejette n'y laisse rien. */
+async function subscribeTests(): Promise<void> {
+    let emit: ((e: Event) => void) | undefined;
+    const warnings: string[] = [];
+    const sub: ConnectorDef = {
+        id: 'sub',
+        name: 'Sub',
+        description: '',
+        defaultEnabled: true,
+        subscribe(_ctx, cb) {
+            emit = cb;
+            return () => {};
+        },
+    };
+    const runner = new ConnectorRunner({
+        connectors: [sub],
+        isEnabled: () => true,
+        settings: () => ({}),
+        callTool: async () => null,
+        presence: () => 'home',
+        ingest: async (e) => {
+            if (e.key === 'boom') throw new Error('ingest kaboom');
+            return 'held';
+        },
+        now: () => NOW,
+        log: { info: () => {}, warn: (m: string) => void warnings.push(m) },
+    });
+    runner.start();
+    assert.ok(emit, 'subscribe branché');
+    emit!(ev('sub', 'arrived'));
+    await sleep(1);
+    assert.deepStrictEqual(runner.status()[0].recent, [
+        { key: 'arrived', subject: 'arrived', at: NOW, outcome: 'held' },
+    ]);
+    // Rejet : rien d'enregistré, un warning, pas d'unhandled rejection
+    // (process.on('unhandledRejection') en tête de fichier).
+    emit!(ev('sub', 'boom'));
+    await sleep(1);
+    assert.strictEqual(runner.status()[0].recent.length, 1);
+    assert.ok(warnings.some((w) => w.includes('sub') && w.includes('ingest')));
+    runner.stop();
 }
 
 run().catch((e) => {
