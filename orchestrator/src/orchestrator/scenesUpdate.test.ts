@@ -92,6 +92,14 @@ for (const bad of [
     { effects: [{ effectId: 'a', target: [] }] },
     { effects: [{ effectId: 'a', target: ['Salon', ''] }] },
     { effects: [{ effectId: 'a' }] },
+    { effects: [null] },
+    { effects: [42] },
+    {
+        effects: Array.from({ length: 21 }, () => ({
+            effectId: 'a',
+            target: 'S',
+        })),
+    },
     { effects: 'aurora' },
     'aurora',
 ]) {
@@ -114,6 +122,21 @@ assert.throws(
             floating: { effects: [] } as any,
         }),
     /floating/,
+);
+
+// Normalisation : champs en trop retirés, espaces ôtés
+updateScene(created.id, {
+    floating: {
+        effects: [{ effectId: ' aurora ', target: [' Salon '], foo: 1 }],
+    } as any,
+});
+assert.deepStrictEqual(getScene(created.id).floating, {
+    effects: [{ effectId: 'aurora', target: ['Salon'] }],
+});
+// Scène inconnue : null (404) même avec un floating invalide
+assert.strictEqual(
+    updateScene('inconnue', { floating: { effects: [] } as any }),
+    null,
 );
 
 fs.rmSync(tmp, { recursive: true, force: true });

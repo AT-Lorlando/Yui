@@ -4,10 +4,11 @@ import * as crypto from 'crypto';
 import Logger from '../logger';
 import { dataPath } from '@yui/shared';
 import type { PresenceState } from './presence';
-import type {
-    AnimationEffect,
-    FloatingConfig,
-    FloatingList,
+import {
+    isFloatingList,
+    type AnimationEffect,
+    type FloatingConfig,
+    type FloatingList,
 } from './animation/types';
 import { animationManager } from './animation/animationManager';
 import {
@@ -203,8 +204,11 @@ export function getScene(id: string): Scene | null {
  * `undefined` passent (effacer / ne pas toucher). Les formes historiques
  * (inline, `{ effectId, target }`) passent telles quelles ; une liste
  * `{ effects }` doit être non vide, chaque entrée avec un `effectId` et une
- * `target` (string ou tableau de strings) non vides.
+ * `target` (string ou tableau de strings) non vides, au plus
+ * `MAX_FLOATING_EFFECTS` entrées.
  */
+export const MAX_FLOATING_EFFECTS = 20;
+
 export function validateFloating(v: unknown): string | null {
     if (v === null || v === undefined) return null;
     if (typeof v !== 'object' || Array.isArray(v)) {
@@ -215,9 +219,15 @@ export function validateFloating(v: unknown): string | null {
     if (!Array.isArray(effects) || !effects.length) {
         return 'floating.effects doit être une liste non vide';
     }
+    if (effects.length > MAX_FLOATING_EFFECTS) {
+        return `floating.effects : ${MAX_FLOATING_EFFECTS} entrées au plus`;
+    }
     const nonEmpty = (x: unknown) => typeof x === 'string' && !!x.trim();
     for (const [i, e] of effects.entries()) {
-        const entry = (e ?? {}) as { effectId?: unknown; target?: unknown };
+        if (!e || typeof e !== 'object' || Array.isArray(e)) {
+            return `floating.effects[${i}] doit être un objet`;
+        }
+        const entry = e as { effectId?: unknown; target?: unknown };
         if (!nonEmpty(entry.effectId)) {
             return `floating.effects[${i}].effectId requis`;
         }
@@ -232,9 +242,27 @@ export function validateFloating(v: unknown): string | null {
     return null;
 }
 
+/**
+ * Pure : valide `floating` (throw si invalide) et, pour une liste, ne garde
+ * que `{ effectId, target }` nettoyés (champs en trop retirés, espaces de
+ * bord ôtés). Les autres formes passent telles quelles.
+ */
+export function normalizeFloating<T>(v: T): T {
+    const err = validateFloating(v);
+    if (err) throw new Error(err);
+    if (!isFloatingList(v)) return v;
+    return {
+        effects: v.effects.map((e) => ({
+            effectId: e.effectId.trim(),
+            target: Array.isArray(e.target)
+                ? e.target.map((t) => t.trim())
+                : e.target.trim(),
+        })),
+    } as T;
+}
+
 export function createScene(data: CreateSceneInput): Scene {
-    const floatingError = validateFloating(data.floating);
-    if (floatingError) throw new Error(floatingError);
+    data = { ...data, floating: normalizeFloating(data.floating) };
     // Un client peut envoyer null pour « pas d'effet » : on n'écrit pas la clé.
     const clean = Object.fromEntries(
         Object.entries(data).filter(([, v]) => v !== null && v !== undefined),
@@ -268,11 +296,13 @@ export function updateScene(
     id: string,
     input: Partial<CreateSceneInput>,
 ): Scene | null {
-    const floatingError = validateFloating(input.floating);
-    if (floatingError) throw new Error(floatingError);
     const scenes = loadScenes();
     const idx = scenes.findIndex((s) => s.id === id);
     if (idx === -1 || scenes[idx].builtIn) return null;
+    // Après le 404 : une scène inconnue reste « introuvable », pas « invalide ».
+    if (input.floating !== undefined) {
+        input = { ...input, floating: normalizeFloating(input.floating) };
+    }
     // Un PATCH partiel envoie undefined pour les champs absents : les fusionner
     // tels quels les effacerait (le spread écrase, puis JSON.stringify les
     // supprime du fichier). C'est ce qui cassait le toggle favori de l'app —
