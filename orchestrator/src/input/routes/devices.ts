@@ -1,12 +1,13 @@
 // Contrôle direct des appareils (bypasse le LLM) — monté sur /devices.
 import express from 'express';
 import { readAmpState } from '../../orchestrator/deviceConditions';
-import type { DeviceHandler } from '../InputSource';
+import type { DeviceHandler, ToolsHandler } from '../InputSource';
 import type { RequireAuth } from './helpers';
 
 export function deviceRoutes(
     requireAuth: RequireAuth,
     deviceHandler: DeviceHandler,
+    toolsHandler?: ToolsHandler,
 ): express.Router {
     const dev = express.Router();
     dev.use(requireAuth);
@@ -82,8 +83,11 @@ export function deviceRoutes(
                 ? { colorTemp: +req.body.colorTemp }
                 : {}),
             // Luminosité en direct pendant le glissement (16/10) : fondu court
-            ...(req.body?.transitionMs !== undefined
-                ? { transitionMs: +req.body.transitionMs }
+            // Valeur non numérique → omise (jamais de transitiontime(NaN)).
+            ...(Number.isFinite(Number(req.body?.transitionMs)) &&
+            req.body?.transitionMs !== null &&
+            req.body?.transitionMs !== ''
+                ? { transitionMs: Number(req.body.transitionMs) }
                 : {}),
         })),
     );
@@ -133,7 +137,20 @@ export function deviceRoutes(
             return;
         }
         try {
-            await deviceHandler('amp_set_state', { state });
+            // Avec le drapeau d'erreur du MCP (ampli non configuré…) : 502,
+            // comme /tools/:name — jamais un 200 trompeur.
+            if (toolsHandler) {
+                const { result, isError } = await toolsHandler.callWithStatus(
+                    'amp_set_state',
+                    { state },
+                );
+                if (isError) {
+                    res.status(502).json({ error: String(result) });
+                    return;
+                }
+            } else {
+                await deviceHandler('amp_set_state', { state });
+            }
             res.json({ state });
         } catch (e: any) {
             res.status(500).json({ error: e.message });

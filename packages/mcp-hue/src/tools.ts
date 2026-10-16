@@ -148,6 +148,8 @@ export function buildHueTools(
                 `(on/off, luminosité, couleur ou blanc). othersOff=true éteint toutes les ` +
                 `lampes non listées. Exemple « lampes TV en rouge/bleu, le reste éteint » : ` +
                 `states=[{target:"TV Droite",color:"#ff0000"},{target:"TV Gauche",color:"#0000ff"}], othersOff=true. ` +
+                `Les lampes partent en parallèle : des cibles qui se recouvrent (une pièce et une de ses lampes) ` +
+                `n'ont pas d'ordre garanti — préférer des cibles disjointes. ` +
                 `Pièces : ${roomList}. Lampes : ${lightList}.`,
             inputSchema: {
                 type: 'object' as const,

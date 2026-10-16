@@ -407,7 +407,10 @@ export class HttpSource implements InputSource {
 
         // ── Routers par domaine (routes/<domaine>.ts) ─────────────────────────
         if (deviceHandler) {
-            app.use('/devices', deviceRoutes(requireAuth, deviceHandler));
+            app.use(
+                '/devices',
+                deviceRoutes(requireAuth, deviceHandler, toolsHandler),
+            );
             app.use(
                 '/',
                 effectRoutes(requireAuth, deviceHandler, toolsHandler),

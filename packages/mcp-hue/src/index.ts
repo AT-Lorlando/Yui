@@ -33,7 +33,7 @@ import {
     resolveTargetIds,
     type BulkEntry,
 } from './bulkStates';
-import { BULK_DEFAULT_TRANSITION_MS, runBulkEntries } from './bulkRun';
+import { bulkTransitionMs, runBulkEntries } from './bulkRun';
 import { discoverLights } from './discovery';
 import { HueEventStream } from './HueEventStream';
 import type { LightStatePatch } from './stateEvents';
@@ -633,10 +633,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 // 2. Puis les cibles : Hue en parallèle, Govee ensuite en
                 //    séquence (bulkRun.ts). Transition commune par défaut pour
                 //    que les lampes montent ensemble.
-                const defaultTransition =
-                    (args as any).transitionMs !== undefined
-                        ? Number((args as any).transitionMs)
-                        : BULK_DEFAULT_TRANSITION_MS;
                 const lightsNow = store.getAll();
                 const results = await runBulkEntries(
                     entries,
@@ -662,7 +658,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 e.colorTemp !== undefined
                                     ? Number(e.colorTemp)
                                     : undefined,
-                            transitionMs: defaultTransition,
+                            transitionMs: bulkTransitionMs(
+                                (args as any).transitionMs,
+                                (e as any).transitionMs,
+                            ),
                         }),
                 );
                 if (othersOff) results.push('reste éteint');

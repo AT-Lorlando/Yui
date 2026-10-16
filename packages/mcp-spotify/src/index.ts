@@ -678,6 +678,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'amp_set_state': {
                 if (!amp)
                     return {
+                        isError: true,
                         content: [
                             {
                                 type: 'text',

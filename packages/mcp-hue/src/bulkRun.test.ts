@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { runBulkEntries } from './bulkRun';
+import { bulkTransitionMs, runBulkEntries } from './bulkRun';
 import type { BulkEntry } from './bulkStates';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -89,6 +89,43 @@ async function run() {
             'Hue 2 ok',
         ]);
     }
+
+    // Pool : 11 entrées → jamais plus de 6 écritures Hue en vol.
+    {
+        let inFlight = 0;
+        let peak = 0;
+        const entries: BulkEntry[] = Array.from({ length: 11 }, (_, k) => ({
+            target: `L${k}`,
+            on: true,
+        }));
+        const out = await runBulkEntries(
+            entries,
+            () => false,
+            async (e) => {
+                inFlight++;
+                peak = Math.max(peak, inFlight);
+                await sleep(10 + Math.random() * 10);
+                inFlight--;
+                return `${e.target} ok`;
+            },
+        );
+        assert.strictEqual(peak, 6, `peak in flight ${peak}`);
+        assert.deepStrictEqual(
+            out,
+            entries.map((e) => `${e.target} ok`),
+        );
+    }
+
+    // Transition : NaN / texte ignorés, repli sur l'action puis le défaut.
+    assert.strictEqual(bulkTransitionMs(undefined), 400);
+    assert.strictEqual(bulkTransitionMs('abc'), 400);
+    assert.strictEqual(bulkTransitionMs(NaN), 400);
+    assert.strictEqual(bulkTransitionMs(-5), 400);
+    assert.strictEqual(bulkTransitionMs('800'), 800);
+    assert.strictEqual(bulkTransitionMs(0), 0);
+    assert.strictEqual(bulkTransitionMs(800, 'oops'), 800);
+    assert.strictEqual(bulkTransitionMs('oops', 1200), 1200);
+    assert.strictEqual(bulkTransitionMs(undefined, Infinity), 400);
 
     console.log('All bulkRun tests passed');
 }
