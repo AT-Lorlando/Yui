@@ -73,4 +73,32 @@ export interface FloatingConfig {
     brightness?: number;
     /** Per-light overrides keyed by light name. */
     perLight?: Record<string, { palette?: string[]; speedSec?: number }>;
+    /**
+     * Overrides par CIBLE (pièce ou lampe), clé en minuscules — résolus en
+     * `perLight` au démarrage de la boucle (`applyPerTarget`) : lampe > pièce.
+     */
+    perTarget?: Record<string, { palette?: string[]; speedSec?: number }>;
+}
+
+/** Une affectation effet → cible dans une scène. */
+export interface FloatingAssignment {
+    effectId: string;
+    target: string | string[];
+}
+
+/**
+ * Dérive de scène multi-effets : chaque entrée applique un effet à sa cible,
+ * le tout fusionné en UNE boucle (une génération, un stop).
+ */
+export interface FloatingList {
+    effects: FloatingAssignment[];
+}
+
+export function isFloatingList(x: unknown): x is FloatingList {
+    return (
+        !!x &&
+        typeof x === 'object' &&
+        !Array.isArray(x) &&
+        Array.isArray((x as { effects?: unknown }).effects)
+    );
 }

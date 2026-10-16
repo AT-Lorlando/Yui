@@ -2,7 +2,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { dataPath } from '@yui/shared';
 import Logger from '../../logger';
-import type { AnimationEffect, FloatingConfig } from './types';
+import {
+    isFloatingList,
+    type AnimationEffect,
+    type FloatingAssignment,
+    type FloatingConfig,
+    type FloatingList,
+} from './types';
 
 /**
  * Bibliothèque d'effets lumineux — entités à part entière, créées et
@@ -223,11 +229,70 @@ export function resolveIntro(
     }));
 }
 
-/** floating de scène → config concrète (inline ou `{ effectId, target }`). */
+/**
+ * Pure : liste d'affectations effet → cible fusionnée en UNE config de boucle.
+ * Cible = union dédoublonnée (ordre d'apparition ; une seule cible reste une
+ * string) ; réglages globaux (palette, vitesse, stagger, jitter, luminosité)
+ * du PREMIER effet résolu ; `perTarget[cible en minuscules]` = palette et
+ * vitesse de son effet (une cible répétée : la dernière entrée gagne).
+ * Entrées sans effet `floating` à palette ignorées ; `null` si aucune reste.
+ */
+export function mergeFloatingEffects(
+    entries: FloatingAssignment[],
+    lookup: (id: string) => LightEffect | undefined,
+): FloatingConfig | null {
+    let first: LightEffect | null = null;
+    const targets: string[] = [];
+    const seen = new Set<string>();
+    const perTarget: NonNullable<FloatingConfig['perTarget']> = {};
+    for (const entry of entries ?? []) {
+        const effect = lookup(entry.effectId);
+        if (!effect || effect.kind !== 'floating' || !effect.palette) {
+            Logger.warn(`effects: floating "${entry.effectId}" introuvable`);
+            continue;
+        }
+        first ??= effect;
+        const list = (
+            Array.isArray(entry.target) ? entry.target : [entry.target]
+        )
+            .map((t) => String(t ?? '').trim())
+            .filter(Boolean);
+        for (const t of list) {
+            const key = t.toLowerCase();
+            if (!seen.has(key)) {
+                seen.add(key);
+                targets.push(t);
+            }
+            perTarget[key] = {
+                palette: effect.palette,
+                speedSec: effect.speedSec ?? 60,
+            };
+        }
+    }
+    if (!first || !targets.length) return null;
+    return {
+        engine: 'software',
+        target: targets.length === 1 ? targets[0] : targets,
+        palette: first.palette!,
+        speedSec: first.speedSec ?? 60,
+        staggerSec: first.staggerSec,
+        speedJitter: first.speedJitter,
+        brightness: first.brightness,
+        perTarget,
+    };
+}
+
+/**
+ * floating de scène → config concrète : inline, `{ effectId, target }` ou
+ * liste `{ effects: [{ effectId, target }] }` (fusionnée en une boucle).
+ */
 export function resolveFloating(
-    floating: FloatingConfig | FloatingRef | undefined,
+    floating: FloatingConfig | FloatingRef | FloatingList | undefined,
 ): FloatingConfig | null {
     if (!floating) return null;
+    if (isFloatingList(floating)) {
+        return mergeFloatingEffects(floating.effects, getEffect);
+    }
     if (!isRef(floating)) return floating as FloatingConfig;
     const effect = getEffect(floating.effectId);
     if (!effect || effect.kind !== 'floating' || !effect.palette) {

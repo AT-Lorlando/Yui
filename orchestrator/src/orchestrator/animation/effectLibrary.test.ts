@@ -11,7 +11,9 @@ import {
     deleteEffect,
     getEffect,
     listEffects,
+    mergeFloatingEffects,
     resolveFloating,
+    type LightEffect,
     resolveIntro,
     upsertEffect,
     validateEffect,
@@ -65,6 +67,91 @@ async function run(): Promise<void> {
     assert.strictEqual(resolveFloating(inline), inline);
     assert.strictEqual(
         resolveFloating({ effectId: 'inexistant', target: 'Salon' }),
+        null,
+    );
+
+    // mergeFloatingEffects : union des cibles, premier effet, perTarget
+    const lib: Record<string, LightEffect> = {
+        a: {
+            id: 'a',
+            name: 'A',
+            kind: 'floating',
+            palette: ['#aa0000', '#aa1111'],
+            speedSec: 30,
+            staggerSec: 4,
+            speedJitter: 0.2,
+            brightness: 50,
+            createdAt: 0,
+        },
+        b: {
+            id: 'b',
+            name: 'B',
+            kind: 'floating',
+            palette: ['#0000bb', '#1111bb'],
+            createdAt: 0,
+        },
+        i: { id: 'i', name: 'I', kind: 'intro', steps: [], createdAt: 0 },
+    };
+    const look = (id: string) => lib[id];
+    const merged = mergeFloatingEffects(
+        [
+            { effectId: 'a', target: 'Salon' },
+            { effectId: 'b', target: ['Lampe Sol', 'salon'] },
+            { effectId: 'b', target: 'Bureau' },
+        ],
+        look,
+    )!;
+    assert.deepStrictEqual(merged.target, ['Salon', 'Lampe Sol', 'Bureau']);
+    assert.deepStrictEqual(merged.palette, ['#aa0000', '#aa1111']);
+    assert.strictEqual(merged.speedSec, 30);
+    assert.strictEqual(merged.staggerSec, 4);
+    assert.strictEqual(merged.speedJitter, 0.2);
+    assert.strictEqual(merged.brightness, 50);
+    assert.strictEqual(merged.engine, 'software');
+    // Cible répétée : la dernière entrée gagne (salon → b)
+    assert.deepStrictEqual(merged.perTarget, {
+        salon: { palette: ['#0000bb', '#1111bb'], speedSec: 60 },
+        'lampe sol': { palette: ['#0000bb', '#1111bb'], speedSec: 60 },
+        bureau: { palette: ['#0000bb', '#1111bb'], speedSec: 60 },
+    });
+    // Effet manquant / intro ignorés ; une seule cible string reste string
+    const single = mergeFloatingEffects(
+        [
+            { effectId: 'zz', target: 'Cuisine' },
+            { effectId: 'i', target: 'Chambre' },
+            { effectId: 'b', target: 'Salon' },
+        ],
+        look,
+    )!;
+    assert.strictEqual(single.target, 'Salon');
+    assert.strictEqual(single.speedSec, 60);
+    assert.deepStrictEqual(single.perTarget, {
+        salon: { palette: ['#0000bb', '#1111bb'], speedSec: 60 },
+    });
+    assert.strictEqual(
+        mergeFloatingEffects([{ effectId: 'zz', target: 'X' }], look),
+        null,
+    );
+    assert.strictEqual(mergeFloatingEffects([], look), null);
+
+    // resolveFloating : liste → config fusionnée via la bibliothèque
+    const fromList = resolveFloating({
+        effects: [
+            { effectId: 'neon-rose', target: 'Salon' },
+            { effectId: 'aurora', target: 'Chambre' },
+        ],
+    });
+    assert.deepStrictEqual(fromList!.target, ['Salon', 'Chambre']);
+    assert.strictEqual(fromList!.speedSec, 45);
+    assert.deepStrictEqual(fromList!.perTarget!.chambre.palette, [
+        '#0b3d2e',
+        '#1b7f5c',
+        '#2ec4b6',
+        '#3a0ca3',
+        '#4361ee',
+    ]);
+    assert.strictEqual(
+        resolveFloating({ effects: [{ effectId: 'nope', target: 'X' }] }),
         null,
     );
 
