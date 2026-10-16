@@ -2,6 +2,7 @@
 import assert from 'assert';
 import {
     animationManager,
+    applyPerTarget,
     computeTickInterval,
     floatingFrameColors,
     shouldCancel,
@@ -74,6 +75,40 @@ async function run(): Promise<void> {
     const colors = floatingFrameColors(cfg, ['A', 'B'], 0);
     assert.ok(colors.A && colors.B);
     assert.notStrictEqual(colors.A.color, colors.B.color); // phase offset → different
+
+    // applyPerTarget : lampe > pièce > global ; perLight explicite gagne
+    const multi: FloatingConfig = {
+        engine: 'software',
+        target: ['Salon', 'Lampe Sol'],
+        palette: ['#000000', '#111111'],
+        speedSec: 30,
+        perTarget: {
+            salon: { palette: ['#aa0000', '#bb0000'], speedSec: 20 },
+            'lampe sol': { palette: ['#00aa00', '#00bb00'], speedSec: 40 },
+        },
+        perLight: { Plafond: { speedSec: 5 } },
+    };
+    const applied = applyPerTarget(multi, [
+        { name: 'Lampe Sol', room: 'Salon' },
+        { name: 'Plafond', room: 'Salon' },
+        { name: 'Bureau', room: 'Bureau' },
+    ]);
+    assert.deepStrictEqual(applied.perLight, {
+        'Lampe Sol': { palette: ['#00aa00', '#00bb00'], speedSec: 40 },
+        Plafond: { palette: ['#aa0000', '#bb0000'], speedSec: 5 },
+    });
+    assert.strictEqual(applied.palette, multi.palette, 'global inchangé');
+    assert.strictEqual(
+        multi.perLight!.Plafond.speedSec,
+        5,
+        'cfg source non muté',
+    );
+    const plain: FloatingConfig = { ...cfg };
+    assert.strictEqual(applyPerTarget(plain, [{ name: 'A' }]), plain);
+    // Bureau sans surcharge → couleurs globales ; Lampe Sol → sa palette
+    const frame = floatingFrameColors(applied, ['Lampe Sol', 'Bureau'], 0);
+    assert.strictEqual(frame['Lampe Sol'].color.toLowerCase(), '#00aa00');
+    assert.strictEqual(frame.Bureau.color.toLowerCase(), '#000000');
 
     // lifecycle: any light-affecting tool cancels an active loop
     assert.strictEqual(shouldCancel('set_lights'), true);

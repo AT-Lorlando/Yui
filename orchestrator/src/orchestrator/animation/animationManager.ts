@@ -233,6 +233,31 @@ export function floatingFrameColors(
     return out;
 }
 
+/**
+ * Pure : résout `cfg.perTarget` (clés pièce/lampe en minuscules) en
+ * `perLight` sur les lampes réellement ciblées — lampe > pièce > global.
+ * Un `perLight` explicite l'emporte champ par champ. Sans perTarget, `cfg`
+ * est rendu tel quel ; sinon une copie (jamais de mutation).
+ */
+export function applyPerTarget(
+    cfg: FloatingConfig,
+    matched: { name: string; room?: string }[],
+): FloatingConfig {
+    const per = cfg.perTarget;
+    if (!per || !Object.keys(per).length) return cfg;
+    const perLight: NonNullable<FloatingConfig['perLight']> = {
+        ...(cfg.perLight ?? {}),
+    };
+    for (const l of matched) {
+        const fromTarget =
+            per[l.name.toLowerCase()] ??
+            (l.room ? per[l.room.toLowerCase()] : undefined);
+        if (!fromTarget) continue;
+        perLight[l.name] = { ...fromTarget, ...(cfg.perLight?.[l.name] ?? {}) };
+    }
+    return { ...cfg, perLight };
+}
+
 interface ActiveFloating {
     kind: 'software' | 'native';
     /** Génération à laquelle la boucle appartient. */
@@ -521,6 +546,8 @@ class AnimationManager {
             ),
         );
         const names = matched.map((l) => l.name);
+        // Dérive multi-effets : surcharges par pièce/lampe → par lampe.
+        cfg = applyPerTarget(cfg, matched);
         const targetLabel = Array.isArray(cfg.target)
             ? cfg.target.join(', ')
             : cfg.target;
