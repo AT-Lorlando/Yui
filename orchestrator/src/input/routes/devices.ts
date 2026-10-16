@@ -81,6 +81,10 @@ export function deviceRoutes(
             ...(req.body?.colorTemp !== undefined
                 ? { colorTemp: +req.body.colorTemp }
                 : {}),
+            // Luminosité en direct pendant le glissement (16/10) : fondu court
+            ...(req.body?.transitionMs !== undefined
+                ? { transitionMs: +req.body.transitionMs }
+                : {}),
         })),
     );
     dev.post(
