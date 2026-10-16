@@ -27,7 +27,13 @@ import {
     goveeTargetsForRoom,
     goveeTargetsForAll,
 } from './goveeRouting';
-import { coveredIds, othersToTurnOff, type BulkEntry } from './bulkStates';
+import {
+    coveredIds,
+    othersToTurnOff,
+    resolveTargetIds,
+    type BulkEntry,
+} from './bulkStates';
+import { BULK_DEFAULT_TRANSITION_MS, runBulkEntries } from './bulkRun';
 import { discoverLights } from './discovery';
 import { HueEventStream } from './HueEventStream';
 import type { LightStatePatch } from './stateEvents';
@@ -624,11 +630,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     );
                 }
 
-                // 2. Puis chaque cible, dans l'ordre donné.
-                const results: string[] = [];
-                for (const e of entries) {
-                    results.push(
-                        await applyLightTarget(String(e.target), {
+                // 2. Puis les cibles : Hue en parallèle, Govee ensuite en
+                //    séquence (bulkRun.ts). Transition commune par défaut pour
+                //    que les lampes montent ensemble.
+                const defaultTransition =
+                    (args as any).transitionMs !== undefined
+                        ? Number((args as any).transitionMs)
+                        : BULK_DEFAULT_TRANSITION_MS;
+                const lightsNow = store.getAll();
+                const results = await runBulkEntries(
+                    entries,
+                    (e) => {
+                        const ids = resolveTargetIds(
+                            lightsNow,
+                            String(e.target),
+                        );
+                        return ids.length > 0 && ids.every((id) => isGovee(id));
+                    },
+                    (e) =>
+                        applyLightTarget(String(e.target), {
                             on: e.on,
                             brightness:
                                 e.brightness !== undefined
@@ -642,9 +662,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 e.colorTemp !== undefined
                                     ? Number(e.colorTemp)
                                     : undefined,
+                            transitionMs: defaultTransition,
                         }),
-                    );
-                }
+                );
                 if (othersOff) results.push('reste éteint');
                 return {
                     content: [{ type: 'text', text: results.join(' · ') }],

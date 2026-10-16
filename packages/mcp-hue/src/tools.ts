@@ -195,6 +195,15 @@ export function buildHueTools(
                         description:
                             'Éteint toutes les lampes qui ne sont pas listées dans states.',
                     },
+                    transitionMs: {
+                        type: 'number',
+                        title: 'Transition (ms)',
+                        minimum: 0,
+                        maximum: 10000,
+                        'x-unit': 'ms',
+                        description:
+                            'Durée du fondu commun à toutes les lampes (défaut 400 ms).',
+                    },
                 },
                 required: ['states'],
             },
