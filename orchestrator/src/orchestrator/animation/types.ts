@@ -72,12 +72,18 @@ export interface FloatingConfig {
     speedJitter?: number;
     brightness?: number;
     /** Per-light overrides keyed by light name. */
-    perLight?: Record<string, { palette?: string[]; speedSec?: number }>;
+    perLight?: Record<
+        string,
+        { palette?: string[]; speedSec?: number; brightness?: number }
+    >;
     /**
      * Overrides par CIBLE (pièce ou lampe), clé en minuscules — résolus en
      * `perLight` au démarrage de la boucle (`applyPerTarget`) : lampe > pièce.
      */
-    perTarget?: Record<string, { palette?: string[]; speedSec?: number }>;
+    perTarget?: Record<
+        string,
+        { palette?: string[]; speedSec?: number; brightness?: number }
+    >;
 }
 
 /** Une affectation effet → cible dans une scène. */

@@ -133,6 +133,19 @@ async function run(): Promise<void> {
         null,
     );
     assert.strictEqual(mergeFloatingEffects([], look), null);
+    // Entrées non-objet ignorées (corps de requête non fiable)
+    assert.strictEqual(mergeFloatingEffects([null, 42, {}] as any, look), null);
+    // Globaux du premier effet qui cible vraiment ; luminosité par cible
+    const firstReal = mergeFloatingEffects(
+        [
+            { effectId: 'b', target: '' },
+            { effectId: 'a', target: 'Salon' },
+        ],
+        look,
+    )!;
+    assert.strictEqual(firstReal.speedSec, 30);
+    assert.strictEqual(firstReal.brightness, 50);
+    assert.strictEqual(firstReal.perTarget!.salon.brightness, 50);
 
     // resolveFloating : liste → config fusionnée via la bibliothèque
     const fromList = resolveFloating({

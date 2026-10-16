@@ -15,6 +15,7 @@ import {
     resolveIntro,
     upsertEffect,
 } from '../../orchestrator/animation/effectLibrary';
+import { validateFloating } from '../../orchestrator/scenes';
 import type { DeviceHandler, ToolsHandler } from '../InputSource';
 import type { RequireAuth } from './helpers';
 
@@ -59,23 +60,22 @@ export function effectRoutes(
     // Aperçu d'une dérive multi-effets (liste effet → cible), fusionnée en
     // UNE boucle comme au lancement de la scène. Stop via /floating/stop.
     anim.post('/floating/preview', requireAuth, async (req: any, res: any) => {
-        const effects = req.body?.effects;
-        if (!Array.isArray(effects) || !effects.length) {
-            return res
-                .status(400)
-                .json({ error: 'effects : liste non vide requise' });
-        }
-        const cfg = mergeFloatingEffects(effects, getEffect);
-        if (!cfg) {
-            return res
-                .status(400)
-                .json({ error: 'Aucun effet de dérive résolu' });
-        }
+        // Tout dans le try : un handler async qui lève hors try n'est pas
+        // capté par Express 4 et ferait tomber le processus.
         try {
+            const effects = req.body?.effects;
+            const err = validateFloating({ effects });
+            if (err) return res.status(400).json({ error: err });
+            const cfg = mergeFloatingEffects(effects, getEffect);
+            if (!cfg) {
+                return res
+                    .status(400)
+                    .json({ error: 'Aucun effet de dérive résolu' });
+            }
             await animationManager.startFloating(cfg, animCall);
             res.json({ success: true });
         } catch (e: any) {
-            res.status(400).json({ error: e.message });
+            res.status(500).json({ error: e?.message ?? String(e) });
         }
     });
 

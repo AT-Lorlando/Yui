@@ -227,7 +227,7 @@ export function floatingFrameColors(
         const t = (phaseSec / speedSec) % 1;
         out[name] = {
             color: sampleGradient(palette, t),
-            brightness: cfg.brightness,
+            brightness: override?.brightness ?? cfg.brightness,
         };
     });
     return out;
@@ -249,9 +249,9 @@ export function applyPerTarget(
         ...(cfg.perLight ?? {}),
     };
     for (const l of matched) {
+        const room = (l.room ?? '').trim().toLowerCase();
         const fromTarget =
-            per[l.name.toLowerCase()] ??
-            (l.room ? per[l.room.toLowerCase()] : undefined);
+            per[l.name.trim().toLowerCase()] ?? (room ? per[room] : undefined);
         if (!fromTarget) continue;
         perLight[l.name] = { ...fromTarget, ...(cfg.perLight?.[l.name] ?? {}) };
     }

@@ -245,18 +245,30 @@ export function mergeFloatingEffects(
     const targets: string[] = [];
     const seen = new Set<string>();
     const perTarget: NonNullable<FloatingConfig['perTarget']> = {};
-    for (const entry of entries ?? []) {
-        const effect = lookup(entry.effectId);
-        if (!effect || effect.kind !== 'floating' || !effect.palette) {
-            Logger.warn(`effects: floating "${entry.effectId}" introuvable`);
+    for (const entry of Array.isArray(entries) ? entries : []) {
+        // Corps de requête non fiable : une entrée non-objet est ignorée.
+        if (!entry || typeof entry !== 'object') {
+            Logger.warn('effects: entrée de dérive invalide ignorée');
             continue;
         }
-        first ??= effect;
+        const effect =
+            typeof entry.effectId === 'string'
+                ? lookup(entry.effectId)
+                : undefined;
+        if (!effect || effect.kind !== 'floating' || !effect.palette) {
+            Logger.warn(
+                `effects: floating "${String(entry.effectId)}" introuvable`,
+            );
+            continue;
+        }
         const list = (
             Array.isArray(entry.target) ? entry.target : [entry.target]
         )
             .map((t) => String(t ?? '').trim())
             .filter(Boolean);
+        // Les globaux viennent du premier effet qui cible VRAIMENT quelque chose.
+        if (!list.length) continue;
+        first ??= effect;
         for (const t of list) {
             const key = t.toLowerCase();
             if (!seen.has(key)) {
@@ -266,6 +278,9 @@ export function mergeFloatingEffects(
             perTarget[key] = {
                 palette: effect.palette,
                 speedSec: effect.speedSec ?? 60,
+                ...(effect.brightness !== undefined
+                    ? { brightness: effect.brightness }
+                    : {}),
             };
         }
     }

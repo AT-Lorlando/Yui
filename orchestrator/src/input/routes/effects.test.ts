@@ -55,6 +55,11 @@ async function run(): Promise<void> {
         const empty = await post({ effects: [] });
         assert.strictEqual(empty.status, 400);
         assert.ok(((await empty.json()) as any).error);
+        for (const bad of [[null], [{}], [42], 'x']) {
+            const r = await post({ effects: bad });
+            assert.strictEqual(r.status, 400, JSON.stringify(bad));
+            assert.ok(((await r.json()) as any).error);
+        }
         const none = await post({
             effects: [{ effectId: 'inexistant', target: 'Salon' }],
         });

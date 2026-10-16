@@ -103,6 +103,21 @@ async function run(): Promise<void> {
         5,
         'cfg source non muté',
     );
+    // Clés de lampe/pièce comparées sans espaces de bord ; luminosité par lampe
+    const spaced = applyPerTarget(
+        {
+            ...cfg,
+            brightness: 80,
+            perTarget: {
+                chevet: { palette: ['#123456', '#123456'], brightness: 20 },
+            },
+        },
+        [{ name: ' Chevet ', room: 'Chambre' }],
+    );
+    assert.strictEqual(spaced.perLight![' Chevet '].brightness, 20);
+    const dim = floatingFrameColors(spaced, [' Chevet ', 'X'], 0);
+    assert.strictEqual(dim[' Chevet '].brightness, 20);
+    assert.strictEqual(dim.X.brightness, 80);
     const plain: FloatingConfig = { ...cfg };
     assert.strictEqual(applyPerTarget(plain, [{ name: 'A' }]), plain);
     // Bureau sans surcharge → couleurs globales ; Lampe Sol → sa palette
