@@ -121,6 +121,20 @@ export function deviceRoutes(
     dev.get('/amp', (_req: any, res: any) =>
         res.json({ state: readAmpState() }),
     );
+    // Corrige l'état mémorisé sans IR (ampli revenu éteint après une coupure).
+    dev.post('/amp/state', async (req: any, res: any) => {
+        const state = req.body?.state;
+        if (state !== 'on' && state !== 'off') {
+            res.status(400).json({ error: "state doit valoir 'on' ou 'off'" });
+            return;
+        }
+        try {
+            await deviceHandler('amp_set_state', { state });
+            res.json({ state });
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
 
     // ── TV (mcp-smartthings : WoL + SmartThings cloud) ────────────────
     dev.get('/tv', call('tv_get_status'));

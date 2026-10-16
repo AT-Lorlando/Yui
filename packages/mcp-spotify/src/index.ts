@@ -675,6 +675,40 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
 
+            case 'amp_set_state': {
+                if (!amp)
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: 'Amp not configured (BROADLINK_HOST missing).',
+                            },
+                        ],
+                    };
+                const wanted = (args as any)?.state;
+                if (wanted !== 'on' && wanted !== 'off')
+                    return {
+                        isError: true,
+                        content: [
+                            {
+                                type: 'text',
+                                text: "state doit valoir 'on' ou 'off'.",
+                            },
+                        ],
+                    };
+                const state = await amp.forceState(wanted);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `État de l'ampli noté : ${
+                                state === 'on' ? 'allumé' : 'éteint'
+                            }`,
+                        },
+                    ],
+                };
+            }
+
             case 'transfer_playback_to_speakers': {
                 const target =
                     ((args as any)?.speaker as string | undefined) ??

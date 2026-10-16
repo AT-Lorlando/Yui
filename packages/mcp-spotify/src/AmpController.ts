@@ -105,4 +105,17 @@ export class AmpController {
     turnOff(): Promise<void> {
         return this.run(() => this.setPower('off'));
     }
+
+    /**
+     * Corrige l'état mémorisé SANS envoyer d'IR (coupure de courant : l'ampli
+     * est revenu éteint alors que le fichier dit « on »). Passe par la même
+     * file que les toggles pour ne jamais s'intercaler avec l'un d'eux.
+     */
+    forceState(state: 'on' | 'off'): Promise<'on' | 'off'> {
+        return this.run(async () => {
+            writeState(state);
+            Logger.info(`Amp state forced to ${state} (no IR sent)`);
+            return state;
+        });
+    }
 }

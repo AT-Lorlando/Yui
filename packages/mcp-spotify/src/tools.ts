@@ -327,6 +327,24 @@ export const SPOTIFY_TOOLS = [
         inputSchema: { type: 'object' as const, properties: {}, required: [] },
     },
     {
+        name: 'amp_set_state',
+        description:
+            "Corrige l'état mémorisé de l'ampli sans envoyer de signal : à utiliser quand l'app et la réalité divergent (coupure de courant)",
+        inputSchema: {
+            type: 'object' as const,
+            'x-audience': ['app'],
+            properties: {
+                state: {
+                    type: 'string',
+                    enum: ['on', 'off'],
+                    title: 'État réel',
+                    description: "État réel de l'ampli",
+                },
+            },
+            required: ['state'],
+        },
+    },
+    {
         name: 'transfer_playback_to_speakers',
         description:
             'Transfère la lecture Spotify active (ex. depuis le téléphone) vers les enceintes du salon (WiiM). No-op si rien ne joue.',
