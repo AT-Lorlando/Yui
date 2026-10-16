@@ -8,7 +8,9 @@ import express from 'express';
 import { animationManager } from '../../orchestrator/animation/animationManager';
 import {
     deleteEffect,
+    getEffect,
     listEffects,
+    mergeFloatingEffects,
     resolveFloating,
     resolveIntro,
     upsertEffect,
@@ -48,6 +50,29 @@ export function effectRoutes(
     anim.post('/floating/start', requireAuth, async (req: any, res: any) => {
         try {
             await animationManager.startFloating(req.body?.floating, animCall);
+            res.json({ success: true });
+        } catch (e: any) {
+            res.status(400).json({ error: e.message });
+        }
+    });
+
+    // Aperçu d'une dérive multi-effets (liste effet → cible), fusionnée en
+    // UNE boucle comme au lancement de la scène. Stop via /floating/stop.
+    anim.post('/floating/preview', requireAuth, async (req: any, res: any) => {
+        const effects = req.body?.effects;
+        if (!Array.isArray(effects) || !effects.length) {
+            return res
+                .status(400)
+                .json({ error: 'effects : liste non vide requise' });
+        }
+        const cfg = mergeFloatingEffects(effects, getEffect);
+        if (!cfg) {
+            return res
+                .status(400)
+                .json({ error: 'Aucun effet de dérive résolu' });
+        }
+        try {
+            await animationManager.startFloating(cfg, animCall);
             res.json({ success: true });
         } catch (e: any) {
             res.status(400).json({ error: e.message });
