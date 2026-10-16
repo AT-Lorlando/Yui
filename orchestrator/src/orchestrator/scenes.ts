@@ -4,7 +4,11 @@ import * as crypto from 'crypto';
 import Logger from '../logger';
 import { dataPath } from '@yui/shared';
 import type { PresenceState } from './presence';
-import type { AnimationEffect, FloatingConfig } from './animation/types';
+import type {
+    AnimationEffect,
+    FloatingConfig,
+    FloatingList,
+} from './animation/types';
 import { animationManager } from './animation/animationManager';
 import {
     createStateReader,
@@ -144,9 +148,10 @@ export interface Scene {
     intro?: AnimationEffect[] | IntroRef;
     /**
      * Optional continuous floating-colour config started after the state —
-     * config inline (legacy) ou référence `{ effectId, target }`.
+     * config inline (legacy), référence `{ effectId, target }` ou liste
+     * `{ effects: [{ effectId, target }] }` (fusionnée en une seule boucle).
      */
-    floating?: FloatingConfig | FloatingRef;
+    floating?: FloatingConfig | FloatingRef | FloatingList;
 }
 
 export type CreateSceneInput = Omit<Scene, 'id' | 'createdAt' | 'builtIn'>;
@@ -193,7 +198,43 @@ export function getScene(id: string): Scene | null {
     return listScenes().find((s) => s.id === id) ?? null;
 }
 
+/**
+ * Pure : message d'erreur si `floating` est invalide, sinon null. `null` /
+ * `undefined` passent (effacer / ne pas toucher). Les formes historiques
+ * (inline, `{ effectId, target }`) passent telles quelles ; une liste
+ * `{ effects }` doit être non vide, chaque entrée avec un `effectId` et une
+ * `target` (string ou tableau de strings) non vides.
+ */
+export function validateFloating(v: unknown): string | null {
+    if (v === null || v === undefined) return null;
+    if (typeof v !== 'object' || Array.isArray(v)) {
+        return 'floating doit être un objet';
+    }
+    if (!('effects' in v)) return null;
+    const effects = (v as { effects: unknown }).effects;
+    if (!Array.isArray(effects) || !effects.length) {
+        return 'floating.effects doit être une liste non vide';
+    }
+    const nonEmpty = (x: unknown) => typeof x === 'string' && !!x.trim();
+    for (const [i, e] of effects.entries()) {
+        const entry = (e ?? {}) as { effectId?: unknown; target?: unknown };
+        if (!nonEmpty(entry.effectId)) {
+            return `floating.effects[${i}].effectId requis`;
+        }
+        const t = entry.target;
+        const ok = Array.isArray(t)
+            ? t.length > 0 && t.every(nonEmpty)
+            : nonEmpty(t);
+        if (!ok) {
+            return `floating.effects[${i}].target : pièce/lampe ou liste non vide requise`;
+        }
+    }
+    return null;
+}
+
 export function createScene(data: CreateSceneInput): Scene {
+    const floatingError = validateFloating(data.floating);
+    if (floatingError) throw new Error(floatingError);
     // Un client peut envoyer null pour « pas d'effet » : on n'écrit pas la clé.
     const clean = Object.fromEntries(
         Object.entries(data).filter(([, v]) => v !== null && v !== undefined),
@@ -227,6 +268,8 @@ export function updateScene(
     id: string,
     input: Partial<CreateSceneInput>,
 ): Scene | null {
+    const floatingError = validateFloating(input.floating);
+    if (floatingError) throw new Error(floatingError);
     const scenes = loadScenes();
     const idx = scenes.findIndex((s) => s.id === id);
     if (idx === -1 || scenes[idx].builtIn) return null;

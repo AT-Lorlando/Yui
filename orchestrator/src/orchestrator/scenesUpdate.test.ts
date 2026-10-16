@@ -9,7 +9,12 @@ process.env.YUI_DATA_DIR = tmp;
 
 // Import après la variable d'env : le chemin de scenes.json est résolu au chargement.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { createScene, updateScene, getScene } = require('./scenes');
+const {
+    createScene,
+    updateScene,
+    getScene,
+    validateFloating,
+} = require('./scenes');
 
 const created = createScene({
     name: 'Test',
@@ -53,6 +58,62 @@ assert.strictEqual(
     'floating' in getScene(created.id),
     false,
     'null efface la dérive',
+);
+
+// Dérive multi-effets : { effects: [{ effectId, target }] }
+const list = {
+    effects: [
+        { effectId: 'aurora', target: 'Salon' },
+        { effectId: 'braise', target: ['Lampe Sol', 'Bureau'] },
+    ],
+};
+updateScene(created.id, { floating: list });
+assert.deepStrictEqual(getScene(created.id).floating, list);
+const withList = createScene({
+    name: 'Multi',
+    icon: 'lucide:bolt',
+    color: '#000',
+    description: '',
+    setup: [],
+    state: [],
+    floating: list,
+});
+assert.deepStrictEqual(getScene(withList.id).floating, list);
+
+// Validation : liste vide / entrées invalides refusées, rien n'est écrit
+assert.strictEqual(validateFloating(list), null);
+assert.strictEqual(validateFloating({ effectId: 'f', target: 'Salon' }), null);
+assert.strictEqual(validateFloating(undefined), null);
+assert.strictEqual(validateFloating(null), null);
+for (const bad of [
+    { effects: [] },
+    { effects: [{ effectId: '', target: 'Salon' }] },
+    { effects: [{ effectId: 'a', target: '' }] },
+    { effects: [{ effectId: 'a', target: [] }] },
+    { effects: [{ effectId: 'a', target: ['Salon', ''] }] },
+    { effects: [{ effectId: 'a' }] },
+    { effects: 'aurora' },
+    'aurora',
+]) {
+    assert.ok(validateFloating(bad), `refusé : ${JSON.stringify(bad)}`);
+}
+assert.throws(
+    () => updateScene(created.id, { floating: { effects: [] } as any }),
+    /floating/,
+);
+assert.deepStrictEqual(getScene(created.id).floating, list, 'inchangé');
+assert.throws(
+    () =>
+        createScene({
+            name: 'Bad',
+            icon: 'x',
+            color: '#000',
+            description: '',
+            setup: [],
+            state: [],
+            floating: { effects: [] } as any,
+        }),
+    /floating/,
 );
 
 fs.rmSync(tmp, { recursive: true, force: true });
