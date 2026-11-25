@@ -22,6 +22,64 @@ export interface WiimStatus {
     artist?: string;
     /** Source décodée (spotify, bluetooth, tidal, dlna…) si connue. */
     source?: string;
+    /** Mode Linkplay brut (diagnostic : une source inconnue s'y lit). */
+    mode?: string;
+    album?: string;
+    /** Pochette (getMetaInfo), si l'enceinte la connaît. */
+    art?: string;
+    /**
+     * Qui pilote la lecture : `spotify` (Spotify Connect — l'API Spotify voit
+     * tout), `wiim` (cast, AirPlay, Bluetooth… — seule l'enceinte sait),
+     * `idle` (rien en cours).
+     */
+    controller: 'spotify' | 'wiim' | 'idle';
+}
+
+/** Mode Linkplay de Spotify Connect. */
+export const SPOTIFY_MODE = '31';
+
+/**
+ * Pur : qui pilote. Spotify Connect → l'API Spotify (synchro garantie) ;
+ * toute autre source en lecture ou en pause → l'enceinte ; sinon rien.
+ */
+export function controllerFor(
+    mode: string | undefined,
+    status: string,
+): WiimStatus['controller'] {
+    if (mode === SPOTIFY_MODE) return 'spotify';
+    if (status === 'play' || status === 'pause' || status === 'load') {
+        return mode && mode !== '0' ? 'wiim' : 'idle';
+    }
+    return 'idle';
+}
+
+/** Pur : getPlayerStatus (+ getMetaInfo facultatif) → WiimStatus. */
+export function parseStatus(raw: any, meta?: any): WiimStatus {
+    const status = String(raw?.status ?? 'none');
+    const mode = raw?.mode !== undefined ? String(raw.mode) : undefined;
+    const m = meta?.metaData ?? {};
+    const clean = (v: unknown) => {
+        const t = typeof v === 'string' ? v.trim() : '';
+        return t &&
+            t.toLowerCase() !== 'unknow' &&
+            t.toLowerCase() !== 'unknown'
+            ? t
+            : undefined;
+    };
+    const art = clean(m.albumArtURI);
+    return {
+        status,
+        playing: status === 'play',
+        volume: Number(raw?.vol ?? 0),
+        muted: raw?.mute === '1',
+        title: decodeHexMeta(raw?.Title) ?? clean(m.title),
+        artist: decodeHexMeta(raw?.Artist) ?? clean(m.artist),
+        album: decodeHexMeta(raw?.Album) ?? clean(m.album),
+        ...(art && /^https?:\/\//.test(art) ? { art } : {}),
+        source: mode ? MODES[mode] : undefined,
+        mode,
+        controller: controllerFor(mode, status),
+    };
 }
 
 /** Les métadonnées Linkplay sont hex-encodées ("556E..." → "Un…"). */
@@ -50,6 +108,10 @@ const MODES: Record<string, string> = {
     '10': 'réseau',
     '1': 'airplay',
     '2': 'dlna',
+    '36': 'qobuz',
+    '49': 'hdmi',
+    '51': 'usb',
+    '99': 'multiroom',
 };
 
 export class WiimClient {
@@ -79,15 +141,17 @@ export class WiimClient {
 
     async getStatus(): Promise<WiimStatus> {
         const raw = JSON.parse(await this.request('getPlayerStatus'));
-        return {
-            status: raw.status ?? 'none',
-            playing: raw.status === 'play',
-            volume: Number(raw.vol ?? 0),
-            muted: raw.mute === '1',
-            title: decodeHexMeta(raw.Title),
-            artist: decodeHexMeta(raw.Artist),
-            source: MODES[String(raw.mode)] ?? undefined,
-        };
+        // Métadonnées complètes (pochette, et titre quand getPlayerStatus
+        // n'en a pas — fréquent en cast) : best-effort, jamais bloquant.
+        let meta: any;
+        if (raw?.status === 'play' || raw?.status === 'pause') {
+            try {
+                meta = JSON.parse(await this.request('getMetaInfo'));
+            } catch {
+                meta = undefined;
+            }
+        }
+        return parseStatus(raw, meta);
     }
 
     async setVolume(percent: number): Promise<void> {
