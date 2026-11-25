@@ -13,7 +13,7 @@ import { EntityStore } from '@yui/shared';
 import type { DoorEntity } from '@yui/shared';
 import NukiController from './NukiController';
 import { buildNukiTools } from './tools';
-import { discoverDoors } from './discovery';
+import { discoverDoors, refreshDoorStates } from './discovery';
 import Logger from './logger';
 
 const nuki = new NukiController();
@@ -49,9 +49,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'list_doors': {
+                await refreshDoorStates(nuki, store);
                 const doors = store.getAll();
                 return {
-                    content: [{ type: 'text', text: JSON.stringify(doors, null, 2) }],
+                    content: [
+                        { type: 'text', text: JSON.stringify(doors, null, 2) },
+                    ],
                 };
             }
 
@@ -76,8 +79,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
     } catch (error) {
         if (error instanceof McpError) throw error;
-        const message =
-            error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         Logger.error(`Tool ${name} failed: ${message}`);
         return {
             content: [{ type: 'text', text: `Error: ${message}` }],
