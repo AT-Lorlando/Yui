@@ -13,13 +13,7 @@
 // (POLL_TIMEOUT_MS) : attendu ici, son dépassement jetterait les avis déjà
 // vidés. Conséquence assumée : les avis d'un scan sortent au poll SUIVANT
 // (la sortie immédiate, elle, part déjà de notifyMail).
-import {
-    SUBJECT_MAX,
-    TODO_TITLE_MAX,
-    TODO_DESCRIPTION_MAX,
-    FACTS_MAX_LINES,
-    FACT_MAX_CHARS,
-} from '../events';
+import { SUBJECT_MAX, FACTS_MAX_LINES, FACT_MAX_CHARS } from '../events';
 import type { Event, Fact } from '../events';
 import type { ConnectorDef } from '../connector';
 import Logger from '../../../logger';
@@ -134,18 +128,6 @@ export function mailConnector(services: MailConnectorServices): ConnectorDef {
                     facts: clipFacts(facts),
                     at: now,
                     ttlMs: NOTIFY_TTL_MS,
-                    // L'id Gmail dans la description permet de retrouver le
-                    // mail depuis le post-it Yoji.
-                    todo: {
-                        title: oneLine(`Répondre : ${n.subject}`).slice(
-                            0,
-                            TODO_TITLE_MAX,
-                        ),
-                        description: (
-                            `De ${n.from} — gmail:${n.mailId}` +
-                            (n.item.reason ? ` — ${n.item.reason}` : '')
-                        ).slice(0, TODO_DESCRIPTION_MAX),
-                    },
                 });
             }
 

@@ -157,11 +157,7 @@ async function run(): Promise<void> {
     ]);
     assert.strictEqual(e1.at, NOW);
     assert.strictEqual(e1.ttlMs, 7 * DAY);
-    assert.deepStrictEqual(e1.todo, {
-        title: 'Répondre : Devis m1',
-        description:
-            'De Michel Dupont <michel@exemple.fr> — gmail:m1 — Michel répond à ta demande de devis',
-    });
+    assert.strictEqual(e1.todo, undefined, 'plus de post-it pour un mail');
     assert.ok(
         !e1.facts.some((f) => f.includes('plafonnée')),
         'pas de mention de plafond sans plafond',
@@ -170,7 +166,6 @@ async function run(): Promise<void> {
         evs[2]!.facts.includes("Notification plafonnée pour aujourd'hui"),
         'mail non poussé (plafond) : événement émis avec le fait',
     );
-    assert.ok(evs[2]!.todo, 'le post-it reste posé');
 
     // Sujet borné à SUBJECT_MAX, une ligne.
     notified = [
@@ -182,7 +177,6 @@ async function run(): Promise<void> {
     const long = (await c.events!(ctx))[0]!;
     assert.ok(long.subject.length <= 200);
     assert.ok(!long.subject.includes('\n'));
-    assert.ok(long.todo!.title.length <= 120);
 
     // ── facts → événement info retenu ────────────────────────────────────
     factsQ = [
