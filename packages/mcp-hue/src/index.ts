@@ -38,12 +38,18 @@ import { discoverLights } from './discovery';
 import { HueEventStream } from './HueEventStream';
 import type { LightStatePatch } from './stateEvents';
 import { patchForWrite } from './storePatch';
+import { RoomDimmer, isPureDimming } from './roomDimming';
 import { colourStatePatch } from './colour';
 import Logger from './logger';
 
 let hue: HueController;
 let HUE_TOOLS = buildHueTools([]);
 const store = new EntityStore<LightEntity>('mcp-hue');
+// Gradateur v2 : luminosité seule d'une pièce allumée, sans toucher aux couleurs.
+const dimmer =
+    process.env.HUE_BRIDGE_IP && process.env.HUE_USERNAME
+        ? new RoomDimmer(process.env.HUE_BRIDGE_IP, process.env.HUE_USERNAME)
+        : null;
 
 // Govee LAN devices indexed by their synthetic id ("g:1", "g:2", …)
 const goveeById = new Map<string, GoveeClient>();
@@ -376,7 +382,31 @@ async function applyLightTarget(
 
     // Try room first
     try {
-        const msg = await hue.setRoomLights(target, {
+        let msg: string | null = null;
+        const group = hue.getRoomGroup(target);
+        const roomIds = hue.getRoomLightIds(target) ?? [];
+        if (
+            dimmer &&
+            group &&
+            isPureDimming(
+                opts,
+                roomIds.map(
+                    (id) => (store.getById(id) as any)?.state?.on === true,
+                ),
+            )
+        ) {
+            try {
+                await dimmer.dim(group.id, brightness!, transitionMs);
+                msg = `${group.name} : luminosité ${brightness}%`;
+            } catch (e) {
+                Logger.warn(
+                    `[hue] gradateur v2 indisponible (${
+                        (e as Error).message
+                    }) — repli v1`,
+                );
+            }
+        }
+        msg ??= await hue.setRoomLights(target, {
             on,
             brightness,
             brightnessDelta,

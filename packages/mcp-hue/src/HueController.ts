@@ -69,6 +69,12 @@ export default class HueController {
         return this.findGroup(roomName)?.lightIds ?? null;
     }
 
+    /** Groupe v1 (id + nom canonique) d'une pièce, ou null. */
+    public getRoomGroup(roomName: string): { id: number; name: string } | null {
+        const g = this.findGroup(roomName);
+        return g ? { id: g.id, name: g.name } : null;
+    }
+
     // ── Colour helpers ─────────────────────────────────────────────────────────
 
     private hexToHueSat(hex: string): { hue: number; sat: number } {
