@@ -16,6 +16,7 @@ export interface AgendaEvent {
     description: string | null; // note/description de l'event (contexte pour le LLM)
     durationMin: number | null; // durée en minutes (events horaires), sinon null
     attendees: string[];
+    calendar?: string | null; // nom de l'agenda Google (Famille, Calendrier…)
 }
 
 /** Nombre de jours (inclus) entre deux dates YYYY-MM-DD ; >= 1. */
@@ -410,7 +411,7 @@ export function eventsHash(events: AgendaEvent[]): string {
 
 // ── Récupération des événements ────────────────────────────────────────────────
 
-type CallTool = (
+export type CallTool = (
     name: string,
     args?: Record<string, unknown>,
 ) => Promise<unknown>;
@@ -420,7 +421,7 @@ type CallTool = (
 export const HORIZON_DAYS = 60;
 export const FETCH_MAX_RESULTS = 100;
 
-function ymd(d: Date): string {
+export function ymd(d: Date): string {
     return d.toISOString().slice(0, 10);
 }
 
@@ -471,6 +472,7 @@ export async function fetchAgendaEvents(
                           )
                           .filter(Boolean)
                     : [],
+                calendar: strOrNull(ev.calendar),
             });
         }
     }

@@ -25,6 +25,7 @@ const REGISTRY: Record<string, DataCategory> = {
     'automations.json': 'config',
     'effects.json': 'config',
     'palettes.json': 'config',
+    'schedule.json': 'config',
     'irrigation.json': 'config',
     'hue-remotes.json': 'config',
     'proactive.json': 'config',
