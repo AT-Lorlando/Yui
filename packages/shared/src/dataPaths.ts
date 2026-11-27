@@ -27,6 +27,7 @@ const REGISTRY: Record<string, DataCategory> = {
     'palettes.json': 'config',
     'schedule.json': 'config',
     'wakeups.json': 'config',
+    'calendar-rules.json': 'config',
     'irrigation.json': 'config',
     'hue-remotes.json': 'config',
     'proactive.json': 'config',
@@ -68,6 +69,8 @@ const REGISTRY: Record<string, DataCategory> = {
     'schedules.json': 'state',
     'phone-alarm.json': 'state',
     'wakeup-runs.json': 'state',
+    'calendar-rules-sync.json': 'state',
+    'instance-id.json': 'state',
     'atv-cert.pem': 'state',
     'atv-key.pem': 'state',
 };

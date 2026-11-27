@@ -23,6 +23,8 @@ export interface AgendaSnapshotEntry {
     location: string | null;
     /** Occurrences du même titre dans l'instantané — ≥ 2 = récurrent. */
     seenTitleCount: number;
+    /** Posé par une règle Yui (`yuiRule`) : jamais annoncé. */
+    rule?: true;
 }
 
 export type AgendaSnapshot = Record<string, AgendaSnapshotEntry>;
@@ -131,6 +133,7 @@ function toSnapshot(events: AgendaEvent[]): AgendaSnapshot {
             location: ev.location,
             seenTitleCount: counts.get(titleKey(ev.title)) ?? 1,
         };
+        if (ev.ruleId) out[ev.id].rule = true;
     }
     return out;
 }
@@ -181,6 +184,8 @@ function changeEvent(
  *   l'instantané est conservé, sinon tout l'agenda passerait pour annulé.
  * - Seuls les événements à plus de 24 h comptent, pour les trois natures.
  * - « Nouveau » exclut les titres déjà vus ≥ 2 fois (réunions récurrentes).
+ * - Les événements posés par une règle Yui (`ruleId`) restent dans
+ *   l'instantané mais ne sont jamais annoncés.
  * - La lecture est une fenêtre glissante (aujourd'hui → +HORIZON_DAYS,
  *   FETCH_MAX_RESULTS au plus) : un id inconnu au bord lointain de la
  *   fenêtre est un événement ancien qui vient d'y entrer, pas un ajout — il
@@ -226,6 +231,8 @@ export function diffAgenda(
 
     const events: Event[] = [];
     for (const ev of next) {
+        // Événement posé par une règle Yui : Yui ne s'annonce pas ses œuvres.
+        if (ev.ruleId || prev[ev.id]?.rule) continue;
         if (!isFar(ev)) continue;
         const entry = snapshot[ev.id]!;
         const old = prev[ev.id];
@@ -242,7 +249,7 @@ export function diffAgenda(
         for (const id of prevIds) {
             if (snapshot[id]) continue;
             const old = prev[id]!;
-            if (!isFar(old)) continue;
+            if (old.rule || !isFar(old)) continue;
             events.push(changeEvent(id, 'cancelled', old, now));
         }
     }

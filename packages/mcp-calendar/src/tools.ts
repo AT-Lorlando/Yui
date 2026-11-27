@@ -2,7 +2,7 @@ export const CALENDAR_TOOLS = [
     {
         name: 'list_calendars',
         description:
-            "List all Google Calendar calendars available to the user, with their ID, name, and access role. Use this when the user asks what calendars they have, or when you need a calendar ID for another tool.",
+            'List all Google Calendar calendars available to the user, with their ID, name, and access role. Use this when the user asks what calendars they have, or when you need a calendar ID for another tool.',
         inputSchema: {
             type: 'object' as const,
             properties: {},
@@ -22,7 +22,7 @@ export const CALENDAR_TOOLS = [
     {
         name: 'get_week',
         description:
-            "Get all events for the current week (Monday to Sunday) across every calendar. Use this for weekly planning questions.",
+            'Get all events for the current week (Monday to Sunday) across every calendar. Use this for weekly planning questions.',
         inputSchema: {
             type: 'object' as const,
             properties: {},
@@ -32,7 +32,7 @@ export const CALENDAR_TOOLS = [
     {
         name: 'get_schedule',
         description:
-            "Get events for a specific date or date range across all (or specific) calendars. Results are grouped by day with full event details. Use this for any date-range query not covered by get_today or get_week.",
+            'Get events for a specific date or date range across all (or specific) calendars. Results are grouped by day with full event details. Use this for any date-range query not covered by get_today or get_week.',
         inputSchema: {
             type: 'object' as const,
             properties: {
@@ -62,17 +62,19 @@ export const CALENDAR_TOOLS = [
     {
         name: 'get_event',
         description:
-            "Get full details for a specific event by its ID — title, time, location, attendees with RSVP status, Google Meet link, description, recurrence info.",
+            'Get full details for a specific event by its ID — title, time, location, attendees with RSVP status, Google Meet link, description, recurrence info.',
         inputSchema: {
             type: 'object' as const,
             properties: {
                 calendarId: {
                     type: 'string',
-                    description: 'Calendar ID. Use "primary" for the main calendar.',
+                    description:
+                        'Calendar ID. Use "primary" for the main calendar.',
                 },
                 eventId: {
                     type: 'string',
-                    description: 'Event ID (from list_calendars or get_schedule output).',
+                    description:
+                        'Event ID (from list_calendars or get_schedule output).',
                 },
             },
             required: ['calendarId', 'eventId'],
@@ -81,7 +83,7 @@ export const CALENDAR_TOOLS = [
     {
         name: 'create_event',
         description:
-            "Create a new calendar event. Supports timed events, all-day events, recurring events (RRULE), and inviting attendees (invitation emails are sent automatically).",
+            'Create a new calendar event. Supports timed events, all-day events, recurring events (RRULE), and inviting attendees (invitation emails are sent automatically).',
         inputSchema: {
             type: 'object' as const,
             properties: {
@@ -131,6 +133,12 @@ export const CALENDAR_TOOLS = [
                     description:
                         'RFC 5545 RRULE for recurring events. Examples: "RRULE:FREQ=WEEKLY" (weekly), "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR" (MWF), "RRULE:FREQ=MONTHLY;BYDAY=1MO" (first Monday of month).',
                 },
+                privateProperties: {
+                    type: 'object',
+                    additionalProperties: { type: 'string' },
+                    description:
+                        'Private extended properties (string map) stored on the event.',
+                },
             },
             required: ['title'],
         },
@@ -138,7 +146,7 @@ export const CALENDAR_TOOLS = [
     {
         name: 'update_event',
         description:
-            "Update an existing event. Only provide the fields you want to change — all others are kept as-is.",
+            'Update an existing event. Only provide the fields you want to change — all others are kept as-is.',
         inputSchema: {
             type: 'object' as const,
             properties: {
@@ -172,16 +180,43 @@ export const CALENDAR_TOOLS = [
                 attendeeEmails: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'New attendee list — replaces the existing one.',
+                    description:
+                        'New attendee list — replaces the existing one.',
+                },
+                privateProperties: {
+                    type: 'object',
+                    additionalProperties: { type: 'string' },
+                    description:
+                        'Private extended properties (string map) stored on the event (merged into the existing ones).',
                 },
             },
             required: ['eventId'],
         },
     },
     {
+        name: 'list_tagged_events',
+        description:
+            "List events tagged with a private yuiRule property (materialised agenda rules) between two dates, across writable calendars (hidden ones included). Returns {events, primaryId, scanned}: the primary calendar's events carry calendarId 'primary', primaryId is its real id, scanned lists the calendars read; each event carries yuiInstance (null if absent). Fails if any calendar cannot be read.",
+        inputSchema: {
+            type: 'object' as const,
+            'x-audience': ['app'],
+            properties: {
+                startDate: {
+                    type: 'string',
+                    description: 'Start date (YYYY-MM-DD).',
+                },
+                endDate: {
+                    type: 'string',
+                    description: 'End date (YYYY-MM-DD), inclusive.',
+                },
+            },
+            required: ['startDate', 'endDate'],
+        },
+    },
+    {
         name: 'delete_event',
         description:
-            "Delete a calendar event. Cancellation emails are automatically sent to attendees.",
+            'Delete a calendar event. Cancellation emails are automatically sent to attendees.',
         inputSchema: {
             type: 'object' as const,
             properties: {
@@ -200,7 +235,7 @@ export const CALENDAR_TOOLS = [
     {
         name: 'search_events',
         description:
-            "Full-text search for events by title, description, location, or attendee name/email. Searches upcoming events by default. Omit calendarId to search all calendars.",
+            'Full-text search for events by title, description, location, or attendee name/email. Searches upcoming events by default. Omit calendarId to search all calendars.',
         inputSchema: {
             type: 'object' as const,
             properties: {
@@ -224,7 +259,7 @@ export const CALENDAR_TOOLS = [
     {
         name: 'find_free_slots',
         description:
-            "Find available time slots in a day — useful for scheduling a meeting. Uses the Google Calendar freebusy API to check all calendars at once.",
+            'Find available time slots in a day — useful for scheduling a meeting. Uses the Google Calendar freebusy API to check all calendars at once.',
         inputSchema: {
             type: 'object' as const,
             properties: {

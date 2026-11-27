@@ -25,6 +25,7 @@ import { deviceRoutes } from './routes/devices';
 import { sceneRoutes } from './routes/scenes';
 import { effectRoutes } from './routes/effects';
 import { paletteRoutes } from './routes/palettes';
+import { calendarRoutes } from './routes/calendar';
 import { scheduleRoutes } from './routes/schedule';
 import { wakeupRoutes } from './routes/wakeups';
 import { notifyRoutes } from './routes/notify';
@@ -420,6 +421,7 @@ export class HttpSource implements InputSource {
         }
         app.use('/', paletteRoutes(requireAuth));
         app.use('/', scheduleRoutes(requireAuth, toolsHandler));
+        app.use('/', calendarRoutes(requireAuth, toolsHandler));
         app.use('/', wakeupRoutes(requireAuth));
         app.use('/', musicRoutes(requireAuth));
         app.use('/', notifyRoutes(requireAuth));

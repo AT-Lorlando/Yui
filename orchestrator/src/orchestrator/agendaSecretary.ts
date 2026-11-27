@@ -18,6 +18,8 @@ export interface AgendaEvent {
     attendees: string[];
     calendar?: string | null; // nom de l'agenda Google (Famille, Calendrier…)
     meetLink?: string | null; // lien de visio (Google Meet…) si l'event en porte un
+    calendarId?: string | null; // id Google de l'agenda
+    ruleId?: string | null; // règle Yui qui a créé l'event (yui_rule)
 }
 
 /** Nombre de jours (inclus) entre deux dates YYYY-MM-DD ; >= 1. */
@@ -449,6 +451,39 @@ function isObj(v: unknown): v is Record<string, unknown> {
     return typeof v === 'object' && v !== null;
 }
 
+/** Normalise un événement `get_schedule` ; null si annulé. */
+export function toAgendaEvent(
+    ev: Record<string, unknown>,
+    dayDate: string,
+): AgendaEvent | null {
+    if (ev.cancelled === true) return null;
+    return {
+        id: str(ev.id) || `${dayDate}-${str(ev.title)}`,
+        title: str(ev.title) || '(Sans titre)',
+        date: str(ev.date) || dayDate,
+        endDate: strOrNull(ev.end_date),
+        start: typeof ev.start === 'string' ? ev.start : null,
+        allDay: ev.all_day === true,
+        location: strOrNull(ev.location),
+        description: strOrNull(ev.note),
+        durationMin:
+            typeof ev.duration_min === 'number' ? ev.duration_min : null,
+        attendees: Array.isArray(ev.attendees)
+            ? (ev.attendees as unknown[])
+                  .map((a) =>
+                      isObj(a)
+                          ? str((a as Record<string, unknown>).name)
+                          : str(a),
+                  )
+                  .filter(Boolean)
+            : [],
+        calendar: strOrNull(ev.calendar),
+        meetLink: strOrNull(ev.meet_link),
+        calendarId: strOrNull(ev.calendar_id),
+        ruleId: strOrNull(ev.yui_rule),
+    };
+}
+
 /** Récupère et normalise les événements aujourd'hui → +60 j via get_schedule. */
 export async function fetchAgendaEvents(
     callTool: CallTool,
@@ -469,32 +504,8 @@ export async function fetchAgendaEvents(
     for (const day of res.days as Array<Record<string, unknown>>) {
         const events = Array.isArray(day.events) ? day.events : [];
         for (const ev of events as Array<Record<string, unknown>>) {
-            if (ev.cancelled === true) continue;
-            out.push({
-                id: str(ev.id) || `${str(day.date)}-${str(ev.title)}`,
-                title: str(ev.title) || '(Sans titre)',
-                date: str(ev.date) || str(day.date),
-                endDate: strOrNull(ev.end_date),
-                start: typeof ev.start === 'string' ? ev.start : null,
-                allDay: ev.all_day === true,
-                location: strOrNull(ev.location),
-                description: strOrNull(ev.note),
-                durationMin:
-                    typeof ev.duration_min === 'number'
-                        ? ev.duration_min
-                        : null,
-                attendees: Array.isArray(ev.attendees)
-                    ? (ev.attendees as unknown[])
-                          .map((a) =>
-                              isObj(a)
-                                  ? str((a as Record<string, unknown>).name)
-                                  : str(a),
-                          )
-                          .filter(Boolean)
-                    : [],
-                calendar: strOrNull(ev.calendar),
-                meetLink: strOrNull(ev.meet_link),
-            });
+            const e = toAgendaEvent(ev, str(day.date));
+            if (e) out.push(e);
         }
     }
     return out;

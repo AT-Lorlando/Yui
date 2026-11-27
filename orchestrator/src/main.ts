@@ -29,6 +29,11 @@ import { PresenceManager, getHomeCoords } from './orchestrator/presence';
 import { markWakeHandled } from './orchestrator/proactive/moments';
 import { WakeupRunner, setWakeupRunner } from './orchestrator/wakeups/runner';
 import {
+    CalendarRulesSync,
+    setCalendarRulesSync,
+} from './orchestrator/calendarRules/sync';
+import { toolsCallTool } from './input/routes/schedule';
+import {
     loadPresenceConfig,
     savePresenceConfig,
 } from './orchestrator/presenceConfig';
@@ -344,11 +349,19 @@ async function main() {
     wakeups.start();
     setWakeupRunner(wakeups);
 
+    // Règles d'agenda : matérialisées dans Google Calendar (démarrage, 04:00, à chaque modif)
+    const calendarRules = new CalendarRulesSync({
+        callTool: toolsCallTool(toolsHandler),
+    });
+    calendarRules.start();
+    setCalendarRulesSync(calendarRules);
+
     const shutdown = async (signal: string) => {
         Logger.info(`Received ${signal}, shutting down…`);
         presence.stop();
         presenceRules.stop();
         wakeups.stop();
+        calendarRules.stop();
         proactive.stop();
         hueRemotes.stop();
         for (const source of sources) {

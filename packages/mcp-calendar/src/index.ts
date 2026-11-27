@@ -74,6 +74,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     description: a.description as string | undefined,
                     attendeeEmails: a.attendeeEmails as string[] | undefined,
                     recurrence: a.recurrence as string | undefined,
+                    privateProperties: a.privateProperties as
+                        | Record<string, string>
+                        | undefined,
                 });
                 break;
 
@@ -89,7 +92,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     location: a.location as string | undefined,
                     description: a.description as string | undefined,
                     attendeeEmails: a.attendeeEmails as string[] | undefined,
+                    privateProperties: a.privateProperties as
+                        | Record<string, string>
+                        | undefined,
                 });
+                break;
+
+            case 'list_tagged_events':
+                result = await calendar.listTaggedEvents(
+                    a.startDate as string,
+                    a.endDate as string,
+                );
                 break;
 
             case 'delete_event':
@@ -125,14 +138,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
 
             default:
-                throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+                throw new McpError(
+                    ErrorCode.MethodNotFound,
+                    `Unknown tool: ${name}`,
+                );
         }
 
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         Logger.error(`Tool "${name}" error: ${message}`);
-        return { content: [{ type: 'text', text: `Error: ${message}` }], isError: true };
+        return {
+            content: [{ type: 'text', text: `Error: ${message}` }],
+            isError: true,
+        };
     }
 });
 

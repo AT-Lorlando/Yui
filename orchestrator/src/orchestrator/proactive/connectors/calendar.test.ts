@@ -244,6 +244,29 @@ function testDiffAgenda(): void {
         diffAgenda(capped.snapshot, bulk.slice(1), NOW, false).events.length,
         1,
     );
+
+    // Événements posés par une règle Yui : gardés dans l'instantané, jamais
+    // annoncés (ni nouveaux, ni déplacés, ni disparus).
+    {
+        const base = ev({ id: 'k0', title: 'Kiné' });
+        const ruleEv = ev({
+            id: 'r1',
+            title: 'Facture',
+            date: '2026-10-06',
+            ruleId: 'facture',
+        });
+        const added = diffAgenda(snapshotOf([base]), [base, ruleEv], NOW);
+        assert.deepStrictEqual(added.events, [], 'règle : pas de « nouveau »');
+        assert.ok(added.snapshot.r1, 'règle : présente dans l’instantané');
+        const moved = diffAgenda(
+            added.snapshot,
+            [base, { ...ruleEv, date: '2026-10-08' }],
+            NOW,
+        );
+        assert.deepStrictEqual(moved.events, [], 'règle : pas de « déplacé »');
+        const gone = diffAgenda(added.snapshot, [base], NOW);
+        assert.deepStrictEqual(gone.events, [], 'règle : pas de « disparu »');
+    }
 }
 
 function testEarlyTomorrow(): void {

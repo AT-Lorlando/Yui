@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import type { Auth, calendar_v3 } from 'googleapis';
 import Logger from './logger';
+import { taggedCalendars, taggedView, type TaggedEvent } from './tagged';
 
 const TIMEZONE = 'Europe/Paris';
 
@@ -69,20 +70,26 @@ const RESPONSE_LABEL: Record<string, string> = {
 function formatEvent(
     event: calendar_v3.Schema$Event,
     calendarName?: string,
+    calendarId?: string,
 ): object {
     const base: Record<string, unknown> = {
-        id:       event.id,
-        title:    event.summary ?? '(Sans titre)',
-        status:   event.status ?? 'confirmed',
+        id: event.id,
+        title: event.summary ?? '(Sans titre)',
+        status: event.status ?? 'confirmed',
         calendar: calendarName ?? null,
     };
+
+    if (calendarId) base.calendar_id = calendarId;
+    const priv = event.extendedProperties?.private;
+    if (priv?.yuiRule) base.yui_rule = priv.yuiRule;
+    if (priv?.yuiDate) base.yui_date = priv.yuiDate;
 
     if (event.status === 'cancelled') return { ...base, cancelled: true };
 
     // Time
     if (event.start?.date) {
-        base.all_day   = true;
-        base.date      = event.start.date;
+        base.all_day = true;
+        base.date = event.start.date;
         const endDateRaw = event.end?.date;
         if (endDateRaw && endDateRaw !== event.start.date) {
             const endExclusive = new Date(endDateRaw);
@@ -92,41 +99,56 @@ function formatEvent(
         }
     } else if (event.start?.dateTime) {
         const start = event.start.dateTime;
-        const end   = event.end?.dateTime;
-        base.all_day  = false;
-        base.date     = start.slice(0, 10);
-        base.start    = formatTime(start);
-        base.end      = end ? formatTime(end) : null;
-        base.duration_min = end ? Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000) : null;
+        const end = event.end?.dateTime;
+        base.all_day = false;
+        base.date = start.slice(0, 10);
+        base.start = formatTime(start);
+        base.end = end ? formatTime(end) : null;
+        base.duration_min = end
+            ? Math.round(
+                  (new Date(end).getTime() - new Date(start).getTime()) / 60000,
+              )
+            : null;
         base.relative = relativeTime(start) || null;
     }
 
-    if (event.location)   base.location = event.location;
+    if (event.location) base.location = event.location;
 
     // Attendees
     if (event.attendees && event.attendees.length > 0) {
-        const self   = event.attendees.find((a) => a.self);
+        const self = event.attendees.find((a) => a.self);
         const others = event.attendees.filter((a) => !a.self);
         if (self) base.my_response = self.responseStatus ?? 'needsAction';
         if (others.length > 0) {
             base.attendees = others.slice(0, 8).map((a) => ({
-                name:     a.displayName ?? a.email,
+                name: a.displayName ?? a.email,
                 response: a.responseStatus ?? 'needsAction',
             }));
         }
     }
 
     // Google Meet
-    const meetLink = event.hangoutLink ?? event.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri;
+    const meetLink =
+        event.hangoutLink ??
+        event.conferenceData?.entryPoints?.find(
+            (e) => e.entryPointType === 'video',
+        )?.uri;
     if (meetLink) base.meet_link = meetLink;
 
     // Description
     if (event.description) {
-        const plain = event.description.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
-        if (plain) base.note = plain.length > 200 ? plain.slice(0, 197) + '...' : plain;
+        const plain = event.description
+            .replace(/<[^>]*>/g, '')
+            .replace(/\n+/g, ' ')
+            .trim();
+        if (plain)
+            base.note =
+                plain.length > 200 ? plain.slice(0, 197) + '...' : plain;
     }
 
-    base.recurring = Boolean(event.recurrence?.length || event.recurringEventId);
+    base.recurring = Boolean(
+        event.recurrence?.length || event.recurringEventId,
+    );
 
     return base;
 }
@@ -173,6 +195,7 @@ function parisToUtcIso(dateStr: string, timeStr: string): string {
 
 interface EventWithCalendar extends calendar_v3.Schema$Event {
     _calendarName: string;
+    _calendarId?: string;
 }
 
 // ── CalendarClient ────────────────────────────────────────────────────────────
@@ -189,9 +212,9 @@ export class CalendarClient {
     async listCalendars(): Promise<object> {
         const res = await this.cal.calendarList.list({ showHidden: false });
         const cals = (res.data.items ?? []).map((c) => ({
-            id:          c.id,
-            name:        c.summary,
-            primary:     c.primary ?? false,
+            id: c.id,
+            name: c.summary,
+            primary: c.primary ?? false,
             access_role: c.accessRole,
             description: c.description ?? null,
         }));
@@ -261,6 +284,7 @@ export class CalendarClient {
                                     ? 'Professional meeting'
                                     : undefined),
                             _calendarName: name,
+                            _calendarId: calId,
                         });
                     }
                 } catch (err) {
@@ -285,12 +309,18 @@ export class CalendarClient {
         // Group by day
         const grouped = new Map<string, object[]>();
         for (const ev of allEvents) {
-            const day = ev.start?.date ?? ev.start?.dateTime?.slice(0, 10) ?? 'unknown';
+            const day =
+                ev.start?.date ?? ev.start?.dateTime?.slice(0, 10) ?? 'unknown';
             if (!grouped.has(day)) grouped.set(day, []);
-            grouped.get(day)!.push(formatEvent(ev, ev._calendarName));
+            grouped
+                .get(day)!
+                .push(formatEvent(ev, ev._calendarName, ev._calendarId));
         }
 
-        const days = Array.from(grouped.entries()).map(([date, events]) => ({ date, events }));
+        const days = Array.from(grouped.entries()).map(([date, events]) => ({
+            date,
+            events,
+        }));
         return { start, end, days };
     }
 
@@ -325,6 +355,7 @@ export class CalendarClient {
         description?: string;
         attendeeEmails?: string[];
         recurrence?: string;
+        privateProperties?: Record<string, string>;
     }): Promise<object> {
         const calId = options.calendarId ?? 'primary';
 
@@ -356,13 +387,24 @@ export class CalendarClient {
             body.recurrence = [options.recurrence];
         }
 
+        if (options.privateProperties) {
+            body.extendedProperties = {
+                private: { ...options.privateProperties },
+            };
+        }
+
         const res = await this.cal.events.insert({
             calendarId: calId,
             requestBody: body,
             sendUpdates: options.attendeeEmails?.length ? 'all' : 'none',
         });
 
-        return { ok: true, id: res.data.id, title: res.data.summary, link: res.data.htmlLink };
+        return {
+            ok: true,
+            id: res.data.id,
+            title: res.data.summary,
+            link: res.data.htmlLink,
+        };
     }
 
     // ── Update event ───────────────────────────────────────────────────────────
@@ -378,6 +420,7 @@ export class CalendarClient {
         location?: string;
         description?: string;
         attendeeEmails?: string[];
+        privateProperties?: Record<string, string>;
     }): Promise<object> {
         const calId = options.calendarId ?? 'primary';
 
@@ -414,13 +457,85 @@ export class CalendarClient {
             body.attendees = options.attendeeEmails.map((email) => ({ email }));
         }
 
+        if (options.privateProperties) {
+            body.extendedProperties = {
+                ...current.extendedProperties,
+                private: {
+                    ...current.extendedProperties?.private,
+                    ...options.privateProperties,
+                },
+            };
+        }
+
         const res = await this.cal.events.update({
             calendarId: calId,
             eventId: options.eventId,
             requestBody: body,
         });
 
-        return { ok: true, id: res.data.id, title: res.data.summary, link: res.data.htmlLink };
+        return {
+            ok: true,
+            id: res.data.id,
+            title: res.data.summary,
+            link: res.data.htmlLink,
+        };
+    }
+
+    // ── Tagged events ──────────────────────────────────────────────────────────
+
+    /**
+     * Events carrying a private `yuiRule` property in writable calendars
+     * (hidden ones included). Throws if any calendar listing fails: callers
+     * reconcile on the result, a partial listing would cause duplicates or
+     * wrong deletions. `scanned` lists the calendars read (ids as reported,
+     * 'primary' for the primary): a rule targeting another one must not create.
+     */
+    async listTaggedEvents(
+        startDate: string,
+        endDate: string,
+    ): Promise<{
+        events: TaggedEvent[];
+        primaryId: string | null;
+        scanned: string[];
+    }> {
+        const timeMin = parisToUtcIso(startDate, '00:00:00');
+        const timeMax = parisToUtcIso(endDate, '23:59:59');
+
+        const listRes = await this.cal.calendarList.list({ showHidden: true });
+        const { primaryId, calendars } = taggedCalendars(
+            listRes.data.items ?? [],
+        );
+
+        const perCal = await Promise.all(
+            calendars.map(async ({ fetchId: calId, reportId }) => {
+                const out: TaggedEvent[] = [];
+                let pageToken: string | undefined;
+                do {
+                    const res = await this.cal.events.list({
+                        calendarId: calId,
+                        timeMin,
+                        timeMax,
+                        singleEvents: true,
+                        showDeleted: false,
+                        maxResults: 250,
+                        timeZone: TIMEZONE,
+                        pageToken,
+                    });
+                    for (const ev of res.data.items ?? []) {
+                        const t = taggedView(ev, reportId);
+                        if (t) out.push(t);
+                    }
+                    pageToken = res.data.nextPageToken ?? undefined;
+                } while (pageToken);
+                return out;
+            }),
+        );
+
+        return {
+            events: perCal.flat(),
+            primaryId,
+            scanned: calendars.map((c) => c.reportId),
+        };
     }
 
     // ── Delete event ───────────────────────────────────────────────────────────
@@ -430,9 +545,15 @@ export class CalendarClient {
         try {
             const ev = await this.cal.events.get({ calendarId, eventId });
             title = ev.data.summary ?? eventId;
-        } catch { /* ignore */ }
+        } catch {
+            /* ignore */
+        }
 
-        await this.cal.events.delete({ calendarId, eventId, sendUpdates: 'all' });
+        await this.cal.events.delete({
+            calendarId,
+            eventId,
+            sendUpdates: 'all',
+        });
         return { ok: true, deleted: title };
     }
 
@@ -592,9 +713,11 @@ export class CalendarClient {
         }
 
         const slots = free.map((slot) => ({
-            start:        formatTime(slot.start.toISOString()),
-            end:          formatTime(slot.end.toISOString()),
-            duration_min: Math.round((slot.end.getTime() - slot.start.getTime()) / 60000),
+            start: formatTime(slot.start.toISOString()),
+            end: formatTime(slot.end.toISOString()),
+            duration_min: Math.round(
+                (slot.end.getTime() - slot.start.getTime()) / 60000,
+            ),
         }));
         return { date, duration_min: durationMinutes, free_slots: slots };
     }
@@ -603,6 +726,11 @@ export class CalendarClient {
 
     async quickAdd(text: string, calendarId = 'primary'): Promise<object> {
         const res = await this.cal.events.quickAdd({ calendarId, text });
-        return { ok: true, id: res.data.id, title: res.data.summary, link: res.data.htmlLink };
+        return {
+            ok: true,
+            id: res.data.id,
+            title: res.data.summary,
+            link: res.data.htmlLink,
+        };
     }
 }
