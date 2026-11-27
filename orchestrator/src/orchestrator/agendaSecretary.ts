@@ -484,6 +484,18 @@ export function toAgendaEvent(
     };
 }
 
+// Lectures en échec rendues vides : le `callTool` du moteur rend le texte
+// d'erreur MCP (`isError`) au lieu de lever, donc `[]` ne distingue pas une
+// panne d'une journée vide. Marque portée par le tableau lui-même (il traverse
+// le cache) sans changer le contrat des autres lecteurs.
+const failedReads = new WeakSet<AgendaEvent[]>();
+
+/** Vrai si `events` vient d'une réponse illisible de `get_schedule` (texte
+ *  d'erreur, null…) — et non d'une fenêtre vide (`{events: []}`). */
+export function isAgendaReadFailure(events: AgendaEvent[]): boolean {
+    return failedReads.has(events);
+}
+
 /** Récupère et normalise les événements aujourd'hui → +60 j via get_schedule. */
 export async function fetchAgendaEvents(
     callTool: CallTool,
@@ -498,7 +510,12 @@ export async function fetchAgendaEvents(
         endDate,
         maxResults: FETCH_MAX_RESULTS,
     });
-    if (!isObj(res) || !Array.isArray(res.days)) return [];
+    if (!isObj(res) || !Array.isArray(res.days)) {
+        const out: AgendaEvent[] = [];
+        // mcp-calendar rend `{events: [], start, end}` pour une fenêtre vide.
+        if (!(isObj(res) && Array.isArray(res.events))) failedReads.add(out);
+        return out;
+    }
 
     const out: AgendaEvent[] = [];
     for (const day of res.days as Array<Record<string, unknown>>) {

@@ -44,6 +44,13 @@ import {
     saveSituation,
 } from './situation';
 import type { Situation } from './situation';
+import { ReminderRunner } from './reminders/runner';
+import {
+    DEFAULT_REMINDER_SETTINGS,
+    type ReminderSettings,
+} from './reminders/types';
+import { listParcels } from '../deliveries/tracker';
+import { getWakeupRunner } from '../wakeups/runner';
 import { detectMoments, returnMomentFacts } from './moments';
 import { MailCourier } from './mail/courier';
 import { SenderStore } from './mail/senders';
@@ -155,6 +162,8 @@ export class ProactiveEngine {
     private composer: BriefComposer;
     private situation: Situation | null;
     private momentState: MomentState = { firedDepartures: [] };
+    /** Rappels par type, phase 1 : mode ombre (journal seulement). */
+    private reminders: ReminderRunner;
     private lastDeltas: string[] = [];
     /** Sérialise les moments : le tick d'intervalle et la transition de
      *  présence peuvent appeler `handleMoment` en même temps, or le dédup
@@ -280,6 +289,53 @@ export class ProactiveEngine {
         // État de module : les briques des connecteurs doivent être connues de
         // `getBricks()`/`isBrickEnabled` dès la construction, pas au `start()`.
         registerConnectorBricks(this.connectors);
+        this.reminders = new ReminderRunner({
+            callTool: this.callTool,
+            journal: this.journal,
+            presenceState: () => this.deps.presenceState(),
+            subscribePresence: (cb) => this.deps.subscribePresence(cb),
+            getSituation: () => this.getSituation(),
+            heldList: () => this.heldList(),
+            todayWake: (date) => getWakeupRunner()?.todayWake(date) ?? null,
+            listParcels: () =>
+                listParcels().map((p) => ({
+                    id: p.id,
+                    label: String(
+                        p.content ?? p.label ?? p.tracking ?? 'colis',
+                    ),
+                    status: p.status,
+                    estimatedDate: p.estimatedDate,
+                    updatedAt: p.updatedAt,
+                })),
+            settings: () => this.reminderSettings(),
+            quietHours: () => this.cfg.quietHours,
+            enabled: () => isBrickEnabled(this.cfg, 'reminders'),
+            now: () => new Date(this.now()),
+        });
+    }
+
+    /** Réglages de la brique `reminders`, valeurs invalides → défaut. */
+    private reminderSettings(): ReminderSettings {
+        const d = DEFAULT_REMINDER_SETTINGS;
+        const hhmm = (key: 'eveTime' | 'morningFallback'): string => {
+            const v = brickSetting(this.cfg, 'reminders', key, d[key]);
+            return typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v)
+                ? v
+                : d[key];
+        };
+        const mins = (
+            key: 'visioLeadMin' | 'onsiteLeadMin' | 'departLeadMin',
+        ): number => {
+            const v = Number(brickSetting(this.cfg, 'reminders', key, d[key]));
+            return Number.isFinite(v) && v > 0 && v <= 240 ? v : d[key];
+        };
+        return {
+            eveTime: hhmm('eveTime'),
+            visioLeadMin: mins('visioLeadMin'),
+            onsiteLeadMin: mins('onsiteLeadMin'),
+            departLeadMin: mins('departLeadMin'),
+            morningFallback: hhmm('morningFallback'),
+        };
     }
 
     /**
@@ -1322,6 +1378,7 @@ export class ProactiveEngine {
             SITUATION_POLL_MS,
         );
         void this.situationTick();
+        this.reminders.start();
         Logger.info(
             `proactive: démarré — connecteurs=[${this.runner
                 .activeIds()
@@ -1342,6 +1399,7 @@ export class ProactiveEngine {
     stop(): void {
         this.runner?.stop();
         this.runner = null;
+        this.reminders.stop();
         if (this.situationTimer) clearInterval(this.situationTimer);
         this.situationTimer = undefined;
     }

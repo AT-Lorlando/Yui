@@ -43,6 +43,9 @@ export interface JournalEntry {
     /** Sortie demandée explicitement par Jérémy (attente satisfaite, ordre
      *  courrier voix/app) : hors budget du juge. */
     requested?: true;
+    /** Rappel par type en mode ombre : ce qui AURAIT été dit/notifié, rien
+     *  n'est sorti. Hors contexte du juge (feedback, récents). */
+    shadow?: true;
 }
 
 const MANUAL_WINDOW_MS = 14 * 24 * 3600_000;
@@ -139,7 +142,9 @@ export class ProactiveJournal {
      * leur sujet — le juge apprend ce qui lasse et ce qui sert.
      */
     feedbackSummary(limit = 12): string {
-        const rated = this.entries.filter((e) => e.feedback).slice(-limit);
+        const rated = this.entries
+            .filter((e) => e.feedback && !e.shadow)
+            .slice(-limit);
         if (!rated.length) return '';
         return rated
             .map(
@@ -172,7 +177,9 @@ export class ProactiveJournal {
     recentSummary(now: number, limit = 8): string {
         const dayMs = 24 * 3600 * 1000;
         return this.entries
-            .filter((e) => now - e.at < dayMs && e.channel !== 'skip')
+            .filter(
+                (e) => now - e.at < dayMs && e.channel !== 'skip' && !e.shadow,
+            )
             .slice(-limit)
             .map(
                 (e) =>

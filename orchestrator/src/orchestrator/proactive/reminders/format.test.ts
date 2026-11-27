@@ -1,6 +1,12 @@
 import assert from 'assert';
 import type { AgendaEvent } from '../../agendaSecretary';
-import { hourNotif, hourSpoken, morningBrief, numberFr } from './format';
+import {
+    hourNotif,
+    hourSpoken,
+    morningBrief,
+    numberFr,
+    numberFrFem,
+} from './format';
 
 const DAY = '2026-11-27';
 
@@ -38,6 +44,17 @@ assert.strictEqual(numberFr(21), 'vingt et un');
 assert.strictEqual(numberFr(31), 'trente et un');
 assert.strictEqual(numberFr(45), 'quarante-cinq');
 assert.strictEqual(numberFr(59), 'cinquante-neuf');
+// minutes au féminin
+assert.strictEqual(numberFrFem(1), 'une');
+assert.strictEqual(numberFrFem(21), 'vingt et une');
+assert.strictEqual(numberFrFem(31), 'trente et une');
+assert.strictEqual(numberFrFem(51), 'cinquante et une');
+assert.strictEqual(numberFrFem(45), 'quarante-cinq');
+assert.strictEqual(numberFrFem(11), 'onze');
+assert.strictEqual(hourSpoken('09:01'), 'neuf heures une');
+assert.strictEqual(hourSpoken('10:21'), 'dix heures vingt et une');
+assert.strictEqual(hourSpoken('21:31'), 'vingt et une heures trente et une');
+assert.strictEqual(hourSpoken('12:41'), 'midi quarante et une');
 
 // ── exemple de Jérémy ──
 {

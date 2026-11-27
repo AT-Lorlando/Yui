@@ -69,6 +69,7 @@ const REGISTRY: Record<string, DataCategory> = {
     'schedules.json': 'state',
     'phone-alarm.json': 'state',
     'wakeup-runs.json': 'state',
+    'reminders-shadow.json': 'state',
     'calendar-rules-sync.json': 'state',
     'instance-id.json': 'state',
     'atv-cert.pem': 'state',

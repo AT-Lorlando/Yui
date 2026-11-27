@@ -139,10 +139,10 @@ export function mailConnector(services: MailConnectorServices): ConnectorDef {
                     key: `mail-info-${n.mailId}`,
                     kind: 'info',
                     importance: 'info',
-                    subject: oneLine(`Courrier : « ${n.subject} »`).slice(
-                        0,
-                        SUBJECT_MAX,
-                    ),
+                    // Expéditeur lisible (rappels : « N mails à traiter : … »).
+                    subject: oneLine(
+                        `Courrier — ${senderName(n.from)} : « ${n.subject} »`,
+                    ).slice(0, SUBJECT_MAX),
                     facts,
                     at: now,
                     ttlMs: INFO_TTL_MS,

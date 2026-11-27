@@ -198,7 +198,10 @@ async function run(): Promise<void> {
     assert.strictEqual(info.key, 'mail-info-m8');
     assert.strictEqual(info.kind, 'info');
     assert.strictEqual(info.importance, 'info');
-    assert.strictEqual(info.subject, 'Courrier : « Relevé de septembre »');
+    assert.strictEqual(
+        info.subject,
+        'Courrier — Qonto : « Relevé de septembre »',
+    );
     assert.deepStrictEqual(info.facts, ['Solde : 3 200 €', 'Frais : 9 €']);
     assert.strictEqual(info.ttlMs, 3 * DAY);
     assert.strictEqual(info.todo, undefined);

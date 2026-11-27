@@ -119,6 +119,38 @@ async function run(): Promise<void> {
     assert.strictEqual(jb.spentToday(NOW), 1, 'attente demandée hors budget');
 
     // `event` et `manual` persistés puis relus.
+    // Rappels en mode ombre : jamais dans le contexte du juge.
+    const js = new ProactiveJournal(
+        path.join(
+            fs.mkdtempSync(path.join(os.tmpdir(), 'yui-journal-')),
+            'j.json',
+        ),
+    );
+    const sh = js.record({
+        at: NOW,
+        source: 'reminders',
+        subject: 'agenda:veille:x',
+        channel: 'notify',
+        message: 'ombre',
+        shadow: true,
+    });
+    js.setFeedback(sh.id, 'down');
+    const real = js.record({
+        at: NOW,
+        source: 'koya',
+        subject: 'vrai',
+        channel: 'notify',
+        message: 'réel',
+    });
+    js.setFeedback(real.id, 'up');
+    assert.ok(!js.feedbackSummary().includes('ombre'), 'feedback sans ombre');
+    assert.ok(js.feedbackSummary().includes('réel'));
+    assert.ok(
+        !js.recentSummary(NOW + 1000).includes('ombre'),
+        'récent sans ombre',
+    );
+    assert.ok(js.recentSummary(NOW + 1000).includes('réel'));
+
     const reread = new ProactiveJournal(file);
     const old = reread.list(300).find((e) => e.subject === 'old');
     assert.ok(old);

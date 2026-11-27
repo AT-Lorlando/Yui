@@ -99,6 +99,35 @@ export class WakeupRunner {
         return pickMornings(readWakeups(), readPhoneAlarm(), this.now());
     }
 
+    /**
+     * Réveil du jour `date` (passé ou à venir) : le plus tôt des occurrences
+     * vues (marques de wakeup-runs.json — un réveil téléphone disparaît de
+     * phone-alarm.json dès qu'il a sonné), sinon `next()`. Lecture seule.
+     * null si aucun réveil ce jour-là ou s'il n'a pas de point du matin.
+     */
+    todayWake(
+        date: string,
+    ): { at: number; afterMin: number; device: string | null } | null {
+        const wakeups = readWakeups();
+        const candidates: Occurrence[] = [];
+        for (const e of Object.values(readRuns())) {
+            if (e?.occ?.date === date) candidates.push(e.occ);
+        }
+        for (const o of this.next()) if (o.date === date) candidates.push(o);
+        candidates.sort((a, b) => a.at - b.at);
+        for (const o of candidates) {
+            const w = wakeups.find((x) => x.id === o.wakeupId);
+            if (!w || !w.enabled) continue;
+            if (!w.brief) return null;
+            return {
+                at: o.at,
+                afterMin: w.brief.afterMin,
+                device: w.brief.speak,
+            };
+        }
+        return null;
+    }
+
     async tick(): Promise<void> {
         if (this.busy) {
             this.rerun = true;

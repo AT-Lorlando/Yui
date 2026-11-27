@@ -354,6 +354,70 @@ async function run() {
         warns.join('|'),
     );
     assert.ok(!infos.some((i) => i.includes('montée')), infos.join('|'));
+    // todayWake : occurrence du jour, future (next) ou passée (marques)
+    s = setup();
+    r = s.mkRunner();
+    s.setNow(at(6, 0));
+    assert.deepStrictEqual(r.todayWake('2026-11-27'), {
+        at: at(7, 0),
+        afterMin: 5,
+        device: 'Chambre',
+    });
+    assert.strictEqual(r.todayWake('2026-11-26'), null, 'autre jour');
+    s.setNow(at(6, 50));
+    await r.tick();
+    s.setNow(at(7, 5));
+    await r.tick();
+    s.setNow(at(10, 0));
+    assert.deepStrictEqual(
+        r.todayWake('2026-11-27'),
+        { at: at(7, 0), afterMin: 5, device: 'Chambre' },
+        'passé : lu dans les marques',
+    );
+    // sans marques et passé : aucun réveil connu aujourd'hui
+    s = setup();
+    r = s.mkRunner();
+    s.setNow(at(10, 0));
+    assert.strictEqual(r.todayWake('2026-11-27'), null);
+    // réveil sans point du matin : null
+    s = setup();
+    store.writeWakeups([
+        {
+            id: 'f',
+            name: 'F',
+            trigger: {
+                kind: 'fixed',
+                time: '07:00',
+                days: [0, 1, 2, 3, 4, 5, 6],
+            },
+            brief: null,
+        },
+    ]);
+    r = s.mkRunner();
+    s.setNow(at(6, 0));
+    assert.strictEqual(r.todayWake('2026-11-27'), null);
+    // point du matin muet (speak: null) : device null
+    s = setup();
+    store.writeWakeups([
+        {
+            id: 'f',
+            name: 'F',
+            trigger: {
+                kind: 'fixed',
+                time: '07:00',
+                days: [0, 1, 2, 3, 4, 5, 6],
+            },
+            brief: { afterMin: 10, speak: null, notify: true },
+        },
+    ]);
+    r = s.mkRunner();
+    s.setNow(at(6, 0));
+    assert.deepStrictEqual(r.todayWake('2026-11-27'), {
+        at: at(7, 0),
+        afterMin: 10,
+        device: null,
+    });
+
     console.log('runner.test.ts ok');
 }
 run().catch((e) => {

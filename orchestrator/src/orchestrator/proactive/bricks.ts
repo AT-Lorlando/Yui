@@ -11,6 +11,7 @@
 // enregistre au démarrage via `registerConnectorBricks`. `CORE_BRICKS` ne garde
 // que ce qui n'a pas de source : moments, anticipations, modules.
 import type { ProactiveConfig } from './types';
+import { DEFAULT_REMINDER_SETTINGS } from './reminders/types';
 
 export type BrickKind =
     | 'watcher'
@@ -96,6 +97,46 @@ export const CORE_BRICKS: BrickDef[] = [
             "Le LLM arbitre chaque intervention (utilité × urgence) sous un budget d'interruptions quotidien, en tenant compte de tes 👍/👎. Désactivé : retour au pipeline simple (seuil de bavardage).",
         kind: 'module',
         defaultEnabled: true,
+    },
+    {
+        id: 'reminders',
+        name: 'Rappels par type (essai)',
+        description:
+            "Rappels réguliers — veille, juste avant un rendez-vous, départ, colis, retour, point du matin — en mode essai : ce qu'ils auraient dit est écrit dans le Fil, rien n'est envoyé.",
+        kind: 'module',
+        defaultEnabled: true,
+        settings: [
+            {
+                key: 'eveTime',
+                label: 'Heure de la veille',
+                type: 'string',
+                default: DEFAULT_REMINDER_SETTINGS.eveTime,
+            },
+            {
+                key: 'visioLeadMin',
+                label: 'Avance visio (min)',
+                type: 'number',
+                default: DEFAULT_REMINDER_SETTINGS.visioLeadMin,
+            },
+            {
+                key: 'onsiteLeadMin',
+                label: 'Avance sur site (min)',
+                type: 'number',
+                default: DEFAULT_REMINDER_SETTINGS.onsiteLeadMin,
+            },
+            {
+                key: 'departLeadMin',
+                label: 'Avance départ (min)',
+                type: 'number',
+                default: DEFAULT_REMINDER_SETTINGS.departLeadMin,
+            },
+            {
+                key: 'morningFallback',
+                label: 'Point du matin sans réveil',
+                type: 'string',
+                default: DEFAULT_REMINDER_SETTINGS.morningFallback,
+            },
+        ],
     },
     {
         id: 'briefing',

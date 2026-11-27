@@ -49,6 +49,12 @@ export function numberFr(n: number): string {
     return `${TENS[t]}${u === 1 ? ' et ' : '-'}${UNITS[u]}`;
 }
 
+/** Comme `numberFr`, au féminin (minutes) : « une », « vingt et une »… */
+export function numberFrFem(n: number): string {
+    const w = numberFr(n);
+    return n % 10 === 1 && n !== 11 ? w.replace(/un$/, 'une') : w;
+}
+
 function parseHhmm(hhmm: string): { h: number; m: number } {
     const [h, m] = hhmm.split(':').map((x) => parseInt(x, 10));
     return { h: h || 0, m: m || 0 };
@@ -63,7 +69,7 @@ export function hourNotif(hhmm: string): string {
 /** '14:30' → 'quatorze heures trente', '12:00' → 'midi'. */
 export function hourSpoken(hhmm: string): string {
     const { h, m } = parseHhmm(hhmm);
-    const mins = m === 0 ? '' : ` ${numberFr(m)}`;
+    const mins = m === 0 ? '' : ` ${numberFrFem(m)}`;
     if (h === 12) return `midi${mins}`;
     if (h === 0) return `minuit${mins}`;
     const word =
