@@ -6,6 +6,7 @@ import {
     parseJudgment,
     eventsHash,
     fetchAgendaEvents,
+    eventMode,
     AgendaSecretary,
     type AgendaEvent,
 } from './agendaSecretary';
@@ -758,6 +759,28 @@ async function run(): Promise<void> {
             );
             assert.strictEqual(n, 2, 'échec non caché → re-tenté');
         }
+    }
+
+    // ── eventMode : visio / sur site / inconnu ─────────────────────────────────
+    {
+        const m = (p: Partial<AgendaEvent> & { title?: string }) =>
+            eventMode(ev({ title: 'x', ...p }));
+        assert.strictEqual(m({ location: 'Réunion Microsoft Teams' }), 'visio');
+        assert.strictEqual(
+            m({ meetLink: 'https://meet.google.com/x' }),
+            'visio',
+        );
+        assert.strictEqual(m({ location: 'https://zoom.us/j/1' }), 'visio');
+        assert.strictEqual(m({ title: 'Visio client' }), 'visio');
+        assert.strictEqual(m({ title: 'Entrevue (sur site)' }), 'onsite');
+        assert.strictEqual(m({ title: 'Atelier en présentiel' }), 'onsite');
+        assert.strictEqual(m({ location: '12 rue X, Paris' }), 'onsite');
+        assert.strictEqual(m({ title: 'Kiné' }), 'onsite');
+        assert.strictEqual(m({ title: 'Point Koya' }), 'unknown');
+        assert.strictEqual(
+            m({ title: 'Point Koya', location: 'Salle Bleue' }),
+            'unknown',
+        );
     }
 
     console.log('agendaSecretary (pure units) OK');

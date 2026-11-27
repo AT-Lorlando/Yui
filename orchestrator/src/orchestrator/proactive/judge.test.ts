@@ -5,7 +5,12 @@ import * as path from 'path';
 import { Judge, parseVerdict, buildJudgeUser } from './judge';
 import { ProactiveJournal } from './journal';
 import { isBrickEnabled, brickSetting } from './bricks';
-import { detectMoments, returnMomentFacts } from './moments';
+import {
+    detectMoments,
+    returnMomentFacts,
+    markWakeHandled,
+    resetWakeHandled,
+} from './moments';
 import type { MomentState } from './moments';
 import { diffSituation } from './situation';
 import type { Situation } from './situation';
@@ -312,6 +317,18 @@ async function run(): Promise<void> {
     assert.strictEqual(
         detectMoments(morningOff, morningOn, st0, () => false).moments.length,
         0,
+    );
+    // Réveil déjà pris en charge (montée/point du réveil programmé) : pas de moment ce jour-là.
+    markWakeHandled(morningOn.at);
+    assert.strictEqual(
+        detectMoments(morningOff, morningOn, st0, () => true).moments.length,
+        0,
+        'moment-wake silencieux après un réveil programmé',
+    );
+    resetWakeHandled();
+    assert.strictEqual(
+        detectMoments(morningOff, morningOn, st0, () => true).moments.length,
+        1,
     );
 
     const eveningOn = situationAt(23, {

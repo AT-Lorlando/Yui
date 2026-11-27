@@ -17,6 +17,7 @@ export interface AgendaEvent {
     durationMin: number | null; // durée en minutes (events horaires), sinon null
     attendees: string[];
     calendar?: string | null; // nom de l'agenda Google (Famille, Calendrier…)
+    meetLink?: string | null; // lien de visio (Google Meet…) si l'event en porte un
 }
 
 /** Nombre de jours (inclus) entre deux dates YYYY-MM-DD ; >= 1. */
@@ -162,6 +163,25 @@ export function categorizeEvent(
         return { category: 'meeting-pro', sure: false };
     }
     return { category: 'autre', sure: false };
+}
+
+export type EventMode = 'visio' | 'onsite' | 'unknown';
+
+const VISIO_PLACE_RE = /teams|zoom|\bmeet\b|visio|webex|whereby/;
+const VISIO_TITLE_RE = /visio|teams/;
+const ONSITE_TITLE_RE = /sur site|presentiel/;
+
+/** Visio, sur site ou inconnu — règles déterministes (accents/casse ignorés). */
+export function eventMode(e: AgendaEvent): EventMode {
+    const title = fold(e.title);
+    const loc = fold(e.location ?? '');
+    const isUrl = /https?:\/\//.test(loc);
+    if (e.meetLink || isUrl || VISIO_PLACE_RE.test(loc)) return 'visio';
+    if (VISIO_TITLE_RE.test(title)) return 'visio';
+    if (ONSITE_TITLE_RE.test(title)) return 'onsite';
+    if (loc && /[\d,]/.test(loc)) return 'onsite';
+    if (categorizeEvent(e, new Date()).category === 'perso') return 'onsite';
+    return 'unknown';
 }
 
 export function buildSecretaryPrompt(
@@ -473,6 +493,7 @@ export async function fetchAgendaEvents(
                           .filter(Boolean)
                     : [],
                 calendar: strOrNull(ev.calendar),
+                meetLink: strOrNull(ev.meet_link),
             });
         }
     }

@@ -113,11 +113,17 @@ export async function sendNotification(text: string): Promise<void> {
  * Lit un texte à voix haute via le pipeline voix (`POST /speak`). Retourne
  * `false` sans lever si le pipeline ne tourne pas — automations, proactivité
  * et `/notify` ne doivent jamais échouer parce que la voix est down.
+ * `opts.device` : enceinte cible autre que le Salon (ex. « Chambre »).
  */
-export async function speakText(text: string): Promise<boolean> {
+export async function speakText(
+    text: string,
+    opts?: { device?: string },
+): Promise<boolean> {
     return new Promise((resolve) => {
         try {
-            const body = JSON.stringify({ text });
+            const body = JSON.stringify(
+                opts?.device ? { text, device: opts.device } : { text },
+            );
             const url = new URL(SPEAK_PIPELINE_URL);
             const req = http.request(
                 {

@@ -32,6 +32,17 @@ export interface MomentState {
 export const DEPARTURE_WINDOW_MIN = { min: 10, max: 45 };
 
 const dayOf = (ts: number) => new Date(ts).toDateString();
+
+/** Jour où un réveil programmé (montée/point du matin) a déjà pris le relais :
+ *  le moment « premières lumières » ne doit pas doubler le point. En mémoire
+ *  comme le reste de l'état des moments (un redémarrage = journée perdue, au pire un doublon). */
+let handledWakeDay: string | undefined;
+export function markWakeHandled(ts: number): void {
+    handledWakeDay = dayOf(ts);
+}
+export function resetWakeHandled(): void {
+    handledWakeDay = undefined;
+}
 const hourOf = (ts: number) => new Date(ts).getHours();
 
 /**
@@ -61,7 +72,8 @@ export function detectMoments(
         hour < 12 &&
         prev.lightsOn.length === 0 &&
         next.lightsOn.length > 0 &&
-        st.wakeDay !== today
+        st.wakeDay !== today &&
+        handledWakeDay !== today
     ) {
         st.wakeDay = today;
         out.push({

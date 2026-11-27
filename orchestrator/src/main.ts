@@ -26,6 +26,8 @@ import {
 } from './orchestrator/automations';
 import { sendNotification, speakText } from './orchestrator/notify';
 import { PresenceManager, getHomeCoords } from './orchestrator/presence';
+import { markWakeHandled } from './orchestrator/proactive/moments';
+import { WakeupRunner, setWakeupRunner } from './orchestrator/wakeups/runner';
 import {
     loadPresenceConfig,
     savePresenceConfig,
@@ -331,10 +333,22 @@ async function main() {
         );
     }
 
+    // Réveils : montée de lumière + point du matin (le serveur ne sonne jamais)
+    const wakeups = new WakeupRunner({
+        callTool: (t, a) => orchestrator.callTool(t, a ?? {}),
+        notify: sendNotification,
+        speak: (t, d) => speakText(t, { device: d }),
+        presence: () => presence.getState(),
+        onWakeHandled: (t) => markWakeHandled(t),
+    });
+    wakeups.start();
+    setWakeupRunner(wakeups);
+
     const shutdown = async (signal: string) => {
         Logger.info(`Received ${signal}, shutting down…`);
         presence.stop();
         presenceRules.stop();
+        wakeups.stop();
         proactive.stop();
         hueRemotes.stop();
         for (const source of sources) {

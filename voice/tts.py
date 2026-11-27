@@ -29,6 +29,7 @@ import soundfile as sf
 
 import echo
 import speech_state
+from speak_target import speak_target
 
 from config import (
     LOCAL_IP,
@@ -234,6 +235,44 @@ def _discover_cast(name: str) -> None:
 
 _discover_cast(TTS_SPEAKER)
 
+# Enceintes secondaires (ex. « Chambre »), découvertes à la demande.
+_extra_casts: dict[str, pychromecast.Chromecast] = {}
+_extra_lock = threading.Lock()
+
+
+def _cast_for(name: str):
+    """Chromecast nommé `name`, découvert paresseusement et mis en cache.
+    None si introuvable (jamais de repli sur le Salon)."""
+    key = name.lower()
+    with _extra_lock:
+        cc = _extra_casts.get(key)
+    if cc is not None:
+        return cc
+    try:
+        chromecasts, browser = pychromecast.get_chromecasts(timeout=10)
+        pychromecast.discovery.stop_discovery(browser)
+        device = next((c for c in chromecasts if c.name.lower() == key), None)
+        if not device:
+            log.warning(f"'{name}' not found on the network.")
+            return None
+        host, port = device.cast_info.host, device.cast_info.port
+        cc = pychromecast.get_chromecast_from_host((host, port, None, None, name))
+        cc.wait(timeout=10)
+        if not cc.socket_client.is_connected:
+            log.warning(f"'{name}' not ready (timeout) — treated as not found.")
+            try:
+                cc.disconnect()
+            except Exception:
+                pass
+            return None
+        with _extra_lock:
+            _extra_casts[key] = cc
+        log.info(f"Connected to '{cc.name}'")
+        return cc
+    except Exception as e:
+        log.error(f"Cast discovery failed for '{name}': {e}")
+        return None
+
 
 # ── WAV duration helper ───────────────────────────────────────────────────────
 
@@ -314,13 +353,14 @@ def play_audio_blocking(
         log.error(f"Playback error: {e}")
 
 
-def start_stream_cast(url: str) -> bool:
-    """Lance la lecture du flux gapless sur l'enceinte. False si échec
-    (l'appelant retombe sur la lecture phrase par phrase)."""
-    if not _cast:
+def start_stream_cast(url: str, cast=None) -> bool:
+    """Lance la lecture du flux gapless sur l'enceinte (`cast`, défaut Salon).
+    False si échec (l'appelant retombe sur la lecture phrase par phrase)."""
+    cast = cast or _cast
+    if not cast:
         return False
     try:
-        mc = _cast.media_controller
+        mc = cast.media_controller
         mc.play_media(url, "audio/wav", stream_type="LIVE")
         mc.block_until_active(timeout=10)
         return True
@@ -329,12 +369,15 @@ def start_stream_cast(url: str) -> bool:
         return False
 
 
-def wait_stream_end(stream: PcmStream, stop_event: threading.Event) -> None:
+def wait_stream_end(
+    stream: PcmStream, stop_event: threading.Event, cast=None
+) -> None:
     """Bloque jusqu'à la fin de lecture du flux (durée poussée écoulée) ou
     stop_event. Coupe le player dans tous les cas (flux LIVE)."""
-    if not _cast:
+    cast = cast or _cast
+    if not cast:
         return
-    mc = _cast.media_controller
+    mc = cast.media_controller
     started = time.time()
     while True:
         if stop_event.is_set():
@@ -371,13 +414,55 @@ def split_sentences(text: str) -> list[str]:
     return [s for s in out if s]
 
 
-def speak(text: str) -> None:
+def _speak_on(text: str, name: str) -> None:
+    """Annonce sur une autre enceinte : flux gapless, sans speech_state
+    (pas de barge-in hors Salon). Introuvable → aucune parole."""
+    cast = _cast_for(name)
+    if cast is None:
+        log.warning(f"Speaker '{name}' unavailable — not speaking.")
+        return
+    stop = threading.Event()  # jamais posé : lecture jusqu'au bout
+    stream = None
+    try:
+        log.info(f"Speaking on '{name}': {text[:80]}…")
+        for sentence in split_sentences(text):
+            audio, _mime = generate_tts(sentence)
+            pcm, rate = wav_to_pcm(audio)
+            if stream is None:
+                stream, url = open_stream(rate)
+                stream.push(pcm)
+                if not start_stream_cast(url, cast):
+                    # Lecture ratée : on oublie l'enceinte pour la redécouvrir.
+                    with _extra_lock:
+                        _extra_casts.pop(name.lower(), None)
+                    log.warning(f"Stream cast on '{name}' failed — not speaking.")
+                    return
+            else:
+                stream.push_gap()
+                stream.push(pcm)
+        if stream is not None:
+            stream.close()  # idempotent ; refermé en finally
+            wait_stream_end(stream, stop, cast)
+    except Exception as e:
+        log.error(f"TTS/Cast error on '{name}': {e}")
+        with _extra_lock:
+            _extra_casts.pop(name.lower(), None)
+    finally:
+        if stream is not None:
+            stream.close()
+
+
+def speak(text: str, device: str | None = None) -> None:
     """Annonce du scheduler/proactivité — même chemin que les réponses :
     lecture gapless, interruptible (speech_state.stop), et l'état de parole
     est partagé pour que le pipeline micro passe en mode barge-in.
 
     Si Yui parle déjà (réponse en cours), on attend qu'elle finisse (30 s max)
-    plutôt que de parler par-dessus."""
+    plutôt que de parler par-dessus.
+
+    `device` : autre enceinte (ex. « Chambre ») — voir `_speak_on`."""
+    if device:
+        return _speak_on(text, device)
     if not _cast:
         log.debug("No cast device — skipping TTS.")
         return
@@ -506,6 +591,7 @@ class _SpeakHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length))
             text = body.get("text", "").strip()
+            device = speak_target(body, TTS_SPEAKER)
         except Exception:
             self.send_response(400)
             self.end_headers()
@@ -515,7 +601,7 @@ class _SpeakHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         if text:
-            threading.Thread(target=speak, args=(text,), daemon=True).start()
+            threading.Thread(target=speak, args=(text, device), daemon=True).start()
 
     def _reply_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode()
