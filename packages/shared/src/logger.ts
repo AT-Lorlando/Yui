@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'async_hooks';
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import dotenv from 'dotenv';
@@ -135,6 +136,15 @@ const JSON_LEVEL: Record<string, 'error' | 'warn' | 'info' | 'debug'> = {
     http: 'debug',
 };
 
+export interface JsonConsoleOptions {
+    app: string;
+    service: string;
+    /** Champs fixes ajoutés à chaque ligne (ex. `mcp_server`). */
+    fields?: Record<string, string>;
+    /** Écrire sur stderr au lieu de stdout (serveurs MCP : stdout = protocole). */
+    stderr?: boolean;
+}
+
 interface JsonErr {
     type: string;
     message: string;
@@ -183,6 +193,38 @@ function extractErr(
     return undefined;
 }
 
+/**
+ * `request_id` de la requête HTTP en cours (en-tête `X-Request-Id` posé par
+ * nginx, sinon généré) : porté par AsyncLocalStorage pour que *tous* les logs
+ * émis pendant la requête, y compris depuis le code métier appelé en aval,
+ * l'incluent sans changer les signatures.
+ */
+const requestContext = new AsyncLocalStorage<{ requestId: string }>();
+
+/** Exécute `fn` avec `requestId` attaché à tous les logs JSON qu'il produit. */
+export function runWithRequestId<T>(requestId: string, fn: () => T): T {
+    return requestContext.run({ requestId }, fn);
+}
+
+/** Secrets courants masqués dans `msg` / `err` (jamais loggés en clair, cf. guide §5). */
+const SECRET_PATTERNS: Array<[RegExp, string]> = [
+    [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, 'Bearer [redacted]'],
+    [
+        /\b(token|secret|password|passwd|api[_-]?key|authorization|cookie)(["']?\s*[:=]\s*["']?)[^\s"',;&]+/gi,
+        '$1$2[redacted]',
+    ],
+    [
+        /\b(access_token|refresh_token|client_secret)=[^\s&"']+/gi,
+        '$1=[redacted]',
+    ],
+];
+
+export function redactSecrets(text: string): string {
+    let out = text;
+    for (const [re, rep] of SECRET_PATTERNS) out = out.replace(re, rep);
+    return out;
+}
+
 function jsonMsgText(message: unknown): string {
     if (message instanceof Error) return message.message;
     return typeof message === 'object' && message !== null
@@ -196,24 +238,30 @@ function jsonMsgText(message: unknown): string {
  * côté Koya). Jamais colorisé. N'altère que le transport Console : les
  * fichiers rotatifs de `LOG_DIR` gardent leur format texte existant.
  */
-function jsonConsoleFormat(opts: {
-    app: string;
-    service: string;
-}): winston.Logform.Format {
+function jsonConsoleFormat(opts: JsonConsoleOptions): winston.Logform.Format {
     return winston.format((info) => {
         const level = JSON_LEVEL[info.level] ?? 'info';
         const err = extractErr(info as Record<string | symbol, unknown>);
         const out: Record<string, unknown> = {
             time: Date.now(),
             level,
-            msg: jsonMsgText(info.message),
+            msg: redactSecrets(jsonMsgText(info.message)),
             app: opts.app,
             service: opts.service,
-            env: process.env.NODE_ENV ?? 'production',
+            env: process.env.NODE_ENV === 'development' ? 'dev' : 'prod',
         };
+        const requestId = requestContext.getStore()?.requestId;
+        if (requestId) out.request_id = requestId;
+        if (opts.fields) Object.assign(out, opts.fields);
         const subsystem = (info as Record<string, unknown>).subsystem;
         if (subsystem) out.subsystem = subsystem;
-        if (err) out.err = err;
+        if (err) {
+            out.err = {
+                ...err,
+                message: redactSecrets(err.message),
+                stack: err.stack ? redactSecrets(err.stack) : undefined,
+            };
+        }
         (info as Record<symbol, unknown>)[MESSAGE] = JSON.stringify(out);
         return info;
     })();
@@ -227,11 +275,33 @@ function jsonConsoleFormat(opts: {
  * jamais se propager par héritage d'env, seulement par cet appel explicite
  * fait par l'orchestrateur à son démarrage.
  */
-export function enableJsonConsole(opts: {
-    app: string;
-    service: string;
-}): void {
+export function enableJsonConsole(opts: JsonConsoleOptions): void {
     consoleTransport.format = jsonConsoleFormat(opts);
+    if (opts.stderr) {
+        for (const level of Object.keys(JSON_LEVEL)) {
+            (
+                consoleTransport as unknown as {
+                    stderrLevels: Record<string, boolean>;
+                }
+            ).stderrLevels[level] = true;
+        }
+    }
+}
+
+/**
+ * Serveurs MCP : l'orchestrateur leur passe `YUI_MCP_SERVER=<nom>` (et à eux
+ * seuls). Leurs logs passent alors en JSON sur **stderr** (stdout est le canal
+ * du protocole MCP) ; l'orchestrateur hérite de ce stderr, donc les lignes
+ * arrivent dans `yui-orchestrator-error.log` avec leur propre `level`.
+ */
+const MCP_SERVER = process.env.YUI_MCP_SERVER;
+if (MCP_SERVER) {
+    enableJsonConsole({
+        app: 'yui',
+        service: 'mcp',
+        fields: { mcp_server: MCP_SERVER },
+        stderr: true,
+    });
 }
 
 /**

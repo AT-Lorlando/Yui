@@ -1,5 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import {
+    StdioClientTransport,
+    getDefaultEnvironment,
+} from '@modelcontextprotocol/sdk/client/stdio.js';
 import OpenAI from 'openai';
 import { env } from '../env';
 import Logger from '../logger';
@@ -171,12 +174,16 @@ export class Orchestrator {
             args: config.args,
             // Inject integrations.json overrides; they win over the package's
             // own dotenv load (dotenv never overrides an already-set var).
-            ...(config.env && {
-                env: {
-                    ...(process.env as Record<string, string>),
-                    ...config.env,
-                },
-            }),
+            env: {
+                ...(config.env
+                    ? {
+                          ...(process.env as Record<string, string>),
+                          ...config.env,
+                      }
+                    : getDefaultEnvironment()),
+                // Logs JSON sur stderr côté MCP (voir packages/shared/src/logger.ts).
+                YUI_MCP_SERVER: config.name,
+            },
         });
 
         const client = new Client(
@@ -429,7 +436,7 @@ export class Orchestrator {
             : this.conversations.getOrCreateVoice(reset === true);
         const story = state.story;
 
-        Logger.info(`Processing order: "${order}"`);
+        Logger.info(`Processing order (${order.length} chars)`);
 
         const { tools: allTools, activeGroups } = this.buildContext(order);
         const systemPrompt = this.buildSystemPrompt(activeGroups);
@@ -537,7 +544,7 @@ export class Orchestrator {
         options?.onConversationId?.(state.id);
         const story = state.story;
 
-        Logger.info(`Processing order (stream): "${order}"`);
+        Logger.info(`Processing order (stream, ${order.length} chars)`);
         const t0 = Date.now();
         const timing: string[] = [];
 

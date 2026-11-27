@@ -103,9 +103,6 @@ async function main() {
 }
 
 main().catch((err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    const stack = err instanceof Error ? err.stack : '';
-    console.error(`Fatal error in mcp-nuki: ${message}`);
-    if (stack) console.error(stack);
+    Logger.error('fatal error', err);
     process.exit(1);
 });

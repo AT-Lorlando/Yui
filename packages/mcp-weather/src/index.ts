@@ -29,10 +29,10 @@ async function resolveClient(location?: string): Promise<WeatherClient> {
     if (!location) return defaultWeather;
     const geo = await geocodeCity(location);
     if (!geo) {
-        Logger.warn(`Geocoding failed for "${location}" — falling back to default`);
+        Logger.warn('Geocoding failed — falling back to default');
         return defaultWeather;
     }
-    Logger.debug(`Geocoded "${location}" → ${geo.name} (${geo.lat}, ${geo.lon})`);
+    Logger.debug(`Geocoded → ${geo.name}`);
     return new WeatherClient(geo.lat, geo.lon, geo.name);
 }
 
@@ -74,21 +74,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
 
             default:
-                throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+                throw new McpError(
+                    ErrorCode.MethodNotFound,
+                    `Unknown tool: ${name}`,
+                );
         }
 
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         Logger.error(`Tool "${name}" error: ${message}`);
-        return { content: [{ type: 'text', text: `Error: ${message}` }], isError: true };
+        return {
+            content: [{ type: 'text', text: `Error: ${message}` }],
+            isError: true,
+        };
     }
 });
 
 async function main() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    Logger.info(`mcp-weather server running on stdio (default: ${defaultCity} ${defaultLat},${defaultLon})`);
+    Logger.info(
+        `mcp-weather server running on stdio (default: ${defaultCity})`,
+    );
 }
 
 main().catch((error) => {

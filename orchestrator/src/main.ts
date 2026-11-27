@@ -60,6 +60,14 @@ import {
 // donc leur stdout MCP n'est jamais basculé en JSON.
 enableJsonConsole({ app: 'yui', service: 'orchestrator' });
 
+// Erreurs non attrapées : une ligne JSON (err.stack dans le champ) puis sortie,
+// PM2 relance. Les rejets de promesse non gérés passent aussi par ici (Node ≥ 15).
+process.on('uncaughtException', (err) => {
+    Logger.error('uncaught exception', err);
+    // laisse le temps au transport console de vider avant de quitter
+    setTimeout(() => process.exit(1), 100);
+});
+
 // Parole hors conversation (automations, proactivité) : voir notify.ts.
 const speakViaPipeline = (text: string): Promise<void> =>
     speakText(text).then(() => undefined);
@@ -349,6 +357,7 @@ async function main() {
 }
 
 main().catch((error) => {
-    console.error('Fatal error:', error);
-    process.exit(1);
+    Logger.error('fatal error at startup', error);
+    // laisse le transport console vider avant de quitter
+    setTimeout(() => process.exit(1), 100);
 });

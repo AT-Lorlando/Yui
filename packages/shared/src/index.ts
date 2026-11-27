@@ -1,5 +1,11 @@
 export * from './types';
-export { default as Logger, enableJsonConsole } from './logger';
+export {
+    default as Logger,
+    enableJsonConsole,
+    runWithRequestId,
+    redactSecrets,
+} from './logger';
+export type { JsonConsoleOptions } from './logger';
 export * from './entities';
 export { EntityStore } from './EntityStore';
 export { GoogleAuth } from './GoogleAuth';

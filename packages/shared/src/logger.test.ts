@@ -7,7 +7,7 @@
 // interne de winston.
 
 import assert from 'assert';
-import { Logger, enableJsonConsole } from './index';
+import { Logger, enableJsonConsole, runWithRequestId } from './index';
 
 type Captured = string[];
 
@@ -57,7 +57,10 @@ function run(): void {
         assert.strictEqual(entry.msg, 'Starting Yui…');
         assert.strictEqual(entry.app, 'yui');
         assert.strictEqual(entry.service, 'orchestrator');
-        assert.strictEqual(entry.env, process.env.NODE_ENV ?? 'production');
+        assert.strictEqual(
+            entry.env,
+            process.env.NODE_ENV === 'development' ? 'dev' : 'prod',
+        );
         assert.strictEqual(typeof entry.time, 'number');
         assert.ok((entry.time as number) > 0);
     }
@@ -147,6 +150,39 @@ function run(): void {
         const [entry] = parseAll(lines);
         assert.strictEqual(entry.subsystem, 'presence');
         assert.strictEqual(entry.err, undefined);
+    }
+
+    // request_id from AsyncLocalStorage reaches logs emitted deep in the call
+    {
+        const lines = captureStdout(() => {
+            runWithRequestId('req-1234abcd', () => {
+                Logger.info('inside request');
+            });
+            Logger.info('outside request');
+        });
+        const [inside, outside] = parseAll(lines);
+        assert.strictEqual(inside.request_id, 'req-1234abcd');
+        assert.strictEqual(outside.request_id, undefined);
+    }
+
+    // secrets are masked in msg and err
+    {
+        const lines = captureStdout(() => {
+            Logger.warn(
+                'call failed Authorization: Bearer abcdef0123456789xyz',
+            );
+            Logger.warn('cfg token=supersecretvalue ok');
+            Logger.error('failed', new Error('bad api_key=hunter2hunter2'));
+        });
+        const entries = parseAll(lines);
+        for (const e of entries) {
+            const raw = JSON.stringify(e);
+            assert.ok(
+                !/abcdef0123456789xyz|supersecretvalue|hunter2/.test(raw),
+                raw,
+            );
+        }
+        assert.ok((entries[1].msg as string).includes('[redacted]'));
     }
 
     // never colourised: no ANSI escape codes in JSON mode

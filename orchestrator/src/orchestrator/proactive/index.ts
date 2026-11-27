@@ -1119,7 +1119,7 @@ export class ProactiveEngine {
             this.dedup.record(dedupKey, nowMs, undefined, fp);
             return;
         }
-        Logger.info(`proactive: ✓ ÉMET "${e.key}" → "${message}"`);
+        Logger.info(`proactive: ✓ ÉMET "${e.key}" (${message.length} chars)`);
         await this.emit(message);
         this.dedup.record(dedupKey, nowMs, message, fp);
     }

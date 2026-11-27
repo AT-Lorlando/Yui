@@ -49,7 +49,7 @@ export async function pushNotification(
     text: string,
     opts: { title?: string } = {},
 ): Promise<boolean> {
-    Logger.info(`[notify] ${text}`);
+    Logger.info(`[notify] push (${text.length} chars)`);
 
     if (!existsSync(SERVICE_ACCOUNT_FILE)) {
         Logger.warn('[notify] No service account file — skipping FCM push');
