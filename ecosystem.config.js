@@ -10,11 +10,6 @@ module.exports = {
             restart_delay: 5000,
             // Logs rotatifs + par sous-système dans <cwd>/logs (cf packages/shared/src/logger.ts).
             // Seul l'orchestrateur définit LOG_DIR → les MCP spawné restent console-only.
-            env: {
-                LOG_DIR: 'logs',
-                LOG_MAX_SIZE: '20m',
-                LOG_MAX_FILES: '14d',
-            },
         },
 
         // ── TTS engine (XTTS v2) ────────────────────────────────────────────────
