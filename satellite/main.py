@@ -55,11 +55,11 @@ VAD_MIN_SPEECH_MS = 300         # minimum speech to consider valid utterance
 VAD_SILENCE_TIMEOUT_MS = 1200   # silence after speech = end of utterance
 MAX_UTTERANCE_S = 15            # safety cap
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
+# Logs JSON sur stdout (convention homelab) : module stdlib partagé avec voice/.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "voice"))
+from jsonlog import setup_logging  # noqa: E402
+
+setup_logging("satellite")
 log = logging.getLogger("yui-satellite")
 
 # ---------------------------------------------------------------------------
