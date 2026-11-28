@@ -103,7 +103,6 @@ async function main() {
 }
 
 main().catch((err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`Fatal error in mcp-irrigation: ${message}`);
+    Logger.error('fatal error', err);
     process.exit(1);
 });

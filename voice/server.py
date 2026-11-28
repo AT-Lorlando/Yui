@@ -23,11 +23,9 @@ import time
 import wave
 
 # Configure logging before any voice module is imported (they log at import time)
-logging.basicConfig(
-    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
+from jsonlog import setup_logging
+
+setup_logging("voice")  # JSON stdout (convention logs homelab)
 
 import numpy as np
 import requests
@@ -154,9 +152,9 @@ class WhisperSTT:
             max_compression=STT_MAX_COMPRESSION,
         )
         if reason:
-            log.warning(f"[stt] rejeté ({reason}) {text!r} [{st.summary()}]")
+            log.warning(f"[stt] rejeté ({reason}) chars={len(text)} [{st.summary()}]")
             return ""
-        log.info(f"[stt] {text!r} [{st.summary()}]")
+        log.info(f"[stt] chars={len(text)} [{st.summary()}]")
         return text
 
 
@@ -188,7 +186,7 @@ def _post_order(text: str, reset_convo: bool = False) -> None:
     global _conversation_mode_until
     _stop_event.clear()
     _speaking.set()
-    log.info(f'Order ({"NEW convo" if reset_convo else "convo"}): "{text}"')
+    log.info(f'Order ({"NEW convo" if reset_convo else "convo"}): chars={len(text)}')
 
     play_queue: _queue.Queue = _queue.Queue()
 
@@ -206,7 +204,7 @@ def _post_order(text: str, reset_convo: bool = False) -> None:
         try:
             slot.put(generate_tts(sentence))
         except Exception as e:
-            log.error(f"TTS error ({sentence[:40]!r}): {e}")
+            log.error(f"TTS error (chars={len(sentence)}): {e}")
             slot.put(None)
 
     def _flush(sentence: str) -> None:
@@ -428,11 +426,11 @@ class VoicePipeline:
         self.hub.record_wake(self.tuning.threshold, text, wav_url)
         lowered = text.strip().lower()
         if any(lowered == w or lowered.startswith(w) for w in STOP_WORDS):
-            log.info(f"stop-word utterance: {text!r}")
+            log.info("stop-word utterance")
             return
         clean = strip_trigger(text)
         if not self.tuning.send_to_ai:
-            log.info(f"send_to_ai OFF — dry-run, not forwarding: {clean!r}")
+            log.info(f"send_to_ai OFF — dry-run, not forwarding (chars={len(clean)})")
             return
         # Thread parleur : le pipeline retourne écouter tout de suite —
         # c'est ce qui rend le barge-in possible pendant la réponse.

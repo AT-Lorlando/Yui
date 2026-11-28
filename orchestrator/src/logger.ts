@@ -1,1 +1,5 @@
-export { Logger as default, enableJsonConsole } from '@yui/shared';
+export {
+    Logger as default,
+    enableJsonConsole,
+    runWithRequestId,
+} from '@yui/shared';

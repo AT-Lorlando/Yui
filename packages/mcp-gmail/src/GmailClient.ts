@@ -343,7 +343,7 @@ export class GmailClient {
             userId: 'me',
             requestBody: { raw },
         });
-        Logger.info(`Email sent to ${to}: "${subject}"`);
+        Logger.info('Email sent');
         return `Email envoyé à ${to} — objet : "${subject}"`;
     }
 
@@ -374,7 +374,7 @@ export class GmailClient {
             requestBody: { raw, threadId },
         });
 
-        Logger.info(`Reply sent to ${from} on thread ${threadId}`);
+        Logger.info(`Reply sent on thread ${threadId}`);
         return `Réponse envoyée à ${from} — objet : "${replySubject}"`;
     }
 

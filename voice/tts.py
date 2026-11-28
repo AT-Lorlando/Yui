@@ -474,7 +474,7 @@ def speak(text: str, device: str | None = None) -> None:
     speech_state.speaking.set()
     stream = None
     try:
-        log.info(f"Speaking: {text[:80]}…")
+        log.info(f"Speaking: chars={len(text)}")
         for sentence in split_sentences(text):
             if speech_state.stop.is_set():
                 break

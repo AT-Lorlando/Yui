@@ -4,7 +4,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import cors from 'cors';
 import * as http from 'http';
-import Logger from '../logger';
+import { randomUUID } from 'crypto';
+import Logger, { runWithRequestId } from '../logger';
 import env from '../env';
 import {
     InputSource,
@@ -92,6 +93,18 @@ export class HttpSource implements InputSource {
             process.env.ORCHESTRATOR_PORT ?? process.env.PORT ?? 4000,
         );
         const app = express();
+        // request_id : X-Request-Id posé par nginx (sinon généré), attaché à tous
+        // les logs de la requête et renvoyé en en-tête de réponse.
+        app.use((req: any, res: any, next: () => void) => {
+            const header = req.headers['x-request-id'];
+            const incoming = Array.isArray(header) ? header[0] : header;
+            const requestId =
+                typeof incoming === 'string' && /^[\w.-]{8,128}$/.test(incoming)
+                    ? incoming
+                    : randomUUID();
+            res.setHeader('X-Request-Id', requestId);
+            runWithRequestId(requestId, next);
+        });
         app.use(cors({ origin: '*' }));
         app.use(bodyParser.json());
         app.use(bodyParser.urlencoded({ extended: true }));

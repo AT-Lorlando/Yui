@@ -22,14 +22,18 @@ Run with:
   /home/chuya/.venvs/xtts/bin/python src/xtts_server.py
 """
 
-import io, json, os, warnings
+import io, json, logging, os, warnings
 warnings.filterwarnings("ignore")
+
+from jsonlog import setup_logging
+setup_logging("tts")  # JSON stdout (convention logs homelab)
+log = logging.getLogger("yui-tts")
 
 PORT     = int(os.getenv("XTTS_PORT", "18770"))
 LANGUAGE = os.getenv("XTTS_LANG", "fr")
 DEVICE   = os.getenv("XTTS_DEVICE", "cuda")
 
-print("Loading XTTS v2 model…", flush=True)
+log.info("Loading XTTS v2 model")
 
 import torch
 # PyTorch 2.6 changed weights_only default to True, breaking TTS model loading
@@ -54,9 +58,9 @@ speakers = list(tts.synthesizer.tts_model.speaker_manager.name_to_id)
 DEFAULT_SPEAKER = os.getenv("XTTS_SPEAKER", "Lilya Stainthorpe")
 DEFAULT_SPEED   = float(os.getenv("XTTS_SPEED", "1.15"))
 
-print(f"XTTS v2 ready — {len(speakers)} speakers", flush=True)
-print(f"Default: speaker='{DEFAULT_SPEAKER}'  speed={DEFAULT_SPEED}", flush=True)
-print(f"Listening on :{PORT}", flush=True)
+log.info("XTTS v2 ready", extra={"fields": {"speakers": len(speakers)}})
+log.info("XTTS defaults", extra={"fields": {"speaker": DEFAULT_SPEAKER, "speed": DEFAULT_SPEED}})
+log.info("Listening", extra={"fields": {"port": PORT}})
 
 
 def generate(text: str, language: str, speaker: str | None,
@@ -97,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(audio)
         except Exception as e:
-            import traceback; traceback.print_exc()
+            log.exception("XTTS generation failed")
             self.send_error(500, str(e))
 
     def do_GET(self):
@@ -113,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def log_message(self, fmt, *args):
-        print(f"[XTTS] {fmt % args}", flush=True)
+        log.debug("http: " + fmt % args)
 
 
 HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

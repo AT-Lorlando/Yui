@@ -854,6 +854,6 @@ async function main() {
 }
 
 main().catch((err) => {
-    console.error('Fatal error in mcp-spotify:', err);
+    Logger.error('fatal error', err);
     process.exit(1);
 });

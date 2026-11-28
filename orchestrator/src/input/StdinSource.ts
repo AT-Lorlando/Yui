@@ -18,7 +18,7 @@ export class StdinSource implements InputSource {
             const order = line.trim();
             if (!order) return;
 
-            Logger.info(`Received order: "${order}"`);
+            Logger.info(`Received order (${order.length} chars)`);
             try {
                 const response = await handler(order);
                 process.stdout.write(`\nYui: ${response}\n\n`);

@@ -48,7 +48,7 @@ export function saveMemory(
     }
     store[namespace][key] = value;
     saveStore(store);
-    Logger.debug(`Memory saved: [${namespace}] ${key} = ${value}`);
+    Logger.debug(`Memory saved: [${namespace}] ${key}`);
 }
 
 export function deleteMemory(namespace: string, key: string): void {
